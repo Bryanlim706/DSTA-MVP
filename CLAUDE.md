@@ -39,9 +39,9 @@ See `PLAN.md` for the full pipeline design, 4-layer model, and scoring formulas.
 
 ## What has NOT been built yet
 
-- Steps 1–15 (see PLAN.md)
-- Human confirmation UI (Step 2.5)
-- Dashboard
+- Steps 1–16 plus Step −1 handling (see PLAN.md for full pipeline)
+- Human confirmation UI (Step 3.5)
+- Dashboard (Step 16)
 - Docker sandbox (Step 10)
 
 ---
@@ -136,4 +136,4 @@ Before pushing, check:
 1. Resolve npm SSL if not yet done (`npm config set strict-ssl false` then `npm install`)
 2. First end-to-end test: start both servers, upload a zip + requirements, verify Step 0 result appears
 3. Build Step 1 — Repo Parser (Tree-sitter, file structure extraction)
-4. Build Steps 2 + 2.5 — Requirement Extractor + Human Confirmation UI
+4. Build Steps 2, 2.5, 3, 3.5 — Stated + Obvious Requirement Extractors, L1b Generator, Human Confirmation UI
