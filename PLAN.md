@@ -126,13 +126,15 @@ Alternative (if all three sub-characteristics must be numerically scored): 40% F
   "project_type": "full_stack_web_app",
   "frontend_framework": "React",
   "backend_framework": "FastAPI",
-  "primary_language": "TypeScript",
   "confidence": "high",
   "reasoning": "...",
   "test_strategy": { "primary": "Playwright E2E", "secondary": "Pytest API tests" },
-  "scan_summary": { "total_files": 42, "config_files_found": ["package.json", "requirements.txt"] }
+  "config_files_found": ["package.json", "requirements.txt"],
+  "llm_used": false,
+  "llm_model": null
 }
 ```
+Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritative `languages` array from source parsing.
 
 ---
 

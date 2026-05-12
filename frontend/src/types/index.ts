@@ -3,21 +3,16 @@ export interface TestStrategy {
   secondary: string | null
 }
 
-export interface ScanSummary {
-  total_files: number
-  extension_counts: Record<string, number>
-  config_files_found: string[]
-}
-
 export interface Step0Result {
   project_type: string
   frontend_framework: string | null
   backend_framework: string | null
-  primary_language: string
   confidence: 'high' | 'medium' | 'low'
   reasoning: string
   test_strategy: TestStrategy
-  scan_summary: ScanSummary
+  config_files_found: string[]
+  llm_used: boolean
+  llm_model: string | null
 }
 
 export interface StepResults {

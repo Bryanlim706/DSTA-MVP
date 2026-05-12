@@ -17,15 +17,24 @@ See `PLAN.md` for the full pipeline design, 4-layer model, and scoring formulas.
 ### Step 0 — Project Type & Scope Classifier (COMPLETE)
 - User uploads a `.zip` of their project + requirements text via the React frontend
 - Backend saves the zip, creates a job (JSON file), runs Step 0 in the background
-- LLM (AsyncAnthropic, prompt caching) classifies: project type, frameworks, confidence, reasoning, test strategy
+- Rule-based first (config files + extension counts); LLM (claude-haiku, prompt caching) called only when confidence is medium or rules produce no match
+- `test_strategy` always formula-derived from `project_type` + `backend_framework` — LLM never overrides it
 - Frontend polls `/api/jobs/{job_id}` every 2s until `step_0_complete`, then displays the result
 - Job status state machine: `created` → `running` → `step_0_complete` (or `error`)
+
+**Step 0 output fields** (stored in `step_results.step_0`):
+```
+project_type, frontend_framework, backend_framework,
+confidence, reasoning, test_strategy,
+config_files_found, llm_used, llm_model
+```
+`primary_language` is NOT in Step 0 output — Step 1 produces a `languages` array from actual source parsing.
 
 ### Frontend (COMPLETE)
 - React + TypeScript + Vite + Tailwind CSS
 - Upload page: drag-and-drop zip + requirements textarea, file size display, validation
 - Loading view: spinner + step name
-- Result page: project type, language, confidence badge, framework pills, reasoning, test strategy, scan summary, config files found
+- Result page: project type, confidence badge, framework pills, reasoning, test strategy, config files found, AI-assisted badge
 - Error view: message + retry button
 
 ### Backend infrastructure (COMPLETE)
@@ -133,7 +142,5 @@ Before pushing, check:
 
 ## Next steps
 
-1. Resolve npm SSL if not yet done (`npm config set strict-ssl false` then `npm install`)
-2. First end-to-end test: start both servers, upload a zip + requirements, verify Step 0 result appears
-3. Build Step 1 — Repo Parser (Tree-sitter, file structure extraction)
-4. Build Steps 2, 2.5, 3, 3.5 — Stated + Obvious Requirement Extractors, L1b Generator, Human Confirmation UI
+1. Build Step 1 — Repo Parser (Tree-sitter, file structure extraction, outputs `languages` array)
+2. Build Steps 2, 2.5, 3, 3.5 — Stated + Obvious Requirement Extractors, L1b Generator, Human Confirmation UI

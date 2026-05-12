@@ -1,6 +1,8 @@
 import os
+import ssl
 
 import anthropic
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,7 +25,11 @@ async def startup():
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
-    app.state.anthropic_client = anthropic.AsyncAnthropic(api_key=api_key)
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    http_client = httpx.AsyncClient(verify=False)
+    app.state.anthropic_client = anthropic.AsyncAnthropic(api_key=api_key, http_client=http_client)
 
 
 from api.routes import jobs, upload  # noqa: E402

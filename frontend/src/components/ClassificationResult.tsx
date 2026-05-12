@@ -39,7 +39,6 @@ export default function ClassificationResult({ result }: Props) {
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">{typeLabel}</h2>
-            <p className="text-sm text-gray-500 mt-0.5">{result.primary_language}</p>
           </div>
           <span
             className={`text-xs font-medium px-2.5 py-1 rounded-full capitalize ${CONFIDENCE_STYLES[result.confidence]}`}
@@ -73,27 +72,24 @@ export default function ClassificationResult({ result }: Props) {
         </div>
       </div>
 
-      {/* Scan stats */}
+      {/* Config files */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Scan summary</h3>
-        <div className="grid grid-cols-2 gap-4 text-sm mb-4">
-          <div>
-            <div className="text-gray-400 text-xs mb-1">Files scanned</div>
-            <div className="font-medium text-gray-800">{result.scan_summary.total_files}</div>
-          </div>
-          <div>
-            <div className="text-gray-400 text-xs mb-1">Config files found</div>
-            <div className="font-medium text-gray-800">{result.scan_summary.config_files_found.length}</div>
-          </div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700">Config files found</h3>
+          {result.llm_used && (
+            <span className="text-xs text-gray-400">AI-assisted</span>
+          )}
         </div>
-        {result.scan_summary.config_files_found.length > 0 && (
+        {result.config_files_found.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
-            {result.scan_summary.config_files_found.map((f) => (
+            {result.config_files_found.map((f) => (
               <span key={f} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">
                 {f}
               </span>
             ))}
           </div>
+        ) : (
+          <p className="text-xs text-gray-400">None found</p>
         )}
       </div>
     </div>

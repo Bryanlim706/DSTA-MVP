@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { pollJob } from './api/client'
 import ClassificationResult from './components/ClassificationResult'
+import Sidebar from './components/Sidebar'
 import UploadPage from './pages/UploadPage'
 import type { Job } from './types'
 
@@ -89,9 +90,15 @@ export default function App() {
     setError(null)
   }
 
-  if (stage === 'upload') return <UploadPage onUploadComplete={handleUploadComplete} />
-  if (stage === 'loading') return <LoadingView job={job} />
-  if (stage === 'step_0_complete' && job) return <ResultPage job={job} onReset={reset} />
-  if (stage === 'error') return <ErrorView error={error} onRetry={reset} />
-  return null
+  return (
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      <Sidebar stage={stage} />
+      <main className="flex-1 overflow-y-auto">
+        {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
+        {stage === 'loading' && <LoadingView job={job} />}
+        {stage === 'step_0_complete' && job && <ResultPage job={job} onReset={reset} />}
+        {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
+      </main>
+    </div>
+  )
 }
