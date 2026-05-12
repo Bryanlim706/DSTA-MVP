@@ -35,7 +35,7 @@ export async function pollJob(
     onUpdate(job)
 
     if (
-      job.status === 'step_1_complete' ||
+      job.status === 'step_2_complete' ||
       job.status === 'waiting_for_confirmation' ||
       job.status === 'complete'
     ) {

@@ -6,7 +6,7 @@ from pathlib import Path
 import aiofiles
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 
-from pipeline import step0_classifier, step1_req_extractor
+from pipeline import step0_classifier, step1_req_extractor, step2_obvious_generator
 from storage.job_store import add_step_result, create_job, get_job, update_job
 
 router = APIRouter()
@@ -59,8 +59,8 @@ async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
             update_job(job_id, {"status": "error", "errors": ["Uploaded file is not a valid zip archive"]})
             return
 
-        result = await step0_classifier.run(extract_to, client)
-        add_step_result(job_id, "step_0", result)
+        step0_result = await step0_classifier.run(extract_to, client)
+        add_step_result(job_id, "step_0", step0_result)
         update_job(job_id, {"status": "running", "current_step": 1})
 
         job = get_job(job_id)
@@ -68,7 +68,13 @@ async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
             job["requirements_text"], extract_to, client
         )
         add_step_result(job_id, "step_1", step1_result)
-        update_job(job_id, {"status": "step_1_complete", "current_step": 1})
+        update_job(job_id, {"status": "running", "current_step": 2})
+
+        step2_result = await step2_obvious_generator.run(
+            step1_result["requirements"], step0_result, client
+        )
+        add_step_result(job_id, "step_2", step2_result)
+        update_job(job_id, {"status": "step_2_complete", "current_step": 2})
     except Exception as e:
         update_job(job_id, {"status": "error", "errors": [str(e)]})
 

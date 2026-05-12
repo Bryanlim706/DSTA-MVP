@@ -37,7 +37,7 @@ FC = ∑(E(L1x) × L1Cx) / ∑ L1Cx      [x ∈ L1a]
 | 0.25 | Partial or unclear evidence in either layer |
 | 0.0 | Not found anywhere |
 
-`L1Cx` = confidence weight (high = 3, medium = 2, low = 1; default 1.0)
+`L1Cx` = confidence weight (critical = 4, high = 3, medium = 2, low = 1; default 1.0)
 
 ### Functional Appropriateness (FA) — L1b vs (L2 ∪ L3)
 
@@ -139,6 +139,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 ---
 
 ### Step 1: Stated Requirement Extractor
+**Status: COMPLETE**
 **Phase: FCom setup — builds L1a (stated)**
 **Tools:** Python, LLM (AsyncAnthropic, prompt caching)
 **Input:** Requirements text provided by user + README (read directly from zip) + any uploaded specification documents
@@ -170,7 +171,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Logic:** LLM generates obvious functional requirements that any user of this app type would naturally expect — so fundamental a user would never write them down, yet surprised to find missing.
 **Deduplication:** Step 1 stated requirements passed as context; LLM must not regenerate items already stated.
 **ISO 25010 rationale:** Completeness covers "all specified tasks and user objectives." Obvious requirements are user objectives implied by the app's purpose even when not explicitly written.
-**Tag:** `obvious` | **Default weight:** 1.0 (user can override at Step 3.5)
+**Tag:** `obvious` | **Weight:** derives from priority (critical=4.0, high=3.0, medium=2.0, low=1.0) — same as Step 1
 **Output:**
 ```json
 [
@@ -181,7 +182,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
     "reasoning": "Any task management app user expects to be able to delete tasks",
     "tag": "obvious",
     "priority": "medium",
-    "weight": 1.0,
+    "weight": 2.0,
     "testable": true
   }
 ]
@@ -244,7 +245,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 
 **User can:**
 - Confirm, edit, delete, reprioritise any L1a item
-- Adjust confidence weights (high=3, medium=2, low=1)
+- Adjust confidence weights (critical=4, high=3, medium=2, low=1)
 - Promote L1b items to L1a (adds them to FC and FCo scoring)
 - Add entirely new requirements
 
@@ -252,7 +253,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 | Requirement | Tag | In score? | Priority | Weight |
 |---|---|---|---|---|
 | User can register | stated | Yes (L1a) | High | 3 |
-| User can delete a task | obvious | Yes (L1a) | Medium | 1 |
+| User can delete a task | obvious | Yes (L1a) | Medium | 2 |
 | User can filter tasks | implied — strongly_implied | Advisory | Medium | 3 |
 | User can bulk-delete | implied — weak | Advisory | Low | 1 |
 
@@ -605,7 +606,7 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their
 | Milestone | Steps | Status |
 |---|---|---|
 | 1 — Scaffold + Upload + Step 0 | Steps −1, 0, upload endpoint, job store, frontend | ✓ DONE |
-| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | Not started |
+| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | Step 1 ✓ DONE \| Steps 2, 3, 3.5 in progress |
 | 3 — Repo Parser | Step 4 | Not started |
 | 4 — Inventory + Mapping + Completeness | Steps 5, 6, 7 | Not started |
 | 5 — AC Generation + Test Execution | Steps 8, 9, 10, 11, 12 | Not started |

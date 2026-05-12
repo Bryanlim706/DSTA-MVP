@@ -1,16 +1,19 @@
 import { useState } from 'react'
 import { pollJob } from './api/client'
 import ClassificationResult from './components/ClassificationResult'
+import ObviousRequirementsResult from './components/ObviousRequirementsResult'
 import RequirementsResult from './components/RequirementsResult'
 import Sidebar from './components/Sidebar'
 import UploadPage from './pages/UploadPage'
 import type { Job } from './types'
 
-type Stage = 'upload' | 'loading' | 'step_1_complete' | 'error'
+type Stage = 'upload' | 'loading' | 'step_2_complete' | 'error'
 
 function LoadingView({ job }: { job: Job | null }) {
   const stepLabel =
-    job?.current_step === 1
+    job?.current_step === 2
+      ? 'Step 2 — Generating obvious requirements…'
+      : job?.current_step === 1
       ? 'Step 1 — Extracting stated requirements…'
       : 'Step 0 — Classifying project type…'
 
@@ -46,6 +49,7 @@ function ErrorView({ error, onRetry }: { error: string | null; onRetry: () => vo
 function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
   const step0 = job.step_results.step_0!
   const step1 = job.step_results.step_1!
+  const step2 = job.step_results.step_2!
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-12">
@@ -53,7 +57,7 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Steps 0–1 complete</p>
+            <p className="text-xs text-gray-400 mt-0.5">Steps 0–2 complete</p>
           </div>
           <button
             onClick={onReset}
@@ -69,8 +73,12 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
           <RequirementsResult result={step1} />
         </div>
 
+        <div className="mt-6">
+          <ObviousRequirementsResult result={step2} />
+        </div>
+
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
-          <span className="font-medium">Next:</span> Step 2 — Obvious requirements (coming soon)
+          <span className="font-medium">Next:</span> Step 3 — Implied functions (coming soon)
         </div>
       </div>
     </div>
@@ -87,7 +95,7 @@ export default function App() {
     try {
       const completed = await pollJob(jobId, (j) => setJob(j))
       setJob(completed)
-      setStage('step_1_complete')
+      setStage('step_2_complete')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
       setStage('error')
@@ -106,7 +114,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto">
         {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
         {stage === 'loading' && <LoadingView job={job} />}
-        {stage === 'step_1_complete' && job && <ResultPage job={job} onReset={reset} />}
+        {stage === 'step_2_complete' && job && <ResultPage job={job} onReset={reset} />}
         {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
       </main>
     </div>

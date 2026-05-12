@@ -36,15 +36,35 @@ export interface Step1Result {
   error?: string
 }
 
+export interface Step2Requirement {
+  req_id: string
+  description: string
+  source: 'obvious'
+  reasoning: string
+  tag: 'obvious'
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  weight: number
+  testable: boolean
+}
+
+export interface Step2Result {
+  requirements: Step2Requirement[]
+  total_count: number
+  llm_model: string
+  dropped_count: number
+  error?: string
+}
+
 export interface StepResults {
   step_0?: Step0Result
   step_1?: Step1Result
+  step_2?: Step2Result
 }
 
 export type JobStatus =
   | 'created'
   | 'running'
-  | 'step_1_complete'
+  | 'step_2_complete'
   | 'waiting_for_confirmation'
   | 'complete'
   | 'error'
