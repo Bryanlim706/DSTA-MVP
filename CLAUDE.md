@@ -28,7 +28,7 @@ project_type, frontend_framework, backend_framework,
 confidence, reasoning, test_strategy,
 config_files_found, llm_used, llm_model
 ```
-`primary_language` is NOT in Step 0 output — Step 1 produces a `languages` array from actual source parsing.
+`primary_language` is NOT in Step 0 output — Step 4 produces the authoritative `languages` array from source parsing.
 
 ### Frontend (COMPLETE)
 - React + TypeScript + Vite + Tailwind CSS
@@ -48,7 +48,7 @@ config_files_found, llm_used, llm_model
 
 ## What has NOT been built yet
 
-- Steps 1–16 plus Step −1 handling (see PLAN.md for full pipeline)
+- Steps 1–17 plus Step −1 handling (see PLAN.md for full pipeline)
 - Human confirmation UI (Step 3.5)
 - Dashboard (Step 16)
 - Docker sandbox (Step 10)
@@ -142,5 +142,5 @@ Before pushing, check:
 
 ## Next steps
 
-1. Build Step 1 — Repo Parser (Tree-sitter, file structure extraction, outputs `languages` array)
-2. Build Steps 2, 2.5, 3, 3.5 — Stated + Obvious Requirement Extractors, L1b Generator, Human Confirmation UI
+1. Build Steps 1, 2, 3, 3.5 — Stated + Obvious Requirement Extractors, L1b Generator, Human Confirmation UI
+2. Build Step 4 — Repo Parser (regex + file path heuristics, outputs `languages`, `api_endpoints`, `database_models`)

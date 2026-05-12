@@ -60,7 +60,7 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
         <ClassificationResult result={result} />
 
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
-          <span className="font-medium">Next:</span> Step 1 — Parse repository structure (coming soon)
+          <span className="font-medium">Next:</span> Step 1 — Extract stated requirements (coming soon)
         </div>
       </div>
     </div>

@@ -10,13 +10,13 @@ A system that evaluates software **Functional Suitability (ISO 25010)** by analy
 
 | Layer | Name | What it captures |
 |---|---|---|
-| L1a | **Confirmed** | Stated (Step 2) + obvious (Step 2.5) requirements, locked after Step 3.5 |
+| L1a | **Confirmed** | Stated (Step 1) + obvious (Step 2) requirements, locked after Step 3.5 |
 | L1b | **Implied** | Enhancement functions — advisory only unless promoted at Step 3.5 |
 | L2 | **Exposed** | What the UI/API actually makes accessible to users |
 | L3 | **Implemented** | What the code actually contains |
 | L4 | **Verified** | What actually works end-to-end when executed |
 
-**L1a = Stated (Step 2) + Obvious (Step 2.5), confirmed at Step 3.5**
+**L1a = Stated (Step 1) + Obvious (Step 2), confirmed at Step 3.5**
 **L1b = Implied enhancements (Step 3), advisory only**
 
 ---
@@ -134,36 +134,14 @@ Alternative (if all three sub-characteristics must be numerically scored): 40% F
   "llm_model": null
 }
 ```
-Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritative `languages` array from source parsing.
+Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing.
 
 ---
 
-### Step 1: Repo Parser
-**Phase: FCom setup**
-**Tools:** Python (zipfile, pathlib), Tree-sitter, json/yaml/toml
-**Input:** Uploaded zip file
-**Extracts:** README, frontend routes/pages, backend routes/endpoints, forms/buttons/components, API specs, package scripts, existing tests, config files, database models
-**Ignores:** node_modules, .git, dist, build, .next, venv, __pycache__, coverage
-**Output:**
-```json
-{
-  "languages": ["TypeScript", "Python"],
-  "frontend_routes": ["/login", "/dashboard", "/tasks"],
-  "api_endpoints": [
-    { "method": "POST", "path": "/api/login", "file": "backend/routes/auth.py", "handler": "login_user" }
-  ],
-  "database_models": ["User", "Task"],
-  "important_files": ["src/pages/Login.tsx", "backend/routes/auth.py"],
-  "existing_tests": ["tests/test_auth.py"]
-}
-```
-
----
-
-### Step 2: Stated Requirement Extractor
+### Step 1: Stated Requirement Extractor
 **Phase: FCom setup — builds L1a (stated)**
 **Tools:** Python, LLM (AsyncAnthropic, prompt caching)
-**Input:** Requirements text provided by user + README + any uploaded specification documents
+**Input:** Requirements text provided by user + README (read directly from zip) + any uploaded specification documents
 **Rule:** Only extract requirements that are **explicitly stated**. No inference. No invention. Every item must include its source quote.
 **Decomposition rule:** General/meta requirements decomposed into atomic testable items, each retaining a reference to its parent.
 **Tag:** `stated`
@@ -185,12 +163,12 @@ Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritat
 
 ---
 
-### Step 2.5: Obvious Requirement Generator
+### Step 2: Obvious Requirement Generator
 **Phase: FCom setup — builds L1a (obvious)**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 0 (project_type, framework) + Step 2 (stated requirements list)
+**Input:** Step 0 (project_type, framework) + Step 1 (stated requirements list)
 **Logic:** LLM generates obvious functional requirements that any user of this app type would naturally expect — so fundamental a user would never write them down, yet surprised to find missing.
-**Deduplication:** Step 2 stated requirements passed as context; LLM must not regenerate items already stated.
+**Deduplication:** Step 1 stated requirements passed as context; LLM must not regenerate items already stated.
 **ISO 25010 rationale:** Completeness covers "all specified tasks and user objectives." Obvious requirements are user objectives implied by the app's purpose even when not explicitly written.
 **Tag:** `obvious` | **Default weight:** 1.0 (user can override at Step 3.5)
 **Output:**
@@ -209,14 +187,14 @@ Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritat
 ]
 ```
 
-**Combined L1a pool:** Step 2 (stated) + Step 2.5 (obvious) → forms the initial L1a before Step 3.5 confirmation.
+**Combined L1a pool:** Step 1 (stated) + Step 2 (obvious) → forms the initial L1a before Step 3.5 confirmation.
 
 ---
 
 ### Step 3: L1b Implied Enhancement Generator
 **Phase: FCom setup — builds L1b**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 0 (project type) + Step 2 + Step 2.5 (combined L1a)
+**Input:** Step 0 (project type) + Step 1 + Step 2 (combined L1a)
 **Logic:** Generates advisory enhancements beyond L1a. LLM assigns a **strength rating** to each item, which maps directly to its FA weight.
 
 | Strength | FA weight (L1Cx) |
@@ -225,7 +203,7 @@ Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritat
 | medium | 2 |
 | weak | 1 |
 
-**Key distinction from Step 2.5:** Step 2.5 generates what a user *expects* to be present (obvious = "of course it has delete"). Step 3 generates what a user *might want* but wouldn't be surprised to find missing (implied = "it would be nice if it had bulk delete").
+**Key distinction from Step 2:** Step 2 generates what a user *expects* to be present (obvious = "of course it has delete"). Step 3 generates what a user *might want* but wouldn't be surprised to find missing (implied = "it would be nice if it had bulk delete").
 **Advisory only:** Not scored unless promoted to L1a at Step 3.5. `strongly_implied` items auto-surfaced at Step 3.5 as promotion candidates.
 **Tag:** `implied`
 **Output:**
@@ -261,7 +239,7 @@ Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritat
 ### Step 3.5: Human Requirement Confirmation *(optional)*
 **Phase: FCom setup — locks L1a**
 **Tools:** React UI, FastAPI endpoint, async job queue
-**Input:** Step 2 (stated) + Step 2.5 (obvious) + Step 3 (L1b with strength and weights)
+**Input:** Step 1 (stated) + Step 2 (obvious) + Step 3 (L1b with strength and weights)
 **Architecture:** Pipeline pauses with status `waiting_for_confirmation`. Resumes when user submits confirmed list.
 
 **User can:**
@@ -285,7 +263,29 @@ Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritat
 
 ---
 
-### Step 4: UI/API Inventory Generator (L2)
+### Step 4: Repo Parser
+**Phase: FCom setup**
+**Tools:** Python (zipfile, pathlib), Tree-sitter, json/yaml/toml
+**Input:** Uploaded zip file
+**Extracts:** README, frontend routes/pages, backend routes/endpoints, forms/buttons/components, API specs, package scripts, existing tests, config files, database models
+**Ignores:** node_modules, .git, dist, build, .next, venv, __pycache__, coverage
+**Output:**
+```json
+{
+  "languages": ["TypeScript", "Python"],
+  "frontend_routes": ["/login", "/dashboard", "/tasks"],
+  "api_endpoints": [
+    { "method": "POST", "path": "/api/login", "file": "backend/routes/auth.py", "handler": "login_user" }
+  ],
+  "database_models": ["User", "Task"],
+  "important_files": ["src/pages/Login.tsx", "backend/routes/auth.py"],
+  "existing_tests": ["tests/test_auth.py"]
+}
+```
+
+---
+
+### Step 5: UI/API Inventory Generator (L2)
 **Phase: FCom — builds L2**
 **Tools:** Tree-sitter (static), Playwright (dynamic), LLM (summarization), Python
 **Input:** Uploaded zip + Step 0 (project type for strategy selection)
@@ -293,7 +293,7 @@ Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritat
 **Three-pass process:**
 1. **Static analysis (Tree-sitter):** Extracts raw UI elements — routes, pages, buttons, forms, links, input fields, event handlers, API calls
 2. **Dynamic analysis (Playwright):** Crawls running app — discovers visible pages, clickable buttons, accessible forms, nav paths, modals, error messages. Extracts real CSS selectors and data-testid attributes.
-3. **LLM summarization:** Takes raw elements from passes 1 and 2 and groups them into named user-facing functions. Without this pass, Step 4 outputs "Email input, Password input, Login button" but cannot identify these as "User can log in." The LLM converts low-level elements → interpretable named functions, making Step 5 mapping significantly more accurate.
+3. **LLM summarization:** Takes raw elements from passes 1 and 2 and groups them into named user-facing functions. Without this pass, Step 5 outputs "Email input, Password input, Login button" but cannot identify these as "User can log in." The LLM converts low-level elements → interpretable named functions, making Step 6 mapping significantly more accurate.
 
 **Output:**
 ```json
@@ -314,19 +314,19 @@ Note: `primary_language` is not in Step 0 output. Step 1 produces the authoritat
 ]
 ```
 
-**Key value:** Dynamic crawl catches features in code not accessible in the UI. LLM summarization makes L2 functions mappable. Selectors feed directly into Step 8 test generation.
+**Key value:** Dynamic crawl catches features in code not accessible in the UI. LLM summarization makes L2 functions mappable. Selectors feed directly into Step 9 test generation.
 
 ---
 
-### Step 5: Requirement-to-UI/API/Code Mapper
+### Step 6: Requirement-to-UI/API/Code Mapper
 **Phase: FCom — cross-links L1 → L2, L3**
 **Tools:** Tree-sitter, LLM (AsyncAnthropic), JSON traceability matrix
-**Input:** Step 2+2.5 (L1a) + Step 3 (L1b) + Step 4 (L2) + Step 1 (L3 skeleton)
+**Input:** Step 1+2 (L1a) + Step 3 (L1b) + Step 5 (L2) + Step 4 (L3 skeleton)
 **Logic:** Maps each L1a and L1b requirement → L2 named functions → API endpoints → backend functions → database models. Produces E() score for each L1a item.
 **Unlinked detection:**
 ```python
-l2_unlinked = set(step4_all_ids) - set(step5_matched_l2_ids)
-l3_unlinked = set(step1_endpoint_ids) - set(step5_matched_l3_ids)
+l2_unlinked = set(step5_all_ids) - set(step6_matched_l2_ids)
+l3_unlinked = set(step4_endpoint_ids) - set(step6_matched_l3_ids)
 ```
 **Output:**
 ```json
@@ -351,15 +351,15 @@ l3_unlinked = set(step1_endpoint_ids) - set(step5_matched_l3_ids)
 
 ---
 
-### Step 6: Functional Completeness + Appropriateness Scorer
+### Step 7: Functional Completeness + Appropriateness Scorer
 **Phase: FCom — numeric scoring**
 **Tools:** Python (formula only — no LLM for numeric scoring)
-**Input:** Step 5 (traceability matrix with E() scores) + Step 2+2.5 (L1a weights) + Step 3 (L1b with strength-derived weights)
+**Input:** Step 6 (traceability matrix with E() scores) + Step 1+2 (L1a weights) + Step 3 (L1b with strength-derived weights)
 **Computes in one pass:**
 1. **FC numeric:** `∑(E × weight) / ∑weight` for all L1a, where weight = user-assigned priority
 2. **FA numeric:** `∑(E × weight) / ∑weight` for all L1b, where weight = strength-derived (3/2/1)
 3. **FC advisory — missing L1a:** L1a items with E()=0.0 or low E(), listed with gap description
-4. **FC advisory — unlinked functions:** L2_unlinked and L3_unlinked from Step 5
+4. **FC advisory — unlinked functions:** L2_unlinked and L3_unlinked from Step 6
 5. **FA advisory — missing L1b:** L1b items with E()=0.0, weighted by strength
 6. **FA advisory — unlinked functions:** same L2/L3 unlinked list (functions with no stated purpose, per ISO 3.1.3 "unnecessary steps")
 
@@ -399,10 +399,10 @@ l3_unlinked = set(step1_endpoint_ids) - set(step5_matched_l3_ids)
 
 ---
 
-### Step 7: Acceptance Criteria Generator
+### Step 8: Acceptance Criteria Generator
 **Phase: FCor setup**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** L1a requirement list as finalised after Step 3.5 (or directly from Step 2+2.5 if Step 3.5 was skipped), including locked L1Cx per requirement
+**Input:** L1a requirement list as finalised after Step 3.5 (or directly from Step 1+2 if Step 3.5 was skipped), including locked L1Cx per requirement
 **Scope:** Only generates ACs for requirements in S = { x ∈ L1a | x ∈ L3 }. Requirements with E()=0.4, 0.25, or 0.0 are skipped — their gaps are already captured in FC advisory.
 **Logic:** Converts each eligible L1a requirement into Given/When/Then ACs. LLM assigns sub-weights per AC that **sum to the requirement's L1Cx**. Persistence and edge cases are ACs of L1a requirements — not separate L1b items.
 **Output:**
@@ -421,11 +421,11 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 
 ---
 
-### Step 8: Test Case Generator
+### Step 9: Test Case Generator
 **Phase: FCor setup**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 7 acceptance criteria + **Step 4 L2 selectors (required)**
-**Critical dependency:** Step 8 **explicitly depends on Step 4's selector-level L2 output**. Tests use real selectors (`[data-testid='login-button']`) from Step 4 — not invented guesses.
+**Input:** Step 8 acceptance criteria + **Step 5 L2 selectors (required)**
+**Critical dependency:** Step 9 **explicitly depends on Step 5's selector-level L2 output**. Tests use real selectors (`[data-testid='login-button']`) from Step 5 — not invented guesses.
 **Test type by E() score:**
 - E()=1.0: Playwright E2E + API tests
 - E()=0.5: API tests only (no UI to drive)
@@ -440,16 +440,16 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 
 ---
 
-### Step 9: Test Oracle Validator
+### Step 10: Test Oracle Validator
 **Phase: FCor setup**
 **Tools:** Python (rule-based), LLM (semantic), Tree-sitter/regex
-**Input:** Step 8 generated tests + Step 7 acceptance criteria
+**Input:** Step 9 generated tests + Step 8 acceptance criteria
 **Rejects tests that:** don't match the requirement or AC, lack meaningful assertions, only check element existence, skip persistence/side effects when required, cover only happy path when edge case ACs exist
 **Output:** Validated test suite + rejection log with reasons
 
 ---
 
-### Step 10: Test Execution Sandbox
+### Step 11: Test Execution Sandbox
 **Phase: FCor — produces L4**
 **Tools:** Docker, Python subprocess, Playwright, Pytest, Jest/Vitest
 **Docker boot sequence:**
@@ -471,7 +471,7 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 
 ---
 
-### Step 11: Behaviour Evidence Collector
+### Step 12: Behaviour Evidence Collector
 **Phase: FCor — enriches L4**
 **Tools:** Python, Playwright trace API, Docker logs
 **Collects:** Screenshots, Playwright traces, console errors, network logs, API responses, DB state before/after, stack traces
@@ -489,7 +489,7 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 
 ---
 
-### Step 12: Functional Correctness Scorer
+### Step 13: Functional Correctness Scorer
 **Phase: FCor — numeric scoring**
 **Tools:** Python (formula only)
 **Formula:**
@@ -505,12 +505,12 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their
 
 ---
 
-### Step 13: Functional Appropriateness — Workflow Friction Analyser
+### Step 14: Functional Appropriateness — Workflow Friction Analyser
 **Phase: FA advisory**
 **Tools:** Python, Playwright trace data, LLM (AsyncAnthropic)
-**Input:** Step 4 dynamic crawl data + Step 11 Playwright traces + Step 7 ACs
+**Input:** Step 5 dynamic crawl data + Step 12 Playwright traces + Step 8 ACs
 **Analyses:** Steps to complete core tasks, discoverability, label clarity, error message quality, workflow interruptions, feedback after actions.
-**Note:** Step 6 covers structural FA (are implied functions present, weighted by strength?). Step 13 covers experiential FA (does the UI help users accomplish their goals efficiently?). Together they form the full FA advisory.
+**Note:** Step 7 covers structural FA (are implied functions present, weighted by strength?). Step 14 covers experiential FA (does the UI help users accomplish their goals efficiently?). Together they form the full FA advisory.
 **Advisory only — not included in main score**
 **Output:**
 ```json
@@ -527,18 +527,18 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their
 
 ---
 
-### Step 14: Evidence Pack Builder
+### Step 15: Evidence Pack Builder
 **Phase: Output**
 **Tools:** Python, JSON, HTML report generator
-**Input:** All step outputs (−1 through 13)
+**Input:** All step outputs (−1 through 14)
 **Aggregates** all layer data into one structured, auditable evidence package. Every score is traceable: FCo → AC results → test logs → L4; FC → E() scores → L2/L3 evidence → L1a requirements.
 
 ---
 
-### Step 15: LLM ISO Evaluator
+### Step 16: LLM ISO Evaluator
 **Phase: Output**
 **Tools:** Python, Anthropic SDK (claude-sonnet-4-6), prompt caching on system prompt
-**Input:** Step 14 evidence pack
+**Input:** Step 15 evidence pack
 **LLM does:** Explain scores, summarise strongest/weakest evidence, identify gaps, give recommendations, state limitations and confidence flags.
 **LLM does NOT:** Override formula scores, invent features, treat L1b as confirmed, assume blocked = failed.
 **Output:**
@@ -560,10 +560,10 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their
 
 ---
 
-### Step 16: Dashboard
+### Step 17: Dashboard
 **Phase: Output**
 **Tools:** React + TypeScript, FastAPI (data served from evidence pack)
-**Input:** Step 14 evidence pack + Step 15 LLM evaluation
+**Input:** Step 15 evidence pack + Step 16 LLM evaluation
 **Shows:**
 - Final Functional Suitability Score (0–5)
 - FC score + FA advisory with data layer comparison labels
@@ -571,7 +571,7 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their
 - Requirement traceability matrix (interactive, per-row status)
 - Layer gap summary (L1 count → L2 exposed → L3 implemented → L4 verified)
 - Test results with screenshots and logs
-- Recommendations from Step 15
+- Recommendations from Step 16
 - Limitations and confidence flags
 
 **Example traceability matrix:**
@@ -605,8 +605,8 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their
 | Milestone | Steps | Status |
 |---|---|---|
 | 1 — Scaffold + Upload + Step 0 | Steps −1, 0, upload endpoint, job store, frontend | ✓ DONE |
-| 2 — Repo Parser | Step 1 | Not started |
-| 3 — Requirements Pipeline | Steps 2, 2.5, 3, 3.5, 7 | Not started |
-| 4 — Inventory + Mapping + Completeness | Steps 4, 5, 6 | Not started |
-| 5 — Test Generation + Execution | Steps 8, 9, 10, 11 | Not started |
-| 6 — Scoring + Dashboard | Steps 12, 13, 14, 15, 16 | Not started |
+| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | Not started |
+| 3 — Repo Parser | Step 4 | Not started |
+| 4 — Inventory + Mapping + Completeness | Steps 5, 6, 7 | Not started |
+| 5 — AC Generation + Test Execution | Steps 8, 9, 10, 11, 12 | Not started |
+| 6 — Scoring + Dashboard | Steps 13, 14, 15, 16, 17 | Not started |
