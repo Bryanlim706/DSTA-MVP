@@ -23,10 +23,10 @@ A system that evaluates software **Functional Suitability (ISO 25010)** by analy
 
 ## ISO Sub-Characteristic Formulas
 
-### Functional Completeness (FC) — L1a vs (L2 ∪ L3)
+### Functional Completeness (FCom) — L1a vs (L2 ∪ L3)
 
 ```
-FC = ∑(E(L1x) × L1Cx) / ∑ L1Cx      [x ∈ L1a]
+FCom = ∑(E(L1x) × L1Cx) / ∑ L1Cx      [x ∈ L1a]
 ```
 
 | E(L1x) | Condition |
@@ -61,9 +61,9 @@ FA = ∑(E(L1x) × L1Cx) / ∑ L1Cx      [x ∈ L1b]
 | medium | 2 |
 | weak | 1 |
 
-FA is **advisory only**. The weighted formula means a missing `strongly_implied` function penalises FA more than a missing `weak` one — mirroring how L1a priority weights FC.
+FA is **advisory only**. The weighted formula means a missing `strongly_implied` function penalises FA more than a missing `weak` one — mirroring how L1a priority weights FCom.
 
-### Functional Correctness (FCo) — L4 vs L1a ∩ L3
+### Functional Correctness (FCor) — L4 vs L1a ∩ L3
 
 AC-level scoring. Each requirement has multiple acceptance criteria; sub-weights sum to L1Cx.
 
@@ -71,17 +71,17 @@ AC-level scoring. Each requirement has multiple acceptance criteria; sub-weights
 S   = { x ∈ L1a | x ∈ L3 }              — eligible set (backend implemented)
 S*  = S \ { x | all ACs blocked }        — testable subset
 
-FCo = ∑(pass_i × ACw_i) / ∑ ACw_i       [i ∈ ACs of requirements in S*]
+FCor = ∑(pass_i × ACw_i) / ∑ ACw_i       [i ∈ ACs of requirements in S*]
 CP  = ∑_blocked_L1Cx / ∑_all_L1Cx
 ```
 
-**Why L3 only, not (L2 ∪ L3):** Requirements where E()=0.4 (UI stub, no backend) would trivially fail correctness tests — FC already penalises them. Scoping to L3 avoids double punishment.
+**Why L3 only, not (L2 ∪ L3):** Requirements where E()=0.4 (UI stub, no backend) would trivially fail correctness tests — FCom already penalises them. Scoping to L3 avoids double punishment.
 
 | E() | In S? | Test type |
 |---|---|---|
 | 1.0 (L2 ∧ L3) | Yes | E2E — Playwright + API |
 | 0.5 (L3 only) | Yes | API only — no Playwright |
-| 0.4 (L2 only) | No | Excluded — FC already penalises |
+| 0.4 (L2 only) | No | Excluded — FCom already penalises |
 | 0.25 / 0.0 | No | Excluded |
 
 | pass_i | Condition |
@@ -91,16 +91,52 @@ CP  = ∑_blocked_L1Cx / ∑_all_L1Cx
 | 0.0 | AC failed |
 | — | Fully blocked — excluded from S*, weight added to CP |
 
-`CP` = confidence penalty, reported separately alongside FCo.
+`CP` = confidence penalty, reported separately alongside FCor.
 
 ### Final Score
 
 ```
-Functional Suitability = 0.50 × FC + 0.50 × FCo
+Functional Suitability = 0.50 × FCom + 0.50 × FCor
 Functional Appropriateness = Advisory only (reported separately)
 ```
 
-Alternative (if all three sub-characteristics must be numerically scored): 40% FC + 45% FCo + 15% FA. Preferred option is 50/50 because FC and FCo are backed by harder evidence.
+Alternative (if all three sub-characteristics must be numerically scored): 40% FCom + 45% FCor + 15% FA. Preferred option is 50/50 because FCom and FCor are backed by harder evidence.
+
+---
+
+## Conceptual Distinctions — FCom, FA, FCor
+
+**The distinguishing question for FCom vs FA:**
+> "If this function is absent, is the software *broken* or just *worse*?"
+
+FCom gap = the software fails at its stated purpose. FA gap = the software succeeds but inefficiently.
+
+**FCom vs FA is a spectrum, not a binary:**
+
+```
+EXPLICIT          OBVIOUS          IMPLIED          UNRELATED
+stated in         so basic         would help       exists with
+requirements      nobody           but absence      no objective
+                  writes it        isn't broken     at all
+     |________________|________________|________________|
+     L1a              L1a              L1b              Unlinked
+     <————————— FCom —————————><————————— FA ——————————————>
+```
+
+- L1a (stated + obvious) → FCom: coverage of expected functions
+- L1b (implied) → FA necessary direction: implied enablers that improve task efficiency
+- Unlinked L2/L3 → FA sufficient direction: functions with no stated purpose (unnecessary steps per ISO 3.1.3)
+
+**FA has two failure modes; FCom has one:**
+- FCom: missing expected function (app is incomplete)
+- FA necessary: missing implied enabler (app is harder to use)
+- FA sufficient: unnecessary function present (app has extra complexity)
+
+**Why Step 3.5 exists:**
+The FCom/FA boundary — between "obvious" (L1a) and "implied" (L1b) — is a judgment call about how fundamental a function is to the app's purpose. It cannot be objectively derived. Step 3.5 is the human resolution gate for this ambiguity: the user promotes L1b items to L1a when they consider them expected rather than merely helpful.
+
+**Why behavioural properties belong in the AC layer, not L1a/L1b:**
+Items like "data persists across restarts", "error message shown on failure", "confirmation before delete" are not *functions* — they cannot be mapped to a UI element or API endpoint in Step 6. They are behavioural properties of existing functions and belong as acceptance criteria at Step 8. FCom and FA both measure whether *functions* exist; FCor measures whether those functions *behave correctly*. The three axes are orthogonal. Persistence, feedback, and error handling sit on the FCor axis, not the FCom or FA axis.
 
 ---
 
@@ -246,7 +282,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **User can:**
 - Confirm, edit, delete, reprioritise any L1a item
 - Adjust confidence weights (critical=4, high=3, medium=2, low=1)
-- Promote L1b items to L1a (adds them to FC and FCo scoring)
+- Promote L1b items to L1a (adds them to FCom and FCor scoring)
 - Add entirely new requirements
 
 **Display format:**
@@ -357,10 +393,10 @@ l3_unlinked = set(step4_endpoint_ids) - set(step6_matched_l3_ids)
 **Tools:** Python (formula only — no LLM for numeric scoring)
 **Input:** Step 6 (traceability matrix with E() scores) + Step 1+2 (L1a weights) + Step 3 (L1b with strength-derived weights)
 **Computes in one pass:**
-1. **FC numeric:** `∑(E × weight) / ∑weight` for all L1a, where weight = user-assigned priority
+1. **FCom numeric:** `∑(E × weight) / ∑weight` for all L1a, where weight = user-assigned priority
 2. **FA numeric:** `∑(E × weight) / ∑weight` for all L1b, where weight = strength-derived (3/2/1)
-3. **FC advisory — missing L1a:** L1a items with E()=0.0 or low E(), listed with gap description
-4. **FC advisory — unlinked functions:** L2_unlinked and L3_unlinked from Step 6
+3. **FCom advisory — missing L1a:** L1a items with E()=0.0 or low E(), listed with gap description
+4. **FCom advisory — unlinked functions:** L2_unlinked and L3_unlinked from Step 6
 5. **FA advisory — missing L1b:** L1b items with E()=0.0, weighted by strength
 6. **FA advisory — unlinked functions:** same L2/L3 unlinked list (functions with no stated purpose, per ISO 3.1.3 "unnecessary steps")
 
@@ -396,7 +432,7 @@ l3_unlinked = set(step4_endpoint_ids) - set(step6_matched_l3_ids)
 }
 ```
 
-**Dashboard checkpoint:** FC numeric + FA numeric + all advisories displayed together in the coverage view. First deliverable milestone — no test execution required.
+**Dashboard checkpoint:** FCom numeric + FA numeric + all advisories displayed together in the coverage view. First deliverable milestone — no test execution required.
 
 ---
 
@@ -404,7 +440,7 @@ l3_unlinked = set(step4_endpoint_ids) - set(step6_matched_l3_ids)
 **Phase: FCor setup**
 **Tools:** Python, LLM (AsyncAnthropic)
 **Input:** L1a requirement list as finalised after Step 3.5 (or directly from Step 1+2 if Step 3.5 was skipped), including locked L1Cx per requirement
-**Scope:** Only generates ACs for requirements in S = { x ∈ L1a | x ∈ L3 }. Requirements with E()=0.4, 0.25, or 0.0 are skipped — their gaps are already captured in FC advisory.
+**Scope:** Only generates ACs for requirements in S = { x ∈ L1a | x ∈ L3 }. Requirements with E()=0.4, 0.25, or 0.0 are skipped — their gaps are already captured in FCom advisory.
 **Logic:** Converts each eligible L1a requirement into Given/When/Then ACs. LLM assigns sub-weights per AC that **sum to the requirement's L1Cx**. Persistence and edge cases are ACs of L1a requirements — not separate L1b items.
 **Output:**
 ```json
@@ -498,11 +534,11 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 S   = { x ∈ L1a | x ∈ L3 }
 S*  = S \ { x | all ACs blocked }
 
-FCo = ∑(pass_i × ACw_i) / ∑ ACw_i      [i ∈ ACs of requirements in S*]
+FCor = ∑(pass_i × ACw_i) / ∑ ACw_i      [i ∈ ACs of requirements in S*]
 CP  = ∑_blocked_L1Cx / ∑_all_L1Cx
 ```
-Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their gaps are captured in FC.
-**Output:** FCo ratio + per-requirement AC breakdown + CP confidence penalty
+Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCor — their gaps are captured in FCom.
+**Output:** FCor ratio + per-requirement AC breakdown + CP confidence penalty
 
 ---
 
@@ -532,7 +568,7 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their
 **Phase: Output**
 **Tools:** Python, JSON, HTML report generator
 **Input:** All step outputs (−1 through 14)
-**Aggregates** all layer data into one structured, auditable evidence package. Every score is traceable: FCo → AC results → test logs → L4; FC → E() scores → L2/L3 evidence → L1a requirements.
+**Aggregates** all layer data into one structured, auditable evidence package. Every score is traceable: FCor → AC results → test logs → L4; FCom → E() scores → L2/L3 evidence → L1a requirements.
 
 ---
 
@@ -567,8 +603,8 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCo — their
 **Input:** Step 15 evidence pack + Step 16 LLM evaluation
 **Shows:**
 - Final Functional Suitability Score (0–5)
-- FC score + FA advisory with data layer comparison labels
-- FCo score + CP confidence penalty
+- FCom score + FA advisory with data layer comparison labels
+- FCor score + CP confidence penalty
 - Requirement traceability matrix (interactive, per-row status)
 - Layer gap summary (L1 count → L2 exposed → L3 implemented → L4 verified)
 - Test results with screenshots and logs
