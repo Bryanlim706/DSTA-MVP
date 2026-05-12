@@ -48,6 +48,16 @@ def update_job(job_id: str, updates: dict) -> dict:
     return job
 
 
+def add_step_result(job_id: str, step_key: str, result: dict) -> dict:
+    job = get_job(job_id)
+    if job is None:
+        raise ValueError(f"Job {job_id} not found")
+    job["step_results"][step_key] = result
+    job["updated_at"] = _now()
+    _write(job_id, job)
+    return job
+
+
 def _write(job_id: str, job: dict) -> None:
     with open(_path(job_id), "w", encoding="utf-8") as f:
         json.dump(job, f, indent=2)

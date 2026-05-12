@@ -15,14 +15,36 @@ export interface Step0Result {
   llm_model: string | null
 }
 
+export interface Step1Requirement {
+  req_id: string
+  description: string
+  source: string
+  source_quote: string
+  tag: 'stated'
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  weight: number
+  testable: boolean
+}
+
+export interface Step1Result {
+  requirements: Step1Requirement[]
+  total_count: number
+  docs_used: string[]
+  truncated_docs: string[]
+  llm_model: string
+  dropped_count: number
+  error?: string
+}
+
 export interface StepResults {
   step_0?: Step0Result
+  step_1?: Step1Result
 }
 
 export type JobStatus =
   | 'created'
   | 'running'
-  | 'step_0_complete'
+  | 'step_1_complete'
   | 'waiting_for_confirmation'
   | 'complete'
   | 'error'

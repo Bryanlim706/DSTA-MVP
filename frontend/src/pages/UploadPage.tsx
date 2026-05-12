@@ -106,11 +106,14 @@ export default function UploadPage({ onUploadComplete }: Props) {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Requirements
+              <span className="ml-2 text-xs font-normal text-gray-400">
+                README, REQUIREMENTS.md and spec docs in your zip are read automatically
+              </span>
             </label>
             <textarea
               value={requirements}
               onChange={(e) => setRequirements(e.target.value)}
-              placeholder="Describe what the software is supposed to do. Paste a requirements document, user stories, or a plain description of intended functionality."
+              placeholder="Add any requirements not already covered in your zip (e.g. user stories, acceptance criteria, or a plain description of intended functionality). Leave blank if your zip already contains a complete requirements document."
               rows={8}
               className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             />

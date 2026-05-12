@@ -370,6 +370,8 @@ def _apply_test_strategy_overrides(result: dict, js_deps: dict) -> None:
         result["test_strategy"]["secondary"] = "Jest + React Testing Library"
     elif has_jest:
         result["test_strategy"]["secondary"] = "Jest"
+    elif project_type == "electron_app":
+        result["test_strategy"]["secondary"] = None
 
 
 # --- Rule-based classifier ---

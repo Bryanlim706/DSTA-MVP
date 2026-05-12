@@ -1,21 +1,25 @@
 import { useState } from 'react'
 import { pollJob } from './api/client'
 import ClassificationResult from './components/ClassificationResult'
+import RequirementsResult from './components/RequirementsResult'
 import Sidebar from './components/Sidebar'
 import UploadPage from './pages/UploadPage'
 import type { Job } from './types'
 
-type Stage = 'upload' | 'loading' | 'step_0_complete' | 'error'
+type Stage = 'upload' | 'loading' | 'step_1_complete' | 'error'
 
 function LoadingView({ job }: { job: Job | null }) {
+  const stepLabel =
+    job?.current_step === 1
+      ? 'Step 1 — Extracting stated requirements…'
+      : 'Step 0 — Classifying project type…'
+
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="text-center">
         <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-sm font-medium text-gray-700">
-          {job?.status === 'running' ? 'Step 0 — Classifying project type…' : 'Starting analysis…'}
-        </p>
-        <p className="text-xs text-gray-400 mt-1">This usually takes 5–10 seconds</p>
+        <p className="text-sm font-medium text-gray-700">{stepLabel}</p>
+        <p className="text-xs text-gray-400 mt-1">This usually takes 10–20 seconds</p>
       </div>
     </div>
   )
@@ -40,14 +44,16 @@ function ErrorView({ error, onRetry }: { error: string | null; onRetry: () => vo
 }
 
 function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
-  const result = job.step_results.step_0!
+  const step0 = job.step_results.step_0!
+  const step1 = job.step_results.step_1!
+
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-12">
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-3xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-xl font-semibold text-gray-900">Project Classification</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Step 0 complete — ready to proceed</p>
+            <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
+            <p className="text-xs text-gray-400 mt-0.5">Steps 0–1 complete</p>
           </div>
           <button
             onClick={onReset}
@@ -57,10 +63,14 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
           </button>
         </div>
 
-        <ClassificationResult result={result} />
+        <ClassificationResult result={step0} />
+
+        <div className="mt-6">
+          <RequirementsResult result={step1} />
+        </div>
 
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
-          <span className="font-medium">Next:</span> Step 1 — Extract stated requirements (coming soon)
+          <span className="font-medium">Next:</span> Step 2 — Obvious requirements (coming soon)
         </div>
       </div>
     </div>
@@ -77,7 +87,7 @@ export default function App() {
     try {
       const completed = await pollJob(jobId, (j) => setJob(j))
       setJob(completed)
-      setStage('step_0_complete')
+      setStage('step_1_complete')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
       setStage('error')
@@ -96,7 +106,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto">
         {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
         {stage === 'loading' && <LoadingView job={job} />}
-        {stage === 'step_0_complete' && job && <ResultPage job={job} onReset={reset} />}
+        {stage === 'step_1_complete' && job && <ResultPage job={job} onReset={reset} />}
         {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
       </main>
     </div>
