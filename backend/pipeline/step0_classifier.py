@@ -134,17 +134,38 @@ _BACKEND_TEST_SECONDARY: dict[str, str] = {
     "CodeIgniter": "PHPUnit",
     "CakePHP": "PHPUnit",
     "Yii": "PHPUnit",
-    "Java": "JUnit",
     "Spring Boot": "JUnit",
     "Rails": "RSpec",
     "ASP.NET": "xUnit",
 }
 
+_BACKEND_TEST_PRIMARY: dict[str, str] = {
+    "Express":      "Jest",
+    "NestJS":       "Jest",
+    "Fastify":      "Jest",
+    "Koa":          "Jest",
+    "Hapi":         "Jest",
+    "Laravel":      "PHPUnit",
+    "Symfony":      "PHPUnit",
+    "Slim":         "PHPUnit",
+    "CodeIgniter":  "PHPUnit",
+    "CakePHP":      "PHPUnit",
+    "Yii":          "PHPUnit",
+    "Spring Boot":  "JUnit",
+    "Rails":        "RSpec",
+    "ASP.NET":      "xUnit",
+}
+
 
 def _get_test_strategy(project_type: str, backend_framework: str | None) -> dict:
     strategy = dict(TEST_STRATEGY_MAP.get(project_type, TEST_STRATEGY_MAP["unknown"]))
-    if backend_framework and backend_framework in _BACKEND_TEST_SECONDARY:
-        strategy["secondary"] = _BACKEND_TEST_SECONDARY[backend_framework]
+    if backend_framework:
+        if backend_framework in _BACKEND_TEST_SECONDARY:
+            strategy["secondary"] = _BACKEND_TEST_SECONDARY[backend_framework]
+        if project_type == "backend_api_only" and backend_framework in _BACKEND_TEST_PRIMARY:
+            strategy["primary"] = _BACKEND_TEST_PRIMARY[backend_framework]
+    if strategy.get("secondary") == strategy.get("primary"):
+        strategy["secondary"] = None
     return strategy
 
 # --- LLM fallback prompt ---
@@ -408,6 +429,20 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
     # If .php files exist but no framework found in composer.json, leave php_fw as None —
     # PHP is a language, not a framework.
 
+    java_fw: str | None = None
+    if has_java:
+        for p, content in scan["config_files"].items():
+            if "pom.xml" in p or "build.gradle" in p:
+                cl = content.lower()
+                if "spring-boot" in cl:
+                    java_fw = "Spring Boot"
+                elif "quarkus" in cl:
+                    java_fw = "Quarkus"
+                elif "micronaut" in cl:
+                    java_fw = "Micronaut"
+                if java_fw:
+                    break
+
     # Unknown language project (Go/Rust/Java only, no JS/Python) — defer to LLM
     if not has_package_json and not has_python and (has_go or has_rust or has_java):
         return None
@@ -419,10 +454,20 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         confidence = "high"
         reasoning = f"Found 'electron' in package.json dependencies with {'React' if frontend_fw else 'renderer'} process structure."
 
+    elif php_fw and not has_java:
+        # Laravel/Symfony etc. commonly use npm/Vite for frontend assets — not a monorepo
+        project_type = "full_stack_web_app" if has_package_json else "backend_api_only"
+        backend_framework = php_fw
+        confidence = "high"
+        reasoning = (
+            f"Found {php_fw} in composer.json"
+            + (" with package.json for frontend assets." if has_package_json else ".")
+        )
+
     elif has_package_json and (has_java or has_php or has_go or has_rust):
         # JS coexisting with a non-JS backend language signals a monorepo (e.g. server + mobile app)
         project_type = "monorepo"
-        backend_framework = php_fw or backend_fw_py or backend_fw_js
+        backend_framework = php_fw or backend_fw_py or backend_fw_js or java_fw
         other_langs = ", ".join(l for l, flag in [("Java", has_java), ("PHP", has_php), ("Go", has_go), ("Rust", has_rust)] if flag)
         confidence = "medium"
         if backend_framework:
@@ -430,16 +475,11 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         else:
             reasoning = f"Found package.json alongside {other_langs} project files with no recognised backend framework. Likely a monorepo."
 
-    elif has_package_json and has_python:
+    elif has_package_json and has_python and (backend_fw_py or backend_fw_js):
         project_type = "full_stack_web_app"
         backend_framework = backend_fw_py or backend_fw_js
-        if backend_framework:
-            confidence = "high"
-            reasoning = f"Found package.json and Python config files. Frontend: {frontend_fw or 'unknown'}, Backend: {backend_framework}."
-        else:
-            # Both JS and Python present but backend framework unrecognised — let LLM confirm
-            confidence = "medium"
-            reasoning = f"Found package.json and Python config files, but backend framework not recognised. Frontend: {frontend_fw or 'unknown'}."
+        confidence = "high"
+        reasoning = f"Found package.json and Python config files. Frontend: {frontend_fw or 'unknown'}, Backend: {backend_framework}."
 
     elif has_package_json and frontend_fw and backend_fw_js:
         project_type = "full_stack_js"
@@ -487,7 +527,7 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         return None  # No recognisable config — defer to LLM
 
     # Contradiction guard: if rules said frontend_only but the dominant file type is a backend
-    # language, rules likely missed something — defer to LLM
+    # language, rules likely missed something — medium confidence triggers LLM review in run()
     if project_type == "frontend_only":
         language = _detect_language(ext_counts, frontend_fw, backend_framework)
         if language in {"Python", "Java", "Go", "Rust", "C#", "Ruby", "PHP"}:
