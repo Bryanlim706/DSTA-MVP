@@ -47,7 +47,7 @@ This grounds the biconditional:
 - L1b → (L2∪L3): *necessary direction* — are implied functions present? → scored
 - (L2∪L3) → L1b: *sufficient/unnecessary direction* — are there functions with no stated purpose? → advisory only
 
-The (L2∪L3) → L1b direction is advisory only because "unnecessary steps" has complex relationships with intentional redundancy for UI intuitiveness and roadmap decisions.
+The L2 → L1b direction (sufficient/unnecessary direction) is advisory only because "unnecessary steps" has complex relationships with intentional redundancy for UI intuitiveness and roadmap decisions. L3-only internal code is excluded from this check — only user-facing L2 endpoints/screens can constitute unnecessary steps.
 
 ```
 FA = ∑(E(L1x) × L1Cx) / ∑ L1Cx      [x ∈ L1b]
@@ -111,6 +111,8 @@ Alternative (if all three sub-characteristics must be numerically scored): 40% F
 
 FCom gap = the software fails at its stated purpose. FA gap = the software succeeds but inefficiently.
 
+FCom = *coverage* — does the software have enough? FA = *calibration* — does it have the right set (necessary and sufficient, per ISO 3.1.3)? The ISO definitions are nearly circular; this directional framing resolves the ambiguity.
+
 **FCom vs FA is a spectrum, not a binary:**
 
 ```
@@ -125,7 +127,7 @@ requirements      nobody           but absence      no objective
 
 - L1a (stated + obvious) → FCom: coverage of expected functions
 - L1b (implied) → FA necessary direction: implied enablers that improve task efficiency
-- Unlinked L2/L3 → FA sufficient direction: functions with no stated purpose (unnecessary steps per ISO 3.1.3)
+- Unlinked L2 → FA sufficient direction: user-facing functions with no stated or implied purpose (unnecessary steps per ISO 3.1.3). L3-only internal code paths are excluded — they are invisible to users and do not constitute "steps" in the ISO sense.
 
 **FA has two failure modes; FCom has one:**
 - FCom: missing expected function (app is incomplete)

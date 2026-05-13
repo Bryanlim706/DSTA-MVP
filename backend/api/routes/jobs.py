@@ -1,8 +1,13 @@
 from fastapi import APIRouter, HTTPException
 
-from storage.job_store import get_job
+from storage.job_store import get_job, list_jobs
 
 router = APIRouter()
+
+
+@router.get("/jobs")
+async def list_recent_jobs(limit: int = 10):
+    return list_jobs(limit)
 
 
 @router.get("/jobs/{job_id}")

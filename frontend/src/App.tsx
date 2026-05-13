@@ -23,6 +23,9 @@ function LoadingView({ job }: { job: Job | null }) {
         <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
         <p className="text-sm font-medium text-gray-700">{stepLabel}</p>
         <p className="text-xs text-gray-400 mt-1">This usually takes 10–20 seconds</p>
+        {job?.job_id && (
+          <p className="text-[10px] text-gray-300 mt-2 font-mono">{job.job_id}</p>
+        )}
       </div>
     </div>
   )
@@ -58,6 +61,7 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
           <div>
             <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
             <p className="text-xs text-gray-400 mt-0.5">Steps 0–2 complete</p>
+            <p className="text-[10px] text-gray-300 mt-0.5 font-mono">{job.job_id}</p>
           </div>
           <button
             onClick={onReset}

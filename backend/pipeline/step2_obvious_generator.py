@@ -9,13 +9,14 @@ LLM_SYSTEM_PROMPT = """You are an obvious requirements generator for software qu
 Given a project type and a list of already-stated requirements, generate ONLY obvious functional requirements — behaviours so fundamental that any user of this type of application expects them by default, yet would never think to write them down explicitly.
 
 Rules:
-1. OBVIOUS (include): core CRUD for the app's primary entity, fundamental navigation, expected session management, essential error/feedback states every user takes for granted.
+1. OBVIOUS (include): core CRUD for the app's primary entity, fundamental navigation, expected session management. A requirement belongs here only if a user could point to a distinct UI screen, button, or API endpoint that implements it.
 2. DO NOT include: nice-to-have features, optimisations, bulk operations, sorting, filtering, export, notifications, advanced settings — these are "implied", not "obvious".
 3. Do NOT repeat any requirement already in the stated requirements list.
 4. Only generate requirements for features directly implied by the project type. Do not invent features beyond the app's evident purpose.
 5. Generate 5–20 requirements. If stated requirements already cover the obvious ones, generate fewer (or return an empty array).
 6. weight derives from priority: critical=4.0  high=3.0  medium=2.0  low=1.0
 7. testable: set false only if the item cannot be expressed as a pass/fail behaviour.
+8. DO NOT generate requirements about internal system behaviour — persistence across restarts, error handling, feedback messages, confirmation dialogs, and window state management are acceptance criteria of functional requirements, not standalone functions. Ask: "Can this be mapped to a UI element or API endpoint?" If not, omit it.
 
 Return ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:
 [{
