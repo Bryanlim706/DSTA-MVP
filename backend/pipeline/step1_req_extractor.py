@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import anthropic
@@ -19,6 +20,10 @@ SPEC_DOC_KEYWORDS = {
     "use-case", "usecase", "epic", "functional",
 }
 README_NAMES = {"readme.md", "readme.rst", "readme.txt", "readme"}
+
+
+def _norm(text: str) -> str:
+    return re.sub(r'\s+', ' ', text.lower().strip())
 MAX_DOCS = 30
 MAX_CHARS_PER_DOC = 12000
 MAX_README_DEPTH = 2
@@ -158,7 +163,7 @@ def _validate_and_normalise(
     requirements_text: str,
     spec_docs: dict[str, str],
 ) -> tuple[list, int]:
-    all_sources_lower = requirements_text.lower() + " " + " ".join(spec_docs.values()).lower()
+    all_sources_norm = _norm(requirements_text + " " + " ".join(spec_docs.values()))
     valid = []
     dropped = 0
 
@@ -172,7 +177,7 @@ def _validate_and_normalise(
             dropped += 1
             continue
 
-        if quote.lower() not in all_sources_lower:
+        if _norm(quote) not in all_sources_norm:
             dropped += 1
             continue
 
