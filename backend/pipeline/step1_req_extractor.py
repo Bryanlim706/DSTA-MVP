@@ -7,6 +7,7 @@ import anthropic
 IGNORE_DIRS = {
     "node_modules", ".git", "dist", "build", ".next", "venv", ".venv",
     "__pycache__", "coverage", ".cache", "out", "target", "vendor",
+    ".claude", ".cursor", ".github", ".vscode", ".idea",
 }
 
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
@@ -18,8 +19,9 @@ SPEC_DOC_KEYWORDS = {
     "use-case", "usecase", "epic", "functional",
 }
 README_NAMES = {"readme.md", "readme.rst", "readme.txt", "readme"}
-MAX_DOCS = 10
+MAX_DOCS = 30
 MAX_CHARS_PER_DOC = 12000
+MAX_README_DEPTH = 2
 
 LLM_SYSTEM_PROMPT = """You are a requirement extraction assistant. Extract ONLY functional requirements that are explicitly stated in the provided text.
 
@@ -59,12 +61,14 @@ def _find_project_root(extract_to: Path) -> Path:
     return root
 
 
-def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str]]:
+def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str], int]:
     """
-    Returns (docs, truncated_docs).
+    Returns (docs, truncated_docs, excluded_count).
     docs: {relative_posix_path: content} — README always first, then spec docs.
     truncated_docs: relative paths of files that exceeded MAX_CHARS_PER_DOC.
-    README is guaranteed to be included before any spec doc when the MAX_DOCS cap is hit.
+    excluded_count: spec docs found but dropped because MAX_DOCS was hit.
+    README files deeper than MAX_README_DEPTH are skipped to avoid sub-module READMEs
+    consuming all README slots.
     Uses relative paths as keys so same-named files in different dirs never collide.
     """
     readme_bucket: dict[str, str] = {}
@@ -73,10 +77,13 @@ def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str]]:
 
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+        depth = len(Path(dirpath).relative_to(root).parts)
         for filename in filenames:
             name_lower = filename.lower()
             ext = Path(filename).suffix.lower()
             is_readme = name_lower in README_NAMES
+            if is_readme and depth > MAX_README_DEPTH:
+                continue
             is_spec = (
                 ext in SPEC_DOC_EXTENSIONS
                 and name_lower != "requirements.txt"
@@ -113,7 +120,8 @@ def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str]]:
             break
         merged[k] = v
 
-    return merged, truncated
+    excluded_count = sum(1 for k in spec_bucket if k not in merged)
+    return merged, truncated, excluded_count
 
 
 def _build_user_message(requirements_text: str, spec_docs: dict[str, str]) -> str:
@@ -130,7 +138,16 @@ def _parse_llm_response(raw: str) -> list:
         text = text.split("```json", 1)[1].split("```", 1)[0].strip()
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0].strip()
-    parsed = json.loads(text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        # LLM output was truncated mid-item (hit max_tokens). Recover everything before
+        # the last complete item so we return partial results instead of failing entirely.
+        last_close = text.rfind("},")
+        if last_close != -1:
+            parsed = json.loads(text[:last_close + 1] + "]")
+        else:
+            raise
     if not isinstance(parsed, list):
         raise ValueError("LLM returned non-array JSON")
     return parsed
@@ -186,17 +203,18 @@ async def run(
     model = "claude-haiku-4-5-20251001"
     spec_docs: dict[str, str] = {}
     truncated_docs: list[str] = []
+    excluded_docs_count: int = 0
 
     try:
         root = _find_project_root(extract_to)
-        spec_docs, truncated_docs = _find_spec_docs(root)
+        spec_docs, truncated_docs, excluded_docs_count = _find_spec_docs(root)
     except Exception:
         pass
 
     try:
         response = await client.messages.create(
             model=model,
-            max_tokens=8192,
+            max_tokens=16000,
             system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": _build_user_message(requirements_text, spec_docs)}],
         )
@@ -208,6 +226,7 @@ async def run(
             "total_count": 0,
             "docs_used": list(spec_docs.keys()),
             "truncated_docs": truncated_docs,
+            "excluded_docs_count": excluded_docs_count,
             "llm_model": model,
             "dropped_count": 0,
             "error": str(exc),
@@ -218,6 +237,7 @@ async def run(
         "total_count": len(requirements),
         "docs_used": list(spec_docs.keys()),
         "truncated_docs": truncated_docs,
+        "excluded_docs_count": excluded_docs_count,
         "llm_model": model,
         "dropped_count": dropped,
     }

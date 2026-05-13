@@ -407,6 +407,19 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         if backend_fw_py:
             is_cli = False
 
+    # Trust Python backend only if a config file exists at root or immediate subdirectory
+    # (depth 0 or 1, e.g. "requirements.txt" or "backend/requirements.txt").
+    # If Python configs live only in sub-service dirs (depth 2+), they belong to separate
+    # services — zero them out so the JS-only rules apply and LLM fallback fires.
+    root_level_py = any(
+        len(p.relative_to(root).parts) <= 1
+        for p in py_config_files
+    )
+    if has_python and not root_level_py:
+        has_python = False
+        backend_fw_py = None
+        is_cli = False
+
     # Use scan config index — catches these files anywhere in the tree, not just root
     config_paths = set(scan["config_files"].keys())
     has_go = any("go.mod" in p for p in config_paths)
