@@ -203,6 +203,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 ---
 
 ### Step 2: Obvious Requirement Generator
+**Status: COMPLETE**
 **Phase: FCom setup — builds L1a (obvious)**
 **Tools:** Python, LLM (AsyncAnthropic)
 **Input:** Step 0 (project_type, framework) + Step 1 (stated requirements list)
@@ -644,7 +645,7 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCor — thei
 | Milestone | Steps | Status |
 |---|---|---|
 | 1 — Scaffold + Upload + Step 0 | Steps −1, 0, upload endpoint, job store, frontend | ✓ DONE |
-| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | Step 1 ✓ DONE \| Steps 2, 3, 3.5 in progress |
+| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | Steps 1, 2 ✓ DONE \| Steps 3, 3.5 not started |
 | 3 — Repo Parser | Step 4 | Not started |
 | 4 — Inventory + Mapping + Completeness | Steps 5, 6, 7 | Not started |
 | 5 — AC Generation + Test Execution | Steps 8, 9, 10, 11, 12 | Not started |
