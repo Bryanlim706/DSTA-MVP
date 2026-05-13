@@ -34,6 +34,7 @@ config_files_found, llm_used, llm_model
 - Ignores tool config dirs: `.claude`, `.cursor`, `.github`, `.vscode`, `.idea` (these waste slots)
 - MAX_DOCS = 30, MAX_CHARS_PER_DOC = 12000
 - LLM (claude-haiku) extracts only explicitly stated requirements; every item must include a verbatim source quote
+- Source quote verification uses whitespace-normalized comparison (`_norm()`) — collapses all whitespace to single space before substring check, so LLM quote normalization (newlines → spaces) doesn't cause false drops
 - JSON truncation recovery: if response is cut off mid-array, recovers items up to last complete `},`
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
 - `functional_area` field on each requirement for cascade advisory grouping

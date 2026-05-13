@@ -187,7 +187,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (stated)**
 **Tools:** Python, LLM (AsyncAnthropic, prompt caching)
 **Input:** Requirements text provided by user + README (read directly from zip) + any uploaded specification documents
-**Rule:** Only extract requirements that are **explicitly stated**. No inference. No invention. Every item must include its source quote.
+**Rule:** Only extract requirements that are **explicitly stated**. No inference. No invention. Every item must include its source quote. Source quote verification uses whitespace-normalized comparison — the quote must appear verbatim in the source (anti-hallucination), but whitespace differences (newlines → spaces) are tolerated.
 **Decomposition rule:** General/meta requirements decomposed into atomic testable items, each retaining a reference to its parent.
 **Tag:** `stated`
 **Output (step_results.step_1):**
