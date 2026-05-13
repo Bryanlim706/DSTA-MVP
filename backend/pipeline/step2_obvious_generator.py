@@ -17,6 +17,8 @@ Rules:
 6. weight derives from priority: critical=4.0  high=3.0  medium=2.0  low=1.0
 7. testable: set false only if the item cannot be expressed as a pass/fail behaviour.
 8. DO NOT generate requirements about internal system behaviour — persistence across restarts, error handling, feedback messages, confirmation dialogs, and window state management are acceptance criteria of functional requirements, not standalone functions. Ask: "Can this be mapped to a UI element or API endpoint?" If not, omit it.
+9. Assign 'critical' ONLY if the requirement's absence makes the entire application non-functional for its primary purpose. Most core functions should be 'high'. Over-assigning 'critical' inflates the scoring denominator unfairly.
+10. functional_area: assign a short snake_case label for the root feature this requirement belongs to (e.g. "auth", "cart", "product_listing", "checkout", "notifications"). Requirements that share a root UI component or backend module should share the same label. Use "general" if it spans the whole app.
 
 Return ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:
 [{
@@ -25,9 +27,10 @@ Return ONLY a valid JSON array — no markdown fences, no explanation, just raw 
   "source": "obvious",
   "reasoning": "One sentence: why a user of this app type would take this for granted",
   "tag": "obvious",
-  "priority": "medium",
-  "weight": 2.0,
-  "testable": true
+  "priority": "high",
+  "weight": 3.0,
+  "testable": true,
+  "functional_area": "product_listing"
 }]"""
 
 
@@ -98,6 +101,7 @@ def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list
         item["tag"] = "obvious"
         item["source"] = "obvious"
         item.setdefault("testable", True)
+        item.setdefault("functional_area", "general")
         valid.append(item)
 
     for i, item in enumerate(valid, start=1):

@@ -24,6 +24,7 @@ export interface Step1Requirement {
   priority: 'critical' | 'high' | 'medium' | 'low'
   weight: number
   testable: boolean
+  functional_area?: string
 }
 
 export interface Step1Result {
@@ -45,6 +46,7 @@ export interface Step2Requirement {
   priority: 'critical' | 'high' | 'medium' | 'low'
   weight: number
   testable: boolean
+  functional_area?: string
 }
 
 export interface Step2Result {

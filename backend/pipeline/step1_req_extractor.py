@@ -32,6 +32,7 @@ Rules:
 6. testable: set false only if the item cannot be expressed as a pass/fail behaviour (e.g. vague quality statements). Functional behaviours are almost always true.
 7. source: use the exact section label from the input — "user_input" for the USER REQUIREMENTS section, or the exact label shown (e.g. "README.md", "docs/REQUIREMENTS.md") for any other section.
 8. If the same requirement appears in multiple sections (same meaning, even if worded differently), extract it once only — prefer "user_input" as the source.
+9. functional_area: assign a short snake_case label for the root feature this requirement belongs to (e.g. "auth", "cart", "product_listing", "checkout", "notifications"). Requirements that share a root component should share the same label. Use "general" if it spans the whole app.
 
 Return ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:
 [{
@@ -42,7 +43,8 @@ Return ONLY a valid JSON array — no markdown fences, no explanation, just raw 
   "tag": "stated",
   "priority": "high",
   "weight": 3.0,
-  "testable": true
+  "testable": true,
+  "functional_area": "auth"
 }]"""
 
 
@@ -166,6 +168,7 @@ def _validate_and_normalise(
         item.setdefault("tag", "stated")
         item.setdefault("testable", True)
         item.setdefault("source", "user_input")
+        item.setdefault("functional_area", "general")
 
         valid.append(item)
 

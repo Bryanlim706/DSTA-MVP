@@ -140,6 +140,12 @@ The FCom/FA boundary — between "obvious" (L1a) and "implied" (L1b) — is a ju
 **Why behavioural properties belong in the AC layer, not L1a/L1b:**
 Items like "data persists across restarts", "error message shown on failure", "confirmation before delete" are not *functions* — they cannot be mapped to a UI element or API endpoint in Step 6. They are behavioural properties of existing functions and belong as acceptance criteria at Step 8. FCom and FA both measure whether *functions* exist; FCor measures whether those functions *behave correctly*. The three axes are orthogonal. Persistence, feedback, and error handling sit on the FCor axis, not the FCom or FA axis.
 
+**L1a validity model — generate, confirm, lock:**
+Steps 1–3 produce heuristic starting points. The LLM reasons from project type and stated requirements, not the actual codebase — it can fabricate requirements for features that don't exist in this specific app, assign wrong weights, or miss app-specific functions. This is expected and by design. The formula is only valid after **Step 3.5 locks L1a**. Skipping Step 3.5 produces an unreliable FCom score. The `functional_area` tag on each L1a item helps reviewers spot fabricated clusters — if an entire cluster (e.g. all "product_detail" requirements) has no match in the uploaded code, the cluster is likely fabricated and should be deleted at Step 3.5.
+
+**Cascade sensitivity:**
+FCom is sensitive to dependency chains. If a root feature is absent from L3, all downstream requirements cascade to E=0, producing a score that may feel disproportionately low. This is technically accurate (the app IS missing those functions) but uninformative about root cause. Step 7 advisory output will group E=0 items by `functional_area` and flag cascade clusters ("N requirements missing — likely one root component absent"). Step 3.5 also mitigates this: reviewers can remove requirements they consider preconditions of others rather than independent objectives.
+
 ---
 
 ## Pipeline Steps
@@ -195,7 +201,8 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
     "tag": "stated",
     "priority": "high",
     "weight": 3.0,
-    "testable": true
+    "testable": true,
+    "functional_area": "auth"
   }
 ]
 ```
@@ -220,9 +227,10 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
     "source": "obvious",
     "reasoning": "Any task management app user expects to be able to delete tasks",
     "tag": "obvious",
-    "priority": "medium",
-    "weight": 2.0,
-    "testable": true
+    "priority": "high",
+    "weight": 3.0,
+    "testable": true,
+    "functional_area": "task_management"
   }
 ]
 ```

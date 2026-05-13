@@ -49,6 +49,13 @@ function RequirementRow({ req }: { req: Step1Requirement }) {
       {expanded && (
         <tr className="bg-gray-50 border-t border-gray-100">
           <td colSpan={6} className="px-4 pb-3 pt-1">
+            {req.functional_area && (
+              <p className="mb-1.5">
+                <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono">
+                  {req.functional_area}
+                </span>
+              </p>
+            )}
             <p className="text-xs text-gray-500 font-medium mb-1">Source quote</p>
             <blockquote className="text-xs text-gray-700 italic border-l-2 border-gray-300 pl-3">
               "{req.source_quote}"

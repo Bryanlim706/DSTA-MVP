@@ -34,6 +34,13 @@ function RequirementRow({ req }: { req: Step2Requirement }) {
       {expanded && (
         <tr className="bg-gray-50 border-t border-gray-100">
           <td colSpan={5} className="px-4 pb-3 pt-1">
+            {req.functional_area && (
+              <p className="mb-1.5">
+                <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono">
+                  {req.functional_area}
+                </span>
+              </p>
+            )}
             <p className="text-xs text-gray-500 font-medium mb-1">Reasoning</p>
             <p className="text-xs text-gray-700 italic">{req.reasoning}</p>
           </td>
