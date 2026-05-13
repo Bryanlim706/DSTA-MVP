@@ -178,7 +178,7 @@ FCom is sensitive to dependency chains. If a root feature is absent from L3, all
   "llm_model": null
 }
 ```
-Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing.
+Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing. To add more frontend and backend frameworks in the future if needed.
 
 ---
 
@@ -190,21 +190,30 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Rule:** Only extract requirements that are **explicitly stated**. No inference. No invention. Every item must include its source quote.
 **Decomposition rule:** General/meta requirements decomposed into atomic testable items, each retaining a reference to its parent.
 **Tag:** `stated`
-**Output:**
+**Output (step_results.step_1):**
 ```json
-[
-  {
-    "req_id": "REQ-001",
-    "description": "User can register an account",
-    "source": "user_input",
-    "source_quote": "users should be able to register and log in",
-    "tag": "stated",
-    "priority": "high",
-    "weight": 3.0,
-    "testable": true,
-    "functional_area": "auth"
-  }
-]
+{
+  "requirements": [
+    {
+      "req_id": "REQ-001",
+      "description": "User can register an account",
+      "source": "user_input",
+      "source_quote": "users should be able to register and log in",
+      "tag": "stated",
+      "priority": "high",
+      "weight": 3.0,
+      "testable": true,
+      "functional_area": "auth"
+    }
+  ],
+  "total_count": 4,
+  "docs_used": ["README.md", "docs/REQUIREMENTS.md"],
+  "truncated_docs": ["docs/REQUIREMENTS.md"],
+  "excluded_docs_count": 2,
+  "llm_model": "claude-haiku-4-5-20251001",
+  "dropped_count": 1,
+  "error": null
+}
 ```
 
 ---
@@ -236,6 +245,8 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 ```
 
 **Combined L1a pool:** Step 1 (stated) + Step 2 (obvious) → forms the initial L1a before Step 3.5 confirmation.
+
+Note: Key accuracy step. Consider requirement dependencies and branching which will bias the score
 
 ---
 
