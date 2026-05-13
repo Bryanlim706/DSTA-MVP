@@ -144,3 +144,14 @@ Before pushing, check:
 
 1. Build Steps 1, 2, 3, 3.5 — Stated + Obvious Requirement Extractors, L1b Generator, Human Confirmation UI
 2. Build Step 4 — Repo Parser (regex + file path heuristics, outputs `languages`, `api_endpoints`, `database_models`)
+
+---
+
+## Known limitations / future scope
+
+### Microservices
+The evaluator is designed for **self-contained applications with user-facing flows**. Microservices architectures are out of scope for the MVP for two reasons:
+1. Individual services are rarely self-contained enough to evaluate against user-story-level requirements — most are internally-facing and flows span multiple services
+2. Steps 4 (L2 Inventory), 8 (Test Generator), and 10 (Sandbox) assume one running app with one base URL and a UI to crawl
+
+**Future implementation:** Microservices support is a post-MVP in-place extension — do not clone the repo. The branch point is `project_type == "microservices"` from Step 0's job JSON, which already flows through the pipeline. Steps 4, 8, and 10 will need a microservices implementation path. To keep this retrofit additive (not a rewrite), ensure the **output schemas** of Steps 4, 8, and 10 remain stable and Playwright-specific logic does not leak into downstream step inputs.
