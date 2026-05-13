@@ -157,9 +157,11 @@ git commit -m "describe what you did"
 git push origin main
 ```
 
-Before pushing, check:
+**Required before every commit (no exceptions):**
 - Did the design, formulas, or output schemas change? → Update `PLAN.md`
-- Is there new context Claude needs next session (new steps built, bugs fixed, path changes)? → Update `CLAUDE.md`
+- Were new steps built, bugs fixed, paths changed, or working instructions revised? → Update `CLAUDE.md`
+
+Both files must be in the same commit as the code — not a follow-up commit. This is how context persists across devices and sessions. The local `~/.claude/projects/*/memory/` directory is machine-local only — do not rely on it for cross-session rules.
 
 ---
 
