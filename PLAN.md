@@ -312,6 +312,8 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (stated)**
 **Tools:** Python, LLM (AsyncAnthropic, prompt caching)
 **Input:** Requirements text provided by user + README (read directly from zip) + any uploaded specification documents
+**Primary gate (UI entry-point rule):** Every extracted requirement must have a dedicated place in the UI — its own page, form, button, or view — that a user can navigate to. If no such place exists (the behavior happens automatically, is a background process, or is a side-effect of another action), it is a Y-axis property belonging in acceptance criteria. Do not extract it. Things that always fail: password hashing, validation rules (duplicate prevention, uniqueness), automatic reordering, UI trigger details for a capability already stated.
+**Secondary filter (when/if signal):** If the item naturally phrases as "System must X when/if condition", it is a reaction — skip it.
 **Rule:** Only extract requirements that are **explicitly stated**. No inference. No invention. Every item must include its source quote. Source quote verification uses whitespace-normalized comparison — the quote must appear verbatim in the source (anti-hallucination), but whitespace differences (newlines → spaces) are tolerated.
 **Decomposition rule:** General/meta requirements decomposed into atomic testable items, each retaining a reference to its parent.
 **Tag:** `stated`
@@ -348,8 +350,11 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (obvious)**
 **Tools:** Python, LLM (AsyncAnthropic)
 **Input:** Step 0 (project_type, framework) + Step 1 (stated requirements list)
+**Primary gate (UI entry-point rule):** Same rule as Step 1 — every generated requirement must be a dedicated UI element a user can navigate to. Behavioral properties (auth guards, session persistence, empty state handling, automatic sorting) are Y-axis ACs even when "obvious" — they do not have their own UI entry point and must not be generated.
+**Angle 1 — Dependency connectors:** What must be true for each stated requirement to be independently testable end-to-end? (e.g. a visible list view is the dependency connector for an "add item" capability.)
+**Angle 2 — App-type affordances (strictly constrained):** Dedicated navigable elements any user of this app type expects — back/home buttons on sub-pages with no navbar, core orientation views, visible entry points between pages. Must be things the user can click or navigate to. Not behavioral properties.
 **Logic:** LLM generates obvious functional requirements that any user of this app type would naturally expect — so fundamental a user would never write them down, yet surprised to find missing.
-**Deduplication:** Step 1 stated requirements passed as context; LLM must not regenerate items already stated.
+**Deduplication:** Step 1 stated requirements passed as context (with functional_area prefix) — LLM must not regenerate items already stated, including paraphrases and form/capability identity duplicates ("display a login form" = the login capability stated from the UI angle; skip it).
 **ISO 25010 rationale:** Completeness covers "all specified tasks and user objectives." Obvious requirements are user objectives implied by the app's purpose even when not explicitly written.
 **Tag:** `obvious` | **Weight:** derives from priority (critical=4.0, high=3.0, medium=2.0, low=1.0) — same as Step 1
 **Output:**

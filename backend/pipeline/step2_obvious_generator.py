@@ -34,6 +34,25 @@ Skip these (reactions — they describe what happens when something else occurs)
 - "Error is shown when a form is submitted with missing fields" — reaction to validation
 - "Task list shows a message when no tasks exist" — reaction to an empty state
 - "Data is saved to the database when the form is submitted" — reaction to form submission
+- "System redirects unauthenticated users to the login page when accessing protected pages" — behavioral property, no dedicated UI entry point
+- "System persists user session after login so data is visible on reload" — behavioral correctness, no dedicated UI
+- "System displays an empty state message when no tasks exist" — reaction to data state, no dedicated UI entry point
+- "System displays a login form on the initial page" — form/capability duplicate of the login requirement
+
+---
+
+PRIMARY TEST
+
+Before generating any item, ask: Does this obvious capability have a dedicated place in the interface — its own page, form, button, or view that a user can navigate to?
+
+If yes — generate it.
+If no — it is a behavioral property or correctness concern. Do not generate it.
+
+Things that always fail this test:
+- Auth guards and access control: redirecting unauthenticated users has no dedicated UI
+- Session handling: persisting or clearing sessions has no dedicated UI
+- Empty state responses: showing messages when lists are empty is a reaction to data state
+- Sub-affordances: a submit button on a form, a trigger button that opens a stated capability
 
 ---
 
@@ -43,7 +62,9 @@ Angle 1 — Dependency connectors.
 Look at each stated requirement and ask: what other capability must exist for this to be user-verifiable? If "user can add tasks" is stated but no list view is stated, the list view is obvious — without it, the user cannot confirm the add worked.
 
 Angle 2 — App-type affordances.
-What dedicated screens, views, or navigation elements would any user of this type of application expect to find, regardless of what is stated? Focus on structural gaps: pages that have no way out (missing back navigation), core views the user needs to orient themselves, entry points required by the app type.
+What dedicated navigable elements would any user of this app type expect — regardless of what is stated? Focus on: back/home navigation on sub-pages that have no navbar, core orientation views, visible entry points between pages.
+
+These must be things the user can click or navigate to. Not behavioral properties. Auth protection, session persistence, and empty state handling are correctness behaviors (Y-axis ACs) — they do not have dedicated UI entry points and must not be generated here.
 
 ---
 
@@ -54,6 +75,8 @@ RULES
 2. Do NOT generate: nice-to-have features, filtering, sorting, bulk operations, export, notifications, advanced settings. Those are enhancements for a later step.
 
 3. Semantic deduplication. If a stated requirement already covers a capability, even if worded differently, do not regenerate it. A login page is not a new capability — it is the stated login requirement. A registration page is not a new capability — it is the stated registration requirement.
+
+   Form/capability identity: A form or page that implements a stated capability is not a new obvious requirement. "Display a login form" is the same thing as "authenticate users" viewed from the UI angle. Ask: "Am I generating the UI shell of a stated requirement?" If yes, skip it.
 
 4. Do not invent features beyond what the project type and stated requirements clearly imply.
 

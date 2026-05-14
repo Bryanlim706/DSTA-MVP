@@ -44,6 +44,21 @@ THE SIGNAL: If you find yourself writing "System must [do X] when [condition]" o
 
 ---
 
+PRIMARY TEST
+
+Before deciding whether to extract an item, ask: Does this have a dedicated place in the interface — its own page, form, button, or view that a user navigates to?
+
+If yes — it may be a capability. Continue to the signal check.
+If no — it is a background behavior or implementation detail. Skip it.
+
+Things that always fail this test:
+- Automatic behaviors: rows sort by status automatically, users are redirected on auth failure
+- Background processes: passwords are hashed before storing, sessions are cleared on logout
+- Validation rules: duplicate entries are blocked, uniqueness is enforced on submission
+- UI trigger details: "the plus button opens the add-row form" — the button is part of the add-row capability, not a capability on its own
+
+---
+
 EXAMPLES
 
 Extract these (capabilities — each is a dedicated, user-facing feature):
@@ -60,6 +75,10 @@ Skip these (reactions — they describe what happens when something else occurs)
 - "Error is shown when username is already taken" — reaction to a validation failure
 - "Page is inaccessible when user is not authenticated" — reaction to auth state
 - "Task list shows a message when no tasks exist" — reaction to an empty state
+- "Passwords are hashed before storing" — background process, no dedicated UI entry point
+- "Duplicate entries are prevented on form submission" — validation rule, no dedicated UI
+- "Tasks with done status sink to the bottom of the table" — automatic reordering, no UI
+- "The plus button opens the add-row form" — sub-affordance of the add-row capability, subsumed
 
 ---
 
