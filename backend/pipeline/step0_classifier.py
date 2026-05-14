@@ -97,6 +97,26 @@ BACKEND_FRAMEWORKS_PY: dict[str, str] = {
 # argparse is stdlib — it never appears in requirements files, so it cannot be detected here.
 CLI_INDICATORS_PY: set[str] = {"click", "typer", "fire"}
 
+_VIEW_DIRS = {"templates", "views"}
+# These extensions can only be processed server-side — unambiguous SSR regardless of directory
+_SSR_SPECIFIC_EXTS = {
+    ".jinja", ".jinja2", ".twig", ".blade.php",
+    ".ejs", ".hbs", ".handlebars", ".njk", ".pug", ".jade",
+}
+
+
+def _has_html_views(file_tree: list[str]) -> bool:
+    """True if the project appears to server-side render HTML pages."""
+    for path in file_tree:
+        if any(path.endswith(ext) for ext in _SSR_SPECIFIC_EXTS):
+            return True
+        if path.endswith(".html"):
+            parts = path.split("/")
+            if any(p in _VIEW_DIRS for p in parts[:-1]):
+                return True
+    return False
+
+
 TEST_STRATEGY_MAP: dict[str, dict] = {
     "full_stack_web_app": {"primary": "Playwright E2E", "secondary": "Pytest API tests"},
     "full_stack_js":      {"primary": "Playwright E2E", "secondary": "Jest/Supertest"},
@@ -471,12 +491,15 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
 
     elif php_fw and not has_java:
         # Laravel/Symfony etc. commonly use npm/Vite for frontend assets — not a monorepo
-        project_type = "full_stack_web_app" if has_package_json else "backend_api_only"
+        has_php_views = has_package_json or _has_html_views(scan.get("file_tree", []))
+        project_type = "full_stack_web_app" if has_php_views else "backend_api_only"
         backend_framework = php_fw
         confidence = "high"
         reasoning = (
             f"Found {php_fw} in composer.json"
-            + (" with package.json for frontend assets." if has_package_json else ".")
+            + (" with package.json for frontend assets." if has_package_json
+               else " with HTML templates — server-side rendered web app." if has_php_views
+               else ".")
         )
 
     elif has_package_json and (has_java or has_php or has_go or has_rust):
@@ -509,10 +532,16 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         reasoning = f"Found {frontend_fw} in package.json with no backend framework detected."
 
     elif has_package_json and backend_fw_js:
-        project_type = "backend_api_only"
-        backend_framework = backend_fw_js
-        confidence = "high"
-        reasoning = f"Found {backend_fw_js} in package.json with no frontend framework."
+        if _has_html_views(scan.get("file_tree", [])):
+            project_type = "full_stack_web_app"
+            backend_framework = backend_fw_js
+            confidence = "high"
+            reasoning = f"Found {backend_fw_js} in package.json with HTML templates — server-side rendered web app."
+        else:
+            project_type = "backend_api_only"
+            backend_framework = backend_fw_js
+            confidence = "high"
+            reasoning = f"Found {backend_fw_js} in package.json with no frontend framework."
 
     elif has_package_json:
         project_type = "library"
@@ -521,10 +550,16 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         reasoning = "Found package.json but no known framework — assumed Node library."
 
     elif has_python and backend_fw_py:
-        project_type = "backend_api_only"
-        backend_framework = backend_fw_py
-        confidence = "high"
-        reasoning = f"Found {backend_fw_py} in Python dependencies."
+        if _has_html_views(scan.get("file_tree", [])):
+            project_type = "full_stack_web_app"
+            backend_framework = backend_fw_py
+            confidence = "high"
+            reasoning = f"Found {backend_fw_py} in Python dependencies with HTML templates — server-side rendered web app."
+        else:
+            project_type = "backend_api_only"
+            backend_framework = backend_fw_py
+            confidence = "high"
+            reasoning = f"Found {backend_fw_py} in Python dependencies."
 
     elif has_python and is_cli:
         project_type = "cli_tool"

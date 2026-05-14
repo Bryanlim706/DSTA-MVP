@@ -180,6 +180,10 @@ FCom is sensitive to dependency chains. If a root feature is absent from L3, all
 ```
 Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing. To add more frontend and backend frameworks in the future if needed.
 
+**SSR detection:** Backends (Flask, Django, Express, Laravel, etc.) without a detected JS frontend framework are classified as `full_stack_web_app` if a `templates/` or `views/` directory with `.html` files exists, or if engine-specific template files (`.ejs`, `.twig`, `.blade.php`, `.pug`, `.hbs`, `.njk`, `.jinja2`) are found. Without this check they would be misclassified as `backend_api_only`, causing Step 2 to generate REST API-style obvious requirements for SSR apps.
+
+**Known limitation:** Next.js, SvelteKit, Nuxt standalone (no separate backend service) are classified as `frontend_only`. Test strategy (Playwright E2E) is correct; Step 2 obvious requirements may miss API-route-specific concerns. To be revisited when Step 4 repo parsing is available.
+
 ---
 
 ### Step 1: Stated Requirement Extractor

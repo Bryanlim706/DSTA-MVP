@@ -20,6 +20,7 @@ See `PLAN.md` for the full pipeline design, 4-layer model, and scoring formulas.
 - Rule-based first (config files + extension counts); LLM (claude-haiku, prompt caching) called only when confidence is medium or rules produce no match
 - `test_strategy` always formula-derived from `project_type` + `backend_framework` — LLM never overrides it
 - Root-level Python check: Python configs only found in sub-service directories (depth 2+) are ignored for framework detection — triggers LLM fallback to handle multi-service apps correctly
+- SSR detection: Flask/Django/Express/PHP backends with a `templates/` or `views/` directory are classified as `full_stack_web_app` (not `backend_api_only`). Engine-specific template extensions (`.ejs`, `.twig`, `.blade.php`, `.pug`, `.hbs`, `.njk`, `.jinja2`) are treated as unambiguous SSR signals regardless of directory.
 
 **Step 0 output fields** (stored in `step_results.step_0`):
 ```
@@ -144,6 +145,7 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **Python 3.12 required** — Python 3.14 (pre-release) causes pydantic-core Rust compilation failure on install
 - **Formula-driven scores** — LLM never overrides the formula
 - **Root-level Python check** — `root_level_py` in Step 0 prevents sub-service requirements.txt (depth 2+) from falsely determining backend_framework
+- **SSR detection (`_has_html_views`)** — Step 0 checks for `templates/`/`views/` HTML files and engine-specific extensions (`.ejs`, `.twig`, `.blade.php`, etc.) to distinguish Flask/Django/Express SSR apps from pure REST APIs. Without this, all Python/JS/PHP backends without a JS frontend framework were misclassified as `backend_api_only`, producing wrong Step 2 obvious requirements.
 - **Step 1 truncation recovery** — `_parse_llm_response` recovers requirements from truncated JSON responses rather than failing with 0 results
 
 ---
