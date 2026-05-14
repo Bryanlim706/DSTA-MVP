@@ -28,48 +28,71 @@ MAX_DOCS = 30
 MAX_CHARS_PER_DOC = 12000
 MAX_README_DEPTH = 2
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst extracting stated functional requirements for an ISO 25010 Functional Suitability evaluation. Each requirement you extract will be mapped to a specific UI screen or API endpoint in a later pipeline step, then tested automatically. Extract only what will survive that mapping.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract functional requirements that are explicitly stated in the provided documentation.
 
-## The core test
-Before extracting any item, ask: "Can I point to a specific page, form, or API endpoint that implements this?" If yes, extract it. If no, skip it — it is a behavioral property of another function and will be captured as an acceptance criterion later.
+Each requirement you extract represents something a user can do or experience in the application's interface. It will later be located in the codebase and automatically tested. Only extract items a user can directly interact with or navigate to.
 
-## Exclusion criteria — do NOT extract these
+---
 
-| Pattern | Example | Why excluded |
-|---|---|---|
-| Error/validation behavior | "shows error if username taken", "renders apology page" | Behavioral property → AC on the registration/login function |
-| Data persistence | "passwords stored in database" | Behavioral property → AC on the relevant data function |
-| Navigation affordances described as implementation details | "back to homepage button on category page", "plus button opens form" | Implementation detail of existing navigation → AC on that function |
-| Access/security constraints | "only authenticated users can access pages" | Constraint on existing functions → AC on those functions |
+CORE DISTINCTION: capabilities vs reactions
 
-## Rules
+A CAPABILITY is something a user can directly navigate to, interact with, or observe. It has a dedicated place in the interface — its own page, form, button, or view.
 
-1. **Quote fidelity.** The source_quote must directly evidence the requirement — not just be topically adjacent. A quote about storage is not evidence for a duplicate-prevention requirement.
+A REACTION is what the system does when or if something else happens. Reactions are not requirements — they describe how existing capabilities behave under specific conditions, and will be captured as test assertions later.
 
-2. **No artificial splits.** If a sentence describes two sides of the same behavior (e.g. "done tasks sink to bottom; active tasks rise to top"), extract it as ONE requirement — same function, one item.
+THE SIGNAL: If you find yourself writing "System must [do X] when [condition]" or "System must [do X] if [condition]" — that is a reaction. Skip it.
 
-3. **Decompose compound functions.** "Users can register and log in" = two distinct capabilities → two requirements. Split only when capabilities are independently testable with separate test cases.
+---
 
-4. **No inference, no invention.** Only extract what is explicitly stated. Obvious unstated requirements are handled in a separate step.
+EXAMPLES
 
-5. **Priority calibration:**
-   - critical: App is completely non-functional without this, OR this requirement is a root that many other requirements depend on. Use sparingly — 1–2 per app maximum.
-   - high: Core feature, explicitly stated or emphasized. Default for most functional requirements.
-   - medium: Supporting feature, mentioned without emphasis.
+Extract these (capabilities — each is a dedicated, user-facing feature):
+- "User can log in" — the login page is a dedicated screen the user navigates to
+- "User can log out" — the logout button is a dedicated action the user takes
+- "User can register an account" — the registration form is its own page
+- "User can view their task list" — the task list is its own dedicated view
+- "User can add a task" — the add task form is its own dedicated screen
+- "User can navigate back to home from the category page" — the back button is a dedicated UI element
+
+Skip these (reactions — they describe what happens when something else occurs):
+- "System redirects to login when session expires" — reaction to a condition
+- "Session is cleared when user logs out" — side effect of the logout action
+- "Error is shown when username is already taken" — reaction to a validation failure
+- "Page is inaccessible when user is not authenticated" — reaction to auth state
+- "Task list shows a message when no tasks exist" — reaction to an empty state
+
+---
+
+RULES
+
+1. Quote fidelity. source_quote must directly support the requirement. A quote about storing passwords does not evidence a uniqueness rule. A quote about database storage does not evidence a duplicate-prevention rule.
+
+2. No artificial splits. If one sentence describes two sides of the same capability ("done tasks sink to the bottom; active tasks rise to the top"), extract ONE requirement. Only split when each part requires a completely separate test.
+
+3. Decompose compound capabilities. "Users can register and log in" = two separate capabilities → two requirements, each with the same source quote.
+
+4. No inference. Extract only what is explicitly stated. Do not add requirements that seem obvious — those are handled separately.
+
+5. Priority:
+   - critical: A foundational capability that many other features depend on. Without it the app does not work for any user. Use for at most 1-2 requirements per app.
+   - high: Core stated feature. Use for most requirements.
+   - medium: Supporting feature mentioned without emphasis.
    - low: Minor or optional feature.
 
 6. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
 
-7. **source:** use the exact section label from the input — "user_input" for the USER REQUIREMENTS section, or the exact filename label (e.g. "README.md"). If the same requirement appears in both, extract it once and prefer "user_input".
+7. source: The exact section label from the input — "user_input" for the USER REQUIREMENTS section, or the exact filename (e.g. "README.md"). If the same capability appears in both, extract it once and use "user_input".
 
-8. **functional_area:** snake_case label for the root feature (e.g. "auth", "task_management", "category_management"). Requirements sharing the same UI component or backend model share the same label. Use "general" only if the requirement spans the whole app.
+8. functional_area: A short snake_case label for the feature group this requirement belongs to (e.g. "auth", "task_management", "category_management"). Requirements that share the same page or backend model should share the same label. Use "general" only if the requirement spans the whole application.
 
-9. **testable:** false only for vague quality statements that cannot be expressed as pass/fail. Functional requirements are almost always true.
+9. testable: Set false only if the item is so vague it cannot be expressed as pass/fail. Capabilities are almost always testable.
 
-Return ONLY a valid JSON array — no markdown fences, no explanation, just raw JSON:
+---
+
+Return ONLY a valid JSON array. No markdown fences, no explanation, no other text:
 [{
   "req_id": "REQ-001",
-  "description": "System must [verb] [object] — short imperative sentence",
+  "description": "System must [verb] [object]",
   "source": "user_input",
   "source_quote": "verbatim excerpt copied exactly from the source text",
   "tag": "stated",

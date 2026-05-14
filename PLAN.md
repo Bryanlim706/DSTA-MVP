@@ -205,6 +205,25 @@ A Y=0 at a root position (stated, left of X) cascades to Y≈0 for all dependent
 | Step 8 AC generation | ACs for dependent requirements should assert prerequisite is satisfied before testing the dependent |
 | Test execution order (Step 11) | Test root requirements first; if root fails, mark dependents as cascade-blocked, not independent failures |
 
+### Validity gate — requirements must be independently invokable capabilities
+
+For a requirement to be valid at any X-axis position (stated, obvious, or implied), it must describe a capability a user can directly navigate to, interact with, or observe. It must have a dedicated home in the interface — its own page, form, button, or view.
+
+**Behavioral reactions do not qualify.** A reaction describes what the system does when or if something else happens. Reactions have no dedicated home of their own — they are properties of existing capabilities. They belong as acceptance criteria at Step 8.
+
+The linguistic signal for LLMs: "System must [do X] when/if [condition]" = reaction = AC. If the item cannot be phrased without a conditional, it is not a standalone capability.
+
+| Capability (valid requirement) | Reaction (AC — not a requirement) |
+|---|---|
+| User can log out | Session is cleared when user logs out |
+| User can view their task list | Task list shows a message when no tasks exist |
+| User can navigate back to home | Page is inaccessible when user is not authenticated |
+| User can add a task | Data is saved to database when form is submitted |
+
+This gate applies equally to L1a and L1b. An implied enhancement that is only a behavioral constraint on an existing capability — not a new independently-navigable function — is an AC regardless of how useful it feels.
+
+**Note on E()=0.5 (implemented, not UI-accessible):** A requirement that maps only to a backend component with no UI exposure is still valid for backend_api_only projects. For full-stack apps it represents a completeness gap — the function exists but users cannot reach it — which FCom advisory flags. The current prompt focus is full-stack web applications; backend_api_only project type is out of scope for the MVP prompt design.
+
 ### E()=0.4 known gap
 
 E()=0.4 (UI visible, no backend) sits lower than E()=0.5 (backend present, no UI) because FCor requires backend. But 0.4 is *worse* for users — they see a form that does nothing, setting expectations that are immediately broken. These requirements are excluded from FCor. Step 14 (Workflow Friction Analyser) catches this experientially. Not numerically scored in FCor — a known model limitation.

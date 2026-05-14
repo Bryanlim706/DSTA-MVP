@@ -58,12 +58,13 @@ runtime  (only for electron_app)
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
 - `functional_area` field on each requirement for cascade advisory grouping
 - **Prompt design (2D model):** Extracts X-axis roots — functions that map to a distinct UI screen or API endpoint. Behavioral properties (error handling, persistence, navigation affordances described as implementation details) are excluded — they belong on the Y axis as ACs. Quote must directly evidence the requirement (not topically adjacent). Two sides of the same behavior = one requirement, not two. `critical` flags root requirements with many dependents, not just urgency-signaled items.
+- **Capability vs reaction rule:** A requirement must be a capability the user can directly navigate to or interact with — its own page, form, button, or view. A reaction ("System must X when/if Y") is an AC, not a requirement. The "when/if" signal is the primary LLM-facing heuristic. See PLAN.md "Validity gate" section.
 
 ### Step 2 — Obvious Requirement Generator (COMPLETE)
 - LLM generates requirements so fundamental users expect them but never write them down
 - Deduplicates against Step 1 stated requirements (semantic, not just string-match)
 - `functional_area` field on each requirement (same grouping scheme as Step 1); passed with descriptions in user message for better semantic dedup
-- **Prompt design (2D model):** Generates from two angles: (1) *dependency connectors* — what stated requirements depend on to be independently testable; (2) *app-type usability* — navigation, affordances, and empty-state functions any user of this app type expects regardless of what is stated (e.g. back navigation from sub-pages with no navbar). Both angles produce functions that map to a distinct UI element or API endpoint — behavioral properties remain in the AC layer.
+- **Prompt design (2D model):** Generates from two angles: (1) *dependency connectors* — what stated requirements depend on to be independently testable; (2) *app-type affordances* — dedicated screens, views, and navigation elements any user of this app type expects regardless of what is stated (e.g. back navigation from dead-end sub-pages). Both angles produce capabilities that map to a distinct UI element — behavioral reactions remain in the AC layer. Current prompt focus: full-stack web applications.
 
 ### Frontend (COMPLETE)
 - React + TypeScript + Vite + Tailwind CSS
