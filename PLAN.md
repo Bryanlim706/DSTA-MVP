@@ -184,6 +184,8 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 
 **Java full-stack:** `frontend_fw` (React/Angular/Vue) + `java_fw` (Spring Boot/Quarkus/Micronaut, detected from `pom.xml`/`build.gradle`) → `full_stack_web_app` at `high` confidence. This rule fires before the generic `monorepo` check so Spring Boot + React is always deterministic (no LLM needed).
 
+**Test strategy design:** For `backend_api_only`, `primary` is always the HTTP-level integration test tool for that framework — Pytest API tests (httpx/test client) for Python, Jest/Supertest for Node.js, JUnit/MockMvc for Spring Boot, PHPUnit for PHP, RSpec for Rails. Unit tests (`Pytest`, plain `Jest`) are NOT the primary because they do not verify HTTP-level requirements. For `full_stack_web_app` and `full_stack_js`, `primary` is Playwright E2E and `secondary` is the backend API test tool (used for L3-only requirements not accessible via the UI).
+
 **Known limitation:** Next.js, SvelteKit, Nuxt standalone (no separate backend service) are classified as `frontend_only`. Test strategy (Playwright E2E) is correct; Step 2 obvious requirements may miss API-route-specific concerns. To be revisited when Step 4 repo parsing is available.
 
 ---
