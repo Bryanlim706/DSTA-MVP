@@ -49,7 +49,7 @@ PRIMARY TEST
 Before deciding whether to extract an item, ask: Does this have a dedicated place in the interface — its own page, form, button, or view that a user navigates to?
 
 If yes — it may be a capability. Continue to the signal check.
-If no — it is a background behavior or implementation detail. Skip it.
+If no — skip it. This applies even when the behavior is explicitly documented. Technical behaviors stated in a README (password hashing, duplicate prevention, automatic sorting) are Y-axis correctness properties — they fail the UI gate regardless of how clearly they appear in the source.
 
 Things that always fail this test:
 - Automatic behaviors: rows sort by status automatically, users are redirected on auth failure
@@ -90,7 +90,7 @@ RULES
 
 3. Decompose compound capabilities. "Users can register and log in" = two separate capabilities → two requirements, each with the same source quote.
 
-4. No inference. Extract only what is explicitly stated. Do not add requirements that seem obvious — those are handled separately.
+4. No inference. Extract only what is explicitly stated AS A USER-FACING CAPABILITY — something with a dedicated page, form, button, or view. Not every sentence in the documentation is a requirement. Explicitly documented technical behaviors (password hashing, duplicate prevention, automatic sorting) are Y-axis properties — do not extract them.
 
 5. Priority:
    - critical: A foundational capability that many other features depend on. Without it the app does not work for any user. Use for at most 1-2 requirements per app.

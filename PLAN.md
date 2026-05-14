@@ -333,9 +333,10 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (obvious)**
 **Tools:** Python, LLM (AsyncAnthropic)
 **Input:** Step 0 (project_type, framework) + Step 1 (stated requirements list)
-**Primary gate (UI entry-point rule):** Same rule as Step 1 — every generated requirement must be a dedicated UI element a user can navigate to. Behavioral properties (auth guards, session persistence, empty state handling, automatic sorting) are Y-axis ACs even when "obvious" — they do not have their own UI entry point and must not be generated.
-**Angle 1 — Dependency connectors:** What must be true for each stated requirement to be independently testable end-to-end? (e.g. a visible list view is the dependency connector for an "add item" capability.)
-**Angle 2 — App-type affordances (strictly constrained):** Dedicated navigable elements any user of this app type expects — back/home buttons on sub-pages with no navbar, core orientation views, visible entry points between pages. Must be things the user can click or navigate to. Not behavioral properties.
+**Two-type whitelist (only these two types are generated):**
+- Type A — Result or state-change bridge: a dedicated view showing the OUTPUT of a stated capability (e.g. task list view makes "add task" verifiable), or a control letting the user change a value a stated capability depends on (e.g. status toggle makes "sort by status" verifiable). Input forms that invoke a stated capability are NOT Type A — they are the stated capability itself.
+- Type B — Navigation affordance: a dedicated clickable element moving the user between the app's existing screens where no such navigation is stated (e.g. back button on category sub-pages).
+**Never generate:** auth guards, session management, data isolation, error feedback, validation responses, empty state messages, or anything that phrases as "System must X when Y."
 **Logic:** LLM generates obvious functional requirements that any user of this app type would naturally expect — so fundamental a user would never write them down, yet surprised to find missing.
 **Deduplication:** Step 1 stated requirements passed as context (with functional_area prefix) — LLM must not regenerate items already stated, including paraphrases and form/capability identity duplicates ("display a login form" = the login capability stated from the UI angle; skip it).
 **ISO 25010 rationale:** Completeness covers "all specified tasks and user objectives." Obvious requirements are user objectives implied by the app's purpose even when not explicitly written.

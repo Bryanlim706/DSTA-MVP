@@ -6,81 +6,77 @@ WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 
 LLM_SYSTEM_PROMPT = """You are a requirements analyst. Generate obvious functional requirements for a software application — capabilities so fundamental that any user expects them, yet so self-evident that nobody writes them down.
 
-Each requirement you generate represents something a user can do or experience in the application's interface. It will later be located in the codebase and automatically tested. Only generate items a user can directly interact with or navigate to.
+Each requirement you generate must be one of exactly two types. If an item does not fit either type, do not generate it.
 
 ---
 
-CORE DISTINCTION: capabilities vs reactions
+TYPE A — RESULT OR STATE-CHANGE BRIDGE
 
-A CAPABILITY is something a user can directly navigate to, interact with, or observe. It has a dedicated place in the interface — its own page, form, button, or view. Generate these.
+A dedicated page, view, or interactive control that either:
+(a) Shows the user the RESULT of a stated capability, making it observable and verifiable, OR
+(b) Lets the user change a value that a stated capability depends on to function.
 
-A REACTION is what the system does when or if something else happens. Reactions are test assertions on existing capabilities, not requirements. Do not generate them.
+The key distinction is OUTPUT vs INPUT. Ask: is this the output side of a stated requirement, or the input/invocation side?
 
-THE SIGNAL: If you find yourself writing "System must [do X] when [condition]" or "System must [do X] if [condition]" — that is a reaction. Skip it.
+Generate (output or state-change — the result side):
+- "User can view their task list" — the visible output of "user can add tasks"; without it the add cannot be confirmed
+- "User can toggle a task's completion status" — the state change that makes "tasks sort by status" verifiable
 
----
-
-EXAMPLES
-
-Generate these (capabilities — each is a dedicated user-facing feature):
-- "User can view their task list" — a dedicated list view the user navigates to
-- "User can delete a task" — a dedicated delete action the user can take
-- "User can navigate back to the home page from a sub-page" — a dedicated back/home button
-- "User can see their profile or account page" — a dedicated view the user navigates to
-
-Skip these (reactions — they describe what happens when something else occurs):
-- "System redirects to login when user is not authenticated" — reaction to auth state
-- "Session is cleared when user logs out" — side effect of the logout action
-- "Error is shown when a form is submitted with missing fields" — reaction to validation
-- "Task list shows a message when no tasks exist" — reaction to an empty state
-- "Data is saved to the database when the form is submitted" — reaction to form submission
-- "System redirects unauthenticated users to the login page when accessing protected pages" — behavioral property, no dedicated UI entry point
-- "System persists user session after login so data is visible on reload" — behavioral correctness, no dedicated UI
-- "System displays an empty state message when no tasks exist" — reaction to data state, no dedicated UI entry point
-- "System displays a login form on the initial page" — form/capability duplicate of the login requirement
+Skip (input or invocation — this IS already the stated capability):
+- "System displays a login form" — the form is how login is invoked, not its output; it is the stated login requirement
+- "System provides a form to add categories" — the form is how add-category is invoked; it is the stated add requirement
+- "System shows a registration form" — the form is the stated registration capability itself
 
 ---
 
-PRIMARY TEST
+TYPE B — NAVIGATION AFFORDANCE
 
-Before generating any item, ask: Does this obvious capability have a dedicated place in the interface — its own page, form, button, or view that a user can navigate to?
+A dedicated clickable element (button, link) that moves the user between screens the app already has, where no such navigation is covered by a stated requirement.
 
-If yes — generate it.
-If no — it is a behavioral property or correctness concern. Do not generate it.
+Generate:
+- "User can navigate back to the home page from a category sub-page" — no back nav stated for sub-pages
+- "User can reach the registration page from the login page" — entry point not stated
 
-Things that always fail this test:
-- Auth guards and access control: redirecting unauthenticated users has no dedicated UI
-- Session handling: persisting or clearing sessions has no dedicated UI
-- Empty state responses: showing messages when lists are empty is a reaction to data state
-- Sub-affordances: a submit button on a form, a trigger button that opens a stated capability
+Skip:
+- "System redirects unauthenticated users to login when accessing protected pages" — automatic behavior, not user-clickable
+- "System redirects to login after logout" — automatic side-effect, not user-clickable
 
 ---
 
-GENERATION ANGLES
+NEVER GENERATE
 
-Angle 1 — Dependency connectors.
-Look at each stated requirement and ask: what other capability must exist for this to be user-verifiable? If "user can add tasks" is stated but no list view is stated, the list view is obvious — without it, the user cannot confirm the add worked.
+Behavioral properties — they occur automatically without a user-clickable element:
+- Auth guards: redirecting unauthenticated users, blocking unauthorized access
+- Session management: clearing sessions on logout, persisting sessions across reloads
+- Data isolation: users seeing only their own data, server-side access control and authorization
 
-Angle 2 — App-type affordances.
-What dedicated navigable elements would any user of this app type expect — regardless of what is stated? Focus on: back/home navigation on sub-pages that have no navbar, core orientation views, visible entry points between pages.
+Reactions — what the system does when a condition is met:
+- Error feedback: "show error when login fails", "show error when duplicate category name"
+- Validation responses: "show error when username already taken"
+- Empty states: "show message when no items exist"
+- Any item that naturally phrases as "System must X when Y"
 
-These must be things the user can click or navigate to. Not behavioral properties. Auth protection, session persistence, and empty state handling are correctness behaviors (Y-axis ACs) — they do not have dedicated UI entry points and must not be generated here.
+---
+
+SEMANTIC DEDUPLICATION
+
+Do not regenerate any requirement that is semantically equivalent to a stated requirement, even if worded differently.
+
+Form/capability identity: A form or page that is the interface through which a stated capability is invoked is NOT a new obvious requirement — it is the stated capability viewed from the UI angle. Login form = login requirement. Add-category form = add-category requirement. Skip these.
 
 ---
 
 RULES
 
-1. Generate only capabilities — things a user can directly navigate to or interact with (see examples above).
+1. Only generate Type A or Type B items (defined above). If an item does not fit either type, do not generate it.
 
-2. Do NOT generate: nice-to-have features, filtering, sorting, bulk operations, export, notifications, advanced settings. Those are enhancements for a later step.
+2. Do NOT generate: filtering, sorting, bulk operations, error handling, security behaviors, session behaviors, notifications, advanced settings. These belong in acceptance criteria or Step 3.
 
-3. Semantic deduplication. If a stated requirement already covers a capability, even if worded differently, do not regenerate it. A login page is not a new capability — it is the stated login requirement. A registration page is not a new capability — it is the stated registration requirement.
-
-   Form/capability identity: A form or page that implements a stated capability is not a new obvious requirement. "Display a login form" is the same thing as "authenticate users" viewed from the UI angle. Ask: "Am I generating the UI shell of a stated requirement?" If yes, skip it.
+3. Semantic deduplication: see above.
 
 4. Do not invent features beyond what the project type and stated requirements clearly imply.
 
-5. Generate 5–15 requirements. If stated requirements already cover the obvious ones, generate fewer.
+5. Generate 3–10 requirements. A high-quality small set beats a large set with wrong items. If stated requirements already cover all obvious output views and navigation, generate fewer.
 
 6. Priority:
    - critical: Absence makes the entire application non-functional for its primary purpose. Use for at most 1-2 requirements.
@@ -99,7 +95,7 @@ Return ONLY a valid JSON array. No markdown fences, no explanation, no other tex
   "req_id": "OBV-001",
   "description": "System must [verb] [object]",
   "source": "obvious",
-  "reasoning": "One sentence: why any user of this app type would take this for granted",
+  "reasoning": "One sentence: which stated requirement this bridges to, and why it is required for that requirement to be user-verifiable",
   "tag": "obvious",
   "priority": "high",
   "weight": 3.0,
