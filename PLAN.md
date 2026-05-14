@@ -182,6 +182,8 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 
 **SSR detection:** Backends (Flask, Django, Express, Laravel, etc.) without a detected JS frontend framework are classified as `full_stack_web_app` if a `templates/` or `views/` directory with `.html` files exists, or if engine-specific template files (`.ejs`, `.twig`, `.blade.php`, `.pug`, `.hbs`, `.njk`, `.jinja2`) are found. Without this check they would be misclassified as `backend_api_only`, causing Step 2 to generate REST API-style obvious requirements for SSR apps.
 
+**Java full-stack:** `frontend_fw` (React/Angular/Vue) + `java_fw` (Spring Boot/Quarkus/Micronaut, detected from `pom.xml`/`build.gradle`) → `full_stack_web_app` at `high` confidence. This rule fires before the generic `monorepo` check so Spring Boot + React is always deterministic (no LLM needed).
+
 **Known limitation:** Next.js, SvelteKit, Nuxt standalone (no separate backend service) are classified as `frontend_only`. Test strategy (Playwright E2E) is correct; Step 2 obvious requirements may miss API-route-specific concerns. To be revisited when Step 4 repo parsing is available.
 
 ---

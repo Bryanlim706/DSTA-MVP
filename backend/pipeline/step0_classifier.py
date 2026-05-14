@@ -502,6 +502,13 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
                else ".")
         )
 
+    elif has_package_json and frontend_fw and java_fw:
+        # Recognised frontend framework + recognised Java backend = full-stack app, not a monorepo
+        project_type = "full_stack_web_app"
+        backend_framework = java_fw
+        confidence = "high"
+        reasoning = f"Found {frontend_fw} in package.json and {java_fw} in Java build files."
+
     elif has_package_json and (has_java or has_php or has_go or has_rust):
         # JS coexisting with a non-JS backend language signals a monorepo (e.g. server + mobile app)
         project_type = "monorepo"
