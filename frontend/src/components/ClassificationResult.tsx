@@ -12,18 +12,33 @@ const CONFIDENCE_STYLES = {
 
 const PROJECT_TYPE_LABELS: Record<string, string> = {
   full_stack_web_app: 'Full-stack web app',
+  full_stack_js: 'Full-stack JS',
   frontend_only: 'Frontend only',
   backend_api_only: 'Backend / API only',
   cli_tool: 'CLI tool',
   library: 'Library',
   static_site: 'Static site',
   monorepo: 'Monorepo',
+  electron_app: 'Desktop (Electron)',
+  mobile_app: 'Mobile app',
   unknown: 'Unknown',
 }
 
-function Pill({ label }: { label: string }) {
+const SERVICE_LAYOUT_LABELS: Record<string, string> = {
+  single_project: 'Single project',
+  single_project_ssr: 'SSR',
+  separate_frontend_backend: 'Separate frontend + backend',
+  monorepo: 'Monorepo',
+  unknown: '',
+}
+
+function Pill({ label, muted }: { label: string; muted?: boolean }) {
   return (
-    <span className="inline-block bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-1 rounded-full">
+    <span
+      className={`inline-block text-xs font-medium px-2.5 py-1 rounded-full ${
+        muted ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-800'
+      }`}
+    >
       {label}
     </span>
   )
@@ -31,6 +46,13 @@ function Pill({ label }: { label: string }) {
 
 export default function ClassificationResult({ result }: Props) {
   const typeLabel = PROJECT_TYPE_LABELS[result.project_type] ?? result.project_type
+  const layoutLabel = SERVICE_LAYOUT_LABELS[result.service_layout] ?? result.service_layout
+
+  const frontendLabel = result.frontend_framework
+    ? result.frontend_tooling
+      ? `${result.frontend_framework} · ${result.frontend_tooling}`
+      : result.frontend_framework
+    : null
 
   return (
     <div className="space-y-4">
@@ -39,6 +61,9 @@ export default function ClassificationResult({ result }: Props) {
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">{typeLabel}</h2>
+            {layoutLabel && (
+              <span className="text-xs text-gray-500 mt-0.5 block">{layoutLabel}</span>
+            )}
           </div>
           <span
             className={`text-xs font-medium px-2.5 py-1 rounded-full capitalize ${CONFIDENCE_STYLES[result.confidence]}`}
@@ -48,8 +73,13 @@ export default function ClassificationResult({ result }: Props) {
         </div>
 
         <div className="flex flex-wrap gap-2 mb-4">
-          {result.frontend_framework && <Pill label={result.frontend_framework} />}
+          {frontendLabel && <Pill label={frontendLabel} />}
           {result.backend_framework && <Pill label={result.backend_framework} />}
+          {result.template_engine && <Pill label={`${result.template_engine} templates`} muted />}
+          {result.runtime && <Pill label={result.runtime} muted />}
+          {result.server_routes_detected && (
+            <Pill label="Server routes detected" muted />
+          )}
         </div>
 
         <p className="text-sm text-gray-600 leading-relaxed">{result.reasoning}</p>

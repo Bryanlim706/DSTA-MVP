@@ -169,24 +169,41 @@ FCom is sensitive to dependency chains. If a root feature is absent from L3, all
 {
   "project_type": "full_stack_web_app",
   "frontend_framework": "React",
-  "backend_framework": "FastAPI",
+  "frontend_tooling": "Vite",
+  "backend_framework": "Spring Boot",
+  "template_engine": null,
+  "service_layout": "separate_frontend_backend",
+  "server_routes_detected": false,
   "confidence": "high",
   "reasoning": "...",
-  "test_strategy": { "primary": "Playwright E2E", "secondary": "Pytest API tests" },
-  "config_files_found": ["package.json", "requirements.txt"],
+  "test_strategy": { "primary": "Playwright E2E", "secondary": "JUnit/MockMvc" },
+  "config_files_found": ["frontend/package.json", "backend/pom.xml"],
   "llm_used": false,
   "llm_model": null
 }
 ```
-Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing. To add more frontend and backend frameworks in the future if needed.
+Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing.
+
+**New fields (20-case audit):**
+- `frontend_tooling` — build tool: `"Vite"`, `"Create React App"`, `"Webpack"`, `"Parcel"`, or `null`
+- `template_engine` — SSR engine: `"Thymeleaf"`, `"Jinja2"`, `"Blade"`, `"EJS"`, `"Handlebars"`, etc., or `null`
+- `service_layout` — `"single_project"` | `"separate_frontend_backend"` | `"monorepo"` | `"single_project_ssr"` | `"unknown"`
+- `server_routes_detected` — `true` when Next.js `pages/api/` or `app/api/`, Nuxt `server/api/`, or SvelteKit `+server.*` files are present
+- `runtime` — only for `electron_app`: `"Electron"`
 
 **SSR detection:** Backends (Flask, Django, Express, Laravel, etc.) without a detected JS frontend framework are classified as `full_stack_web_app` if a `templates/` or `views/` directory with `.html` files exists, or if engine-specific template files (`.ejs`, `.twig`, `.blade.php`, `.pug`, `.hbs`, `.njk`, `.jinja2`) are found. Without this check they would be misclassified as `backend_api_only`, causing Step 2 to generate REST API-style obvious requirements for SSR apps.
 
-**Java full-stack:** `frontend_fw` (React/Angular/Vue) + `java_fw` (Spring Boot/Quarkus/Micronaut, detected from `pom.xml`/`build.gradle`) → `full_stack_web_app` at `high` confidence. This rule fires before the generic `monorepo` check so Spring Boot + React is always deterministic (no LLM needed).
+**Java full-stack (JS + Java):** `frontend_fw` (React/Angular/Vue) + `java_fw` (Spring Boot/Quarkus/Micronaut, detected from `pom.xml`/`build.gradle`/`build.gradle.kts`) → `full_stack_web_app` at `high` confidence. This rule fires before the generic `monorepo` check so Spring Boot + React is always deterministic (no LLM needed).
+
+**Java full-stack (SSR):** `java_fw` + `_has_html_views()` → `full_stack_web_app` at `high` confidence. Bypasses the `return None` early guard so Spring Boot + Thymeleaf is deterministic without LLM. `build.gradle.kts` added to CONFIG_FILES.
+
+**Mobile detection:** React Native and Expo are classified as `mobile_app` (not `frontend_only`). Test strategy: Jest.
+
+**Production deps:** `backend_fw_js` detection uses `dependencies` only (not `devDependencies`). Express/NestJS in devDeps (mock servers, test utils) no longer cause misclassification.
 
 **Test strategy design:** For `backend_api_only`, `primary` is always the HTTP-level integration test tool for that framework — Pytest API tests (httpx/test client) for Python, Jest/Supertest for Node.js, JUnit/MockMvc for Spring Boot, PHPUnit for PHP, RSpec for Rails. Unit tests (`Pytest`, plain `Jest`) are NOT the primary because they do not verify HTTP-level requirements. For `full_stack_web_app` and `full_stack_js`, `primary` is Playwright E2E and `secondary` is the backend API test tool (used for L3-only requirements not accessible via the UI).
 
-**Known limitation:** Next.js, SvelteKit, Nuxt standalone (no separate backend service) are classified as `frontend_only`. Test strategy (Playwright E2E) is correct; Step 2 obvious requirements may miss API-route-specific concerns. To be revisited when Step 4 repo parsing is available.
+**Known limitation:** Next.js, SvelteKit, Nuxt standalone (no separate backend service) are classified as `frontend_only`. Test strategy (Playwright E2E) is correct; `server_routes_detected` flag surfaces API routes. Full re-classification to `full_stack_web_app` deferred to after Step 4 repo parsing.
 
 ---
 

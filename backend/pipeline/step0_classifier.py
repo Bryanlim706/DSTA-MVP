@@ -21,11 +21,12 @@ IGNORE_DIRS = {
     "node_modules", ".git", "dist", "build", ".next", "venv", ".venv",
     "__pycache__", "coverage", ".cache", ".turbo", "out", ".nuxt",
     ".output", "target", "vendor", "bin", "obj", ".svelte-kit",
+    "examples", "demo", "demos", "sample", "samples",
 }
 
 CONFIG_FILES = {
     "package.json", "requirements.txt", "pyproject.toml", "setup.py", "Cargo.toml",
-    "go.mod", "pom.xml", "build.gradle", "composer.json", "angular.json",
+    "go.mod", "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "angular.json",
     "next.config.js", "next.config.ts", "next.config.mjs",
     "vite.config.js", "vite.config.ts", "vite.config.mjs",
     "nuxt.config.js", "nuxt.config.ts",
@@ -115,6 +116,79 @@ def _has_html_views(file_tree: list[str]) -> bool:
             if any(p in _VIEW_DIRS for p in parts[:-1]):
                 return True
     return False
+
+
+# --- Tooling, template engine, layout, and server-route helpers ---
+
+def _detect_frontend_tooling(js_deps: dict[str, str], file_tree: list[str]) -> str | None:
+    if "vite" in js_deps or any("vite.config" in p for p in file_tree):
+        return "Vite"
+    if "react-scripts" in js_deps:
+        return "Create React App"
+    if "@vue/cli-service" in js_deps:
+        return "Vue CLI"
+    if "@angular/cli" in js_deps:
+        return "Angular CLI"
+    if "webpack" in js_deps:
+        return "Webpack"
+    if "parcel" in js_deps:
+        return "Parcel"
+    return None
+
+
+_TEMPLATE_ENGINE_EXTS: dict[str, str] = {
+    ".jinja": "Jinja2", ".jinja2": "Jinja2",
+    ".twig": "Twig",
+    ".blade.php": "Blade",
+    ".ejs": "EJS",
+    ".hbs": "Handlebars", ".handlebars": "Handlebars",
+    ".njk": "Nunjucks",
+    ".pug": "Pug", ".jade": "Pug",
+    ".erb": "ERB",
+    ".cshtml": "Razor", ".razor": "Razor",
+    ".ftl": "FreeMarker", ".ftlh": "FreeMarker",
+    ".heex": "HEEx", ".leex": "HEEx",
+}
+
+
+def _detect_template_engine(file_tree: list[str], java_build_content: str = "") -> str | None:
+    for path in file_tree:
+        for ext, engine in _TEMPLATE_ENGINE_EXTS.items():
+            if path.endswith(ext):
+                return engine
+        if path.endswith(".html") and "src/main/resources/templates" in path:
+            return "Thymeleaf"
+    if "thymeleaf" in java_build_content.lower():
+        return "Thymeleaf"
+    return None
+
+
+def _detect_service_layout(file_tree: list[str], project_type: str, template_engine: str | None) -> str:
+    top_dirs = {p.split("/")[0] for p in file_tree if "/" in p}
+    frontend_dirs = {"frontend", "client", "web", "ui"}
+    backend_dirs = {"backend", "server", "api", "service"}
+    if top_dirs & frontend_dirs and top_dirs & backend_dirs:
+        return "separate_frontend_backend"
+    if project_type == "monorepo":
+        return "monorepo"
+    if template_engine:
+        return "single_project_ssr"
+    if project_type != "unknown":
+        return "single_project"
+    return "unknown"
+
+
+_META_FW_WITH_ROUTES = {"Next.js", "Nuxt", "SvelteKit", "Remix"}
+
+
+def _detect_server_routes(frontend_fw: str | None, file_tree: list[str]) -> bool:
+    if frontend_fw not in _META_FW_WITH_ROUTES:
+        return False
+    return (
+        any("pages/api/" in p or "app/api/" in p for p in file_tree)
+        or any("server/api/" in p for p in file_tree)
+        or any("+server." in p for p in file_tree)
+    )
 
 
 TEST_STRATEGY_MAP: dict[str, dict] = {
@@ -334,6 +408,7 @@ def _scan_project(root: Path) -> dict:
     config_contents: dict[str, str] = {}
     extension_counts: dict[str, int] = {}
     js_deps_merged: dict[str, str] = {}
+    js_deps_prod_merged: dict[str, str] = {}
 
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
@@ -354,6 +429,7 @@ def _scan_project(root: Path) -> dict:
                     data = json.loads(full_path.read_text(encoding="utf-8", errors="ignore"))
                     js_deps_merged.update(data.get("dependencies", {}))
                     js_deps_merged.update(data.get("devDependencies", {}))
+                    js_deps_prod_merged.update(data.get("dependencies", {}))
                 except Exception:
                     pass
 
@@ -370,6 +446,7 @@ def _scan_project(root: Path) -> dict:
         "extension_counts": dict(sorted(extension_counts.items(), key=lambda x: -x[1])[:20]),
         "total_files": len(file_tree),
         "js_deps": {k.lower(): v for k, v in js_deps_merged.items()},
+        "js_deps_prod": {k.lower(): v for k, v in js_deps_prod_merged.items()},
     }
 
 
@@ -421,7 +498,8 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
 
     is_electron = "electron" in js_deps
     frontend_fw = _detect_frontend(js_deps)
-    backend_fw_js = _detect_backend_js(js_deps)
+    js_deps_prod = scan.get("js_deps_prod", js_deps)
+    backend_fw_js = _detect_backend_js(js_deps_prod)
 
     py_config_files = [
         p for pattern in ("requirements*.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile")
@@ -491,8 +569,11 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
                 if java_fw:
                     break
 
+    # Java SSR is deterministic — let it through even without JS/Python
+    java_ssr = has_java and bool(java_fw) and _has_html_views(scan.get("file_tree", []))
+
     # Unknown language project (Go/Rust/Java only, no JS/Python) — defer to LLM
-    if not has_package_json and not has_python and (has_go or has_rust or has_java):
+    if not has_package_json and not has_python and (has_go or has_rust or has_java) and not java_ssr:
         return None
 
     # --- Classification ---
@@ -546,10 +627,20 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         reasoning = f"Found {frontend_fw} and {backend_fw_js} in package.json dependencies."
 
     elif has_package_json and frontend_fw:
-        project_type = "frontend_only"
-        backend_framework = None
-        confidence = "high"
-        reasoning = f"Found {frontend_fw} in package.json with no backend framework detected."
+        if frontend_fw in {"React Native", "Expo"}:
+            project_type = "mobile_app"
+            backend_framework = None
+            confidence = "high"
+            reasoning = f"Found {frontend_fw} in package.json — mobile application."
+        else:
+            project_type = "frontend_only"
+            backend_framework = None
+            has_react_source = (
+                frontend_fw != "React"
+                or any(p.endswith((".jsx", ".tsx")) for p in scan.get("file_tree", []))
+            )
+            confidence = "high" if has_react_source else "medium"
+            reasoning = f"Found {frontend_fw} in package.json with no backend framework detected."
 
     elif has_package_json and backend_fw_js:
         if _has_html_views(scan.get("file_tree", [])):
@@ -593,6 +684,21 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         confidence = "medium"
         reasoning = "Found Python project with no known web framework — assumed library."
 
+    elif java_ssr:
+        project_type = "full_stack_web_app"
+        backend_framework = java_fw
+        confidence = "high"
+        reasoning = f"Found {java_fw} in Java build files with HTML templates — server-side rendered web app."
+
+    elif ext_counts.get(".html", 0) > 0 and not any(
+        ext_counts.get(ext, 0) > 0
+        for ext in {".py", ".java", ".go", ".rs", ".cs", ".rb", ".php"}
+    ):
+        project_type = "static_site"
+        backend_framework = None
+        confidence = "medium"
+        reasoning = "Found HTML/CSS/JS files with no backend language — plain static site."
+
     else:
         return None  # No recognisable config — defer to LLM
 
@@ -603,10 +709,29 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
         if language in {"Python", "Java", "Go", "Rust", "C#", "Ruby", "PHP"}:
             confidence = "medium"
 
+    file_tree = scan.get("file_tree", [])
+    java_build_content = " ".join(
+        v for k, v in scan.get("config_files", {}).items()
+        if "pom.xml" in k or "build.gradle" in k
+    )
+    frontend_tooling = _detect_frontend_tooling(js_deps, file_tree)
+    template_engine = _detect_template_engine(file_tree, java_build_content)
+    # Infer Jinja2 for Python backends that use HTML views but don't have explicit engine extensions
+    if template_engine is None and project_type == "full_stack_web_app" and backend_framework in {
+        "Flask", "Django", "FastAPI", "Starlette", "Litestar", "aiohttp", "Tornado", "Bottle", "Sanic", "Quart",
+    } and _has_html_views(file_tree):
+        template_engine = "Jinja2"
+    service_layout = _detect_service_layout(file_tree, project_type, template_engine)
+    server_routes = _detect_server_routes(frontend_fw, file_tree)
+
     return {
         "project_type": project_type,
         "frontend_framework": frontend_fw,
+        "frontend_tooling": frontend_tooling,
         "backend_framework": backend_framework,
+        "template_engine": template_engine,
+        "service_layout": service_layout,
+        "server_routes_detected": server_routes,
         "confidence": confidence,
         "reasoning": reasoning,
         "test_strategy": _get_test_strategy(project_type, backend_framework),
@@ -640,7 +765,11 @@ def _parse_llm_response(raw: str) -> dict:
 _LLM_FALLBACK = {
     "project_type": "unknown",
     "frontend_framework": None,
+    "frontend_tooling": None,
     "backend_framework": None,
+    "template_engine": None,
+    "service_layout": "unknown",
+    "server_routes_detected": False,
     "confidence": "low",
     "reasoning": "Could not parse classifier response.",
     "test_strategy": {"primary": "none", "secondary": None},
@@ -667,6 +796,29 @@ async def _classify_by_llm(scan: dict, client: anthropic.AsyncAnthropic) -> dict
         parsed.setdefault("confidence", "low")
         parsed.setdefault("reasoning", "No reasoning provided.")
         parsed["test_strategy"] = _get_test_strategy(parsed["project_type"], parsed.get("backend_framework"))
+        java_build_content = " ".join(
+            v for k, v in scan.get("config_files", {}).items()
+            if "pom.xml" in k or "build.gradle" in k
+        )
+        parsed["frontend_tooling"] = _detect_frontend_tooling(scan["js_deps"], scan.get("file_tree", []))
+        parsed["template_engine"] = _detect_template_engine(scan.get("file_tree", []), java_build_content)
+        _PYTHON_JINJA2_BACKENDS = {
+            "Flask", "Django", "FastAPI", "Starlette", "Litestar",
+            "aiohttp", "Tornado", "Bottle", "Sanic", "Quart",
+        }
+        if (
+            parsed["template_engine"] is None
+            and parsed.get("project_type") == "full_stack_web_app"
+            and parsed.get("backend_framework") in _PYTHON_JINJA2_BACKENDS
+            and _has_html_views(scan.get("file_tree", []))
+        ):
+            parsed["template_engine"] = "Jinja2"
+        parsed["service_layout"] = _detect_service_layout(
+            scan.get("file_tree", []), parsed["project_type"], parsed["template_engine"]
+        )
+        parsed["server_routes_detected"] = _detect_server_routes(
+            parsed.get("frontend_framework"), scan.get("file_tree", [])
+        )
         return parsed
     except Exception:
         return dict(_LLM_FALLBACK)
@@ -701,6 +853,9 @@ async def run(extract_to: Path, client: anthropic.AsyncAnthropic) -> dict:
             result["test_strategy"]["secondary"] = (
                 f"{existing} + Android JUnit/Espresso" if existing else "Android JUnit/Espresso"
             )
+
+    if result.get("project_type") == "electron_app":
+        result["runtime"] = "Electron"
 
     result["config_files_found"] = list(scan["config_files"].keys())
     result["llm_used"] = llm_called

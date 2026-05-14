@@ -21,15 +21,32 @@ See `PLAN.md` for the full pipeline design, 4-layer model, and scoring formulas.
 - `test_strategy` always formula-derived from `project_type` + `backend_framework` — LLM never overrides it
 - Root-level Python check: Python configs only found in sub-service directories (depth 2+) are ignored for framework detection — triggers LLM fallback to handle multi-service apps correctly
 - SSR detection: Flask/Django/Express/PHP backends with a `templates/` or `views/` directory are classified as `full_stack_web_app` (not `backend_api_only`). Engine-specific template extensions (`.ejs`, `.twig`, `.blade.php`, `.pug`, `.hbs`, `.njk`, `.jinja2`) are treated as unambiguous SSR signals regardless of directory.
-- Java full-stack: React/Angular/Vue + recognised Java framework (Spring Boot, Quarkus, Micronaut) with a `pom.xml` or `build.gradle` → classified as `full_stack_web_app` at `high` confidence without LLM. Previously fell into the `monorepo` (medium confidence) path, triggering probabilistic LLM classification.
+- Java full-stack (JS + Java): React/Angular/Vue + recognised Java framework (Spring Boot, Quarkus, Micronaut) with a `pom.xml` or `build.gradle` → `full_stack_web_app` at `high` confidence without LLM.
+- Java full-stack (SSR): Spring Boot + `build.gradle.kts` + HTML templates in `src/main/resources/templates/` → `full_stack_web_app` at `high` confidence, `template_engine = "Thymeleaf"`. Deterministic — no LLM fallback. `build.gradle.kts` is now in CONFIG_FILES so Gradle Kotlin DSL projects are read.
+- Mobile apps: React Native and Expo classified as `mobile_app` (not `frontend_only`).
+- Production deps: `backend_fw_js` detection uses only `dependencies` (not `devDependencies`) — prevents Express used as a dev mock server from misclassifying the project as `backend_api_only`.
+- IGNORE_DIRS extended: `examples`, `demo`, `sample`, `demos`, `samples` excluded from walk to prevent example build files in library repos from affecting classification.
+- Static site: rule-based `static_site` detection — HTML files present, no backend language → `medium` confidence without LLM.
+- React confidence: if `react` is in deps but no `.jsx`/`.tsx` source files exist, confidence is `medium` → LLM review.
+- Tests: `backend/tests/test_step0_classifier.py` — 12 fixtures, all passing.
+- Audit doc: `docs/step0-edge-case-audit.md` — full 20-case analysis.
 
 **Step 0 output fields** (stored in `step_results.step_0`):
 ```
-project_type, frontend_framework, backend_framework,
+project_type, frontend_framework, frontend_tooling, backend_framework,
+template_engine, service_layout, server_routes_detected,
 confidence, reasoning, test_strategy,
 config_files_found, llm_used, llm_model
+runtime  (only for electron_app)
 ```
 `primary_language` is NOT in Step 0 output — Step 4 produces the authoritative `languages` array from source parsing.
+
+**New fields added in 20-case audit:**
+- `frontend_tooling` — build tool: `"Vite"`, `"Create React App"`, `"Webpack"`, `"Parcel"`, etc.
+- `template_engine` — SSR engine: `"Thymeleaf"`, `"Jinja2"`, `"Blade"`, `"EJS"`, etc.
+- `service_layout` — `"single_project"` | `"separate_frontend_backend"` | `"monorepo"` | `"single_project_ssr"` | `"unknown"`
+- `server_routes_detected` — `true` when Next.js/Nuxt/SvelteKit/Remix API route dirs are found
+- `runtime` — only for `electron_app`: `"Electron"`
 
 ### Step 1 — Stated Requirement Extractor (COMPLETE)
 - Scans uploaded zip for README files (capped at depth ≤ 2) and spec docs (keyword-matched .md/.rst/.txt)
@@ -105,6 +122,8 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       App.tsx                        # Stage state machine
   uploads/                           # Runtime — gitignored
   jobs/                              # Runtime — gitignored
+  docs/
+    step0-edge-case-audit.md         # 20-case classifier audit
   PLAN.md
   CLAUDE.md
 ```
@@ -147,7 +166,13 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **Formula-driven scores** — LLM never overrides the formula
 - **Root-level Python check** — `root_level_py` in Step 0 prevents sub-service requirements.txt (depth 2+) from falsely determining backend_framework
 - **SSR detection (`_has_html_views`)** — Step 0 checks for `templates/`/`views/` HTML files and engine-specific extensions (`.ejs`, `.twig`, `.blade.php`, etc.) to distinguish Flask/Django/Express SSR apps from pure REST APIs. Without this, all Python/JS/PHP backends without a JS frontend framework were misclassified as `backend_api_only`, producing wrong Step 2 obvious requirements.
-- **Java full-stack rule** — `frontend_fw + java_fw` (detected from `pom.xml`/`build.gradle`) classifies as `full_stack_web_app` at `high` confidence before the generic `monorepo` check. Ensures Spring Boot + React/Angular/Vue is always classified deterministically.
+- **Java full-stack rule** — `frontend_fw + java_fw` (detected from `pom.xml`/`build.gradle`/`build.gradle.kts`) classifies as `full_stack_web_app` at `high` confidence before the generic `monorepo` check. Ensures Spring Boot + React/Angular/Vue is always classified deterministically.
+- **Java SSR rule** — `java_fw + _has_html_views()` bypasses the `return None` early guard so Spring Boot + Thymeleaf is classified deterministically at `high` confidence without LLM. `build.gradle.kts` added to CONFIG_FILES so Gradle Kotlin DSL is readable.
+- **Production deps for backend detection** — `backend_fw_js` uses `js_deps_prod` (production `dependencies` only) not `js_deps_merged`, preventing Express/NestJS in `devDependencies` (mock servers, test utilities) from misclassifying a React SPA as a full-stack app.
+- **Mobile detection** — React Native / Expo detected before the `frontend_only` branch and classified as `mobile_app` with Jest primary.
+- **Static site rule** — HTML files present, no backend language extensions → `static_site` at `medium` confidence. No LLM needed for plain HTML/CSS/JS sites.
+- **React source validation** — if `react` is in deps but no `.jsx`/`.tsx` files exist in file_tree → `medium` confidence → LLM review (avoids false high-confidence React claims from peer-dep contamination).
+- **New deterministic fields** — `frontend_tooling`, `template_engine`, `service_layout`, `server_routes_detected` computed by pure helpers from the file tree and config contents. Populated for both rule-based and LLM results. See `docs/step0-edge-case-audit.md`.
 - **Test strategy primary/secondary** — for `backend_api_only`, primary is always the HTTP-level test tool (Pytest API tests / Jest/Supertest / JUnit/MockMvc / PHPUnit / RSpec), not a unit test runner. Unit tests are never the right primary for verifying user-facing API requirements. Secondary is `null` for API-only (deduped away) and the backend test tool for full-stack apps (Playwright primary + backend tool secondary).
 - **Step 1 truncation recovery** — `_parse_llm_response` recovers requirements from truncated JSON responses rather than failing with 0 results
 

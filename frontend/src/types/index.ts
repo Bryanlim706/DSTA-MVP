@@ -6,13 +6,18 @@ export interface TestStrategy {
 export interface Step0Result {
   project_type: string
   frontend_framework: string | null
+  frontend_tooling: string | null
   backend_framework: string | null
+  template_engine: string | null
+  service_layout: string
+  server_routes_detected: boolean
   confidence: 'high' | 'medium' | 'low'
   reasoning: string
   test_strategy: TestStrategy
   config_files_found: string[]
   llm_used: boolean
   llm_model: string | null
+  runtime?: string
 }
 
 export interface Step1Requirement {
