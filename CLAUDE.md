@@ -57,12 +57,13 @@ runtime  (only for electron_app)
 - JSON truncation recovery: if response is cut off mid-array, recovers items up to last complete `},`
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
 - `functional_area` field on each requirement for cascade advisory grouping
+- **Prompt design (2D model):** Extracts X-axis roots — functions that map to a distinct UI screen or API endpoint. Behavioral properties (error handling, persistence, navigation affordances described as implementation details) are excluded — they belong on the Y axis as ACs. Quote must directly evidence the requirement (not topically adjacent). Two sides of the same behavior = one requirement, not two. `critical` flags root requirements with many dependents, not just urgency-signaled items.
 
 ### Step 2 — Obvious Requirement Generator (COMPLETE)
 - LLM generates requirements so fundamental users expect them but never write them down
-- Deduplicates against Step 1 stated requirements
-- Rule 9: assigns 'critical' only when absence makes entire app non-functional — most items should be 'high'
-- `functional_area` field on each requirement (same grouping scheme as Step 1)
+- Deduplicates against Step 1 stated requirements (semantic, not just string-match)
+- `functional_area` field on each requirement (same grouping scheme as Step 1); passed with descriptions in user message for better semantic dedup
+- **Prompt design (2D model):** Generates from two angles: (1) *dependency connectors* — what stated requirements depend on to be independently testable; (2) *app-type usability* — navigation, affordances, and empty-state functions any user of this app type expects regardless of what is stated (e.g. back navigation from sub-pages with no navbar). Both angles produce functions that map to a distinct UI element or API endpoint — behavioral properties remain in the AC layer.
 
 ### Frontend (COMPLETE)
 - React + TypeScript + Vite + Tailwind CSS

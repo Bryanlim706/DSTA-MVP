@@ -148,6 +148,87 @@ FCom is sensitive to dependency chains. If a root feature is absent from L3, all
 
 ---
 
+## The Evaluation Space as a 2D Plane
+
+Every requirement is a point on a 2D plane. All pipeline step prompts are written with this model as their grounding. Prompts in future steps should reference it.
+
+### X axis — explicitness (and feature dependency depth)
+
+```
+stated       obvious       implied       unlinked
+ (L1a)        (L1a)         (L1b)        (L2/L3 only)
+   |____________|_____________|_____________|
+   <—— FCom ——><——————————— FA ———————————————>
+```
+
+The X axis encodes both how explicitly a requirement was stated AND its depth in the feature dependency tree. This is structural, not accidental: people articulate what a system *is* (roots), not what it must enable as prerequisite infrastructure.
+
+- **Stated (roots):** Foundational capabilities that define the app's purpose. Auth, core data model, primary CRUD actions. All other features depend on these. Users write them down because they define what the app does.
+- **Obvious (direct dependents):** Assumed by any user; never written down. Two sub-types: (1) *dependency connectors* — what stated requirements depend on to be independently testable (e.g. "user can view task list" makes "user can add task" verifiable); (2) *app-type usability* — navigation, affordances, and feedback functions any user expects regardless of what is stated (e.g. back navigation from sub-pages with no navbar, empty states on list views).
+- **Implied (second-order dependents):** Enhancements built on top of the obvious layer — filtering, sorting, bulk operations. Would improve the app; absence isn't catastrophic if roots are solid.
+- **Unlinked (orphaned):** Exists in L2/L3 but has no stated or implied purpose.
+
+### Y axis — implementation depth (two distinct phases)
+
+**Phase 1 — Presence** (FCom/FA, measured by E()): Does the function exist at any layer? Detection only — no app execution needed.
+
+| E() | Condition |
+|---|---|
+| 1.0 | L2 (UI accessible) AND L3 (backend implemented) |
+| 0.5 | L3 only — implemented but not UI-accessible |
+| 0.4 | L2 only — UI visible, backend missing or broken |
+| 0.25 | Partial / unclear evidence in either layer |
+| 0.0 | Not found |
+
+**Phase 2 — Correctness** (FCor): For requirements above the presence threshold (L3 exists), does the implementation behave correctly? Requires running the app and executing tests.
+
+```
+FCor high   All ACs pass — happy path and edge cases
+FCor mid    Happy path passes, edge cases fail
+FCor low    Present in L3 but fails most tests
+```
+
+FCom and FA operate entirely in Phase 1. FCor operates entirely in Phase 2. A requirement at E()=1.0 (FCom: fully wired) can still have FCor=0.1 (FCor: behaving incorrectly). The axes are orthogonal.
+
+### Cascade: X and Y interact via dependency
+
+A Y=0 at a root position (stated, left of X) cascades to Y≈0 for all dependents, regardless of their X position. If auth is absent (Y=0, root), then task management (obvious, dependent) also fails — not because task code is missing, but because its prerequisite is absent. FCom correctly assigns E≈0 to all cascading items, but Step 7 advisory must surface the root cause.
+
+### Pipeline implications
+
+| Concern | How the 2D plane shapes it |
+|---|---|
+| FCom scoring | Weighted average of E() across L1a — cascade-sensitive; one missing root can cascade to many zeros |
+| FA scoring | Same formula applied to L1b; L1b dependents of missing L1a roots also approach zero |
+| Step 3.5 human review | Root requirements (stated, many dependents) are highest priority to confirm or delete |
+| Step 7 cascade advisory | Group E()=0 items by `functional_area`; identify cluster root as primary gap |
+| Step 8 AC generation | ACs for dependent requirements should assert prerequisite is satisfied before testing the dependent |
+| Test execution order (Step 11) | Test root requirements first; if root fails, mark dependents as cascade-blocked, not independent failures |
+
+### E()=0.4 known gap
+
+E()=0.4 (UI visible, no backend) sits lower than E()=0.5 (backend present, no UI) because FCor requires backend. But 0.4 is *worse* for users — they see a form that does nothing, setting expectations that are immediately broken. These requirements are excluded from FCor. Step 14 (Workflow Friction Analyser) catches this experientially. Not numerically scored in FCor — a known model limitation.
+
+### Prompt design philosophy (all steps)
+
+The X/Y plane determines what each pipeline step's LLM should and should not do:
+
+**Step 1 (stated):** Extract the X-axis roots — functions that define what the app is. Every item must map to a distinct UI screen or API endpoint. Behavioral properties (error handling, persistence, navigation affordances described as implementation details) belong on the Y axis as ACs, not on the X axis as requirements. Priority `critical` should flag requirements that are roots with many dependents, not just items the source text labels as urgent.
+
+**Step 2 (obvious):** Generate from two angles:
+- *Angle 1 — Dependency connectors:* For each stated requirement, what must be true for it to be independently testable end-to-end? (e.g. "user can view task list" enables testing "user can add task")
+- *Angle 2 — App-type usability:* What navigation, feedback, and affordance functions would any user expect regardless of what is stated? (e.g. back navigation from sub-pages with no navbar, empty states on list views, redirect-to-login for unauthenticated access) These are distinct UI/API functions, not behavioral properties of existing functions.
+
+Deduplication must be semantic — if a stated requirement already covers a function (even if worded differently), the obvious requirement must not regenerate it.
+
+**Step 3 (implied):** Generate second-order dependents — enhancements that improve the app but whose absence doesn't break the dependency tree. FA-scored (not FCom-scored). Strength rating maps to FA weight.
+
+**Step 8 (ACs):** ACs live on the Y axis — they measure Phase 2 correctness. ACs for dependent requirements should first assert prerequisites are satisfied. Persistence, error messages, and edge-case handling are ACs, not L1a requirements.
+
+**Step 11 (test execution):** Execute in dependency order — test roots first. If a root fails, mark its dependents as cascade-blocked rather than running them as independent tests. This distinguishes true independent failures from cascade failures in the FCor output.
+
+---
+
 ## Pipeline Steps
 
 ### Step −1: User Input
