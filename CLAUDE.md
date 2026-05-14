@@ -54,19 +54,17 @@ runtime  (only for electron_app)
 - MAX_DOCS = 30, MAX_CHARS_PER_DOC = 12000
 - LLM (claude-haiku) extracts only explicitly stated requirements; every item must include a verbatim source quote
 - Source quote verification uses whitespace-normalized comparison (`_norm()`) — collapses all whitespace to single space before substring check, so LLM quote normalization (newlines → spaces) doesn't cause false drops
-- **Code-side UI element filter** (`_quote_has_ui_element`): drops items whose source_quote contains no HTML filename (`.html`), no quoted button name, no named UI component (navigation bar, category page, home page), and is not a Javascript user-action sentence. This is a post-LLM safety net — items that don't reference a UI element are filtered regardless of what the LLM generates.
 - JSON truncation recovery: if response is cut off mid-array, recovers items up to last complete `},`
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
 - `functional_area` field on each requirement for cascade advisory grouping
-- **Prompt design (pattern-matching approach):** Extract ONLY from sentences whose grammatical subject is an HTML filename, a quoted button/link name, a named UI component, or "Javascript" (for user-initiated actions). This is a mechanical pattern-match, not an interpretation rule. The SELF-CHECK step asks the LLM to verify each item's subject before outputting. Behavioral properties (hashing, validation rules, automatic sorting) have no such subject and are skipped.
-- **source_quote = single sentence:** LLM instructed to quote one sentence only to prevent combining implementation-detail sentences with UI sentences.
+- **Prompt design (2D model):** Extracts X-axis roots — functions that map to a distinct UI screen or API endpoint. Behavioral properties (error handling, persistence, navigation affordances described as implementation details) are excluded — they belong on the Y axis as ACs. Quote must directly evidence the requirement (not topically adjacent). Two sides of the same behavior = one requirement, not two. `critical` flags root requirements with many dependents, not just urgency-signaled items.
+- **Capability vs reaction rule:** A requirement must be a capability the user can directly navigate to or interact with — its own page, form, button, or view. A reaction ("System must X when/if Y") is an AC, not a requirement. The "when/if" signal is the primary LLM-facing heuristic. See PLAN.md "Validity gate" section.
 
 ### Step 2 — Obvious Requirement Generator (COMPLETE)
 - LLM generates requirements so fundamental users expect them but never write them down
 - Deduplicates against Step 1 stated requirements (semantic, not just string-match)
 - `functional_area` field on each requirement (same grouping scheme as Step 1); passed with descriptions in user message for better semantic dedup
-- **Parser updated:** handles reasoning text before JSON array (extracts array starting at first `[`)
-- **Prompt design (5-check YES/NO form):** LLM answers 5 specific YES/NO checks rather than open-ended generation. Each check covers one specific gap type: (1) home/landing page, (2) output views for add/create capabilities, (3) status change controls (ONLY if explicit sorting stated), (4) navigation TO create pages, (5) back navigation FROM sub-pages. Items are generated ONLY for NO answers. Hard stops prevent generation outside these 5 checks — specifically no auth guards, error messages, empty states, session management, or redirect behaviors.
+- **Prompt design (2D model):** Generates from two angles: (1) *dependency connectors* — what stated requirements depend on to be independently testable; (2) *app-type affordances* — dedicated screens, views, and navigation elements any user of this app type expects regardless of what is stated (e.g. back navigation from dead-end sub-pages). Both angles produce capabilities that map to a distinct UI element — behavioral reactions remain in the AC layer. Current prompt focus: full-stack web applications.
 
 ### Frontend (COMPLETE)
 - React + TypeScript + Vite + Tailwind CSS
@@ -179,9 +177,6 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **New deterministic fields** — `frontend_tooling`, `template_engine`, `service_layout`, `server_routes_detected` computed by pure helpers from the file tree and config contents. Populated for both rule-based and LLM results. See `docs/step0-edge-case-audit.md`.
 - **Test strategy primary/secondary** — for `backend_api_only`, primary is always the HTTP-level test tool (Pytest API tests / Jest/Supertest / JUnit/MockMvc / PHPUnit / RSpec), not a unit test runner. Unit tests are never the right primary for verifying user-facing API requirements. Secondary is `null` for API-only (deduped away) and the backend test tool for full-stack apps (Playwright primary + backend tool secondary).
 - **Step 1 truncation recovery** — `_parse_llm_response` recovers requirements from truncated JSON responses rather than failing with 0 results
-- **Step 1 UI element filter** — `_quote_has_ui_element(quote)` is a post-LLM code filter that drops items with source_quotes referencing no HTML filename, no quoted button name, and no named UI component. This prevents backend behaviors (hashing, validation rules, automatic sorting) from passing even when the LLM ignores prompt instructions. Regex-based; uses ASCII-safe double-quoted raw strings to avoid smart-quote encoding corruption from editors.
-- **Step 2 parser update** — handles reasoning text before JSON array by finding the first `[` character; LLM can output YES/NO answers before the JSON without breaking the parser
-- **File encoding caution** — Edit tool may insert Unicode curly quotes into Python code (U+201C/U+201D replacing `"`). If regex patterns in step1_req_extractor.py cause `SyntaxError: invalid character`, use PowerShell to bulk-replace curly quotes back to ASCII: `$content.Replace([char]0x201C, [char]0x22).Replace([char]0x201D, [char]0x22)`
 
 ---
 

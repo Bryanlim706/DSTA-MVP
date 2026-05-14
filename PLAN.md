@@ -295,8 +295,8 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (stated)**
 **Tools:** Python, LLM (AsyncAnthropic, prompt caching)
 **Input:** Requirements text provided by user + README (read directly from zip) + any uploaded specification documents
-**Extraction approach (pattern-matching on grammatical subject):** The LLM extracts ONLY from sentences whose grammatical subject is one of: (1) an HTML filename, (2) a quoted button or link name, (3) a named UI component (navigation bar, home page, category page, etc.), or (4) "Javascript" for user-initiated actions. All other subjects (app.py, database, backend processes, automatic behaviors) are skipped unconditionally.
-**Code-side filter:** After LLM extraction, `_quote_has_ui_element(quote)` validates each item's source_quote against the same subject rules — drops items whose quote lacks any HTML filename, quoted button, or named UI component. This is a deterministic safety net independent of LLM instruction-following.
+**Primary gate (UI entry-point rule):** Every extracted requirement must have a dedicated place in the UI — its own page, form, button, or view — that a user can navigate to. If no such place exists (the behavior happens automatically, is a background process, or is a side-effect of another action), it is a Y-axis property belonging in acceptance criteria. Do not extract it. Things that always fail: password hashing, validation rules (duplicate prevention, uniqueness), automatic reordering, UI trigger details for a capability already stated.
+**Secondary filter (when/if signal):** If the item naturally phrases as "System must X when/if condition", it is a reaction — skip it.
 **Rule:** Only extract requirements that are **explicitly stated**. No inference. No invention. Every item must include its source quote. Source quote verification uses whitespace-normalized comparison — the quote must appear verbatim in the source (anti-hallucination), but whitespace differences (newlines → spaces) are tolerated.
 **Decomposition rule:** General/meta requirements decomposed into atomic testable items, each retaining a reference to its parent.
 **Tag:** `stated`
@@ -333,14 +333,11 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (obvious)**
 **Tools:** Python, LLM (AsyncAnthropic)
 **Input:** Step 0 (project_type, framework) + Step 1 (stated requirements list)
-**5-check YES/NO form:** LLM answers 5 specific gap checks, generating a requirement ONLY for each NO answer. This replaces open-ended gap-finding with a precise, constrained form:
-- Check 1: Home page after login stated? (NO → generate home page requirement)
-- Check 2: Each add/create capability has a stated output view? (NO → generate list/view requirement)
-- Check 3: Explicit sorting/ordering phrase stated AND no status change control? (NO sorting phrase → skip entirely; sorting phrase + no control → generate status toggle)
-- Check 4: Each add/create capability has a stated navigation button/link? (NO → generate navigation affordance)
-- Check 5: Each sub-page has stated back/home navigation? (NO → generate back navigation)
-**Hard stops:** Auth guards, login redirects, session checks, empty state messages, error messages, data persistence, session management, and anything phrased "System must X when/if Y" are NEVER generated.
-**Parser:** `_parse_llm_response` handles LLM reasoning text before the JSON array (bracket_pos search).
+**Two-type whitelist (only these two types are generated):**
+- Type A — Result or state-change bridge: a dedicated view showing the OUTPUT of a stated capability (e.g. task list view makes "add task" verifiable), or a control letting the user change a value a stated capability depends on (e.g. status toggle makes "sort by status" verifiable). Input forms that invoke a stated capability are NOT Type A — they are the stated capability itself.
+- Type B — Navigation affordance: a dedicated clickable element moving the user between the app's existing screens where no such navigation is stated (e.g. back button on category sub-pages).
+**Never generate:** auth guards, session management, data isolation, error feedback, validation responses, empty state messages, or anything that phrases as "System must X when Y."
+**Logic:** LLM generates obvious functional requirements that any user of this app type would naturally expect — so fundamental a user would never write them down, yet surprised to find missing.
 **Deduplication:** Step 1 stated requirements passed as context (with functional_area prefix) — LLM must not regenerate items already stated, including paraphrases and form/capability identity duplicates ("display a login form" = the login capability stated from the UI angle; skip it).
 **ISO 25010 rationale:** Completeness covers "all specified tasks and user objectives." Obvious requirements are user objectives implied by the app's purpose even when not explicitly written.
 **Tag:** `obvious` | **Weight:** derives from priority (critical=4.0, high=3.0, medium=2.0, low=1.0) — same as Step 1

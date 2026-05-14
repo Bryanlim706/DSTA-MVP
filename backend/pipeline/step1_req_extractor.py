@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import re
 from pathlib import Path
@@ -24,103 +24,96 @@ README_NAMES = {"readme.md", "readme.rst", "readme.txt", "readme"}
 
 def _norm(text: str) -> str:
     return re.sub(r'\s+', ' ', text.lower().strip())
-
-
-_HTML_FILE_RE = re.compile(r"\b\w+\.html\b", re.IGNORECASE)
-_QUOTED_BUTTON_RE = re.compile(r"""[\"’][^\"’]{1,40}[\"’]\s*button""", re.IGNORECASE)
-_UI_COMPONENT_RE = re.compile(
-    r"\b(navigation\s*bar|navbar|category\s+page|home\s+page|each\s+category\s+page)\b",
-    re.IGNORECASE,
-)
-
-
-def _quote_has_ui_element(quote: str) -> bool:
-    """Return True if quote references an HTML file, quoted button, or named UI component."""
-    if _HTML_FILE_RE.search(quote):
-        return True
-    if _QUOTED_BUTTON_RE.search(quote):
-        return True
-    if _UI_COMPONENT_RE.search(quote):
-        return True
-    # "the table" only valid as subject (near start of sentence), not as object
-    if re.match(r"the\s+table\b", quote.strip(), re.IGNORECASE):
-        return True
-    # Javascript as valid subject for user-initiated actions
-    if re.match(r"^Javascript\b", quote.strip(), re.IGNORECASE):
-        return True
-    return False
-
-
 MAX_DOCS = 30
 MAX_CHARS_PER_DOC = 12000
 MAX_README_DEPTH = 2
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract functional requirements from software documentation.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract functional requirements that are explicitly stated in the provided documentation.
 
-EXTRACTION RULE: Extract ONLY from sentences whose grammatical subject is one of:
-1. An HTML filename — e.g. "login.html", "register.html", "add_row.html"
-2. A quoted button or link name — e.g. "the 'logout' button", "the 'change password' button"
-3. A named UI component — e.g. "the navigation bar", "the table", "the category page", "the home page"
-4. "Javascript" — only when the sentence describes a user-initiated action (clicking, deleting, editing)
+Each requirement you extract represents something a user can do or experience in the application's interface. It will later be located in the codebase and automatically tested. Only extract items a user can directly interact with or navigate to.
 
-All other subjects are skipped — no exceptions.
+---
+
+CORE DISTINCTION: capabilities vs reactions
+
+A CAPABILITY is something a user can directly navigate to, interact with, or observe. It has a dedicated place in the interface — its own page, form, button, or view.
+
+A REACTION is what the system does when or if something else happens. Reactions are not requirements — they describe how existing capabilities behave under specific conditions, and will be captured as test assertions later.
+
+THE SIGNAL: If you find yourself writing "System must [do X] when [condition]" or "System must [do X] if [condition]" — that is a reaction. Skip it.
+
+---
+
+PRIMARY TEST
+
+Before deciding whether to extract an item, ask: Does this have a dedicated place in the interface — its own page, form, button, or view that a user navigates to?
+
+If yes — it may be a capability. Continue to the signal check.
+If no — skip it. This applies even when the behavior is explicitly documented. Technical behaviors stated in a README (password hashing, duplicate prevention, automatic sorting) are Y-axis correctness properties — they fail the UI gate regardless of how clearly they appear in the source.
+
+Things that always fail this test:
+- Automatic behaviors: rows sort by status automatically, users are redirected on auth failure
+- Background processes: passwords are hashed before storing, sessions are cleared on logout
+- Validation rules: duplicate entries are blocked, uniqueness is enforced on submission
+- UI trigger details: "the plus button opens the add-row form" — the button is part of the add-row capability, not a capability on its own
 
 ---
 
 EXAMPLES
 
-EXTRACT:
-- "login.html renders a login page, requiring the user to enter their username and password" → subject: login.html (HTML file) → login capability
-- "The 'change password' button allows the user to change their passwords" → subject: 'change password' button → change password
-- "add_categories.html renders a page which allows the user to add a category" → subject: add_categories.html → add category
-- "Each category page has a back to homepage button, as well as a table with columns..." → subject: category page (UI component) → back navigation + table view
-- "Javascript also allows for deletion of the elements(category) from the navigation bar" → subject: Javascript (user-initiated action) → delete category
+Extract these (capabilities — each is a dedicated, user-facing feature):
+- "User can log in" — the login page is a dedicated screen the user navigates to
+- "User can log out" — the logout button is a dedicated action the user takes
+- "User can register an account" — the registration form is its own page
+- "User can view their task list" — the task list is its own dedicated view
+- "User can add a task" — the add task form is its own dedicated screen
+- "User can navigate back to home from the category page" — the back button is a dedicated UI element
 
-SKIP (subject is a backend process, not a UI element):
-- "Passwords are hashed before storing, for security." → subject: passwords (automatic backend process) → SKIP
-- "The input is validated by app.py, which prevents duplicate category name entries." → subject: app.py → SKIP
-- "Rows with status marked as done sink to the bottom of the table." → subject: rows (automatic sorting behavior) → SKIP
-- "Username and password is proofread against the sqlite3 database in app.py." → subject: database → SKIP
-- "app.py passes this name data to layout.html, enabling the rendering" → subject: app.py → SKIP
-- "If valid, username and password is stored in sqlite3 database through app.py." → subject: app.py process → SKIP
-
----
-
-QUOTE RULE: source_quote must be ONE sentence only. Never combine multiple sentences.
-
----
-
-DEDUPLICATION
-
-If a button and the page it opens describe the same user action (e.g. "plus button opens add_row.html"), extract ONE requirement.
-
----
-
-SELF-CHECK
-
-Before outputting, for each item ask: "What is the FIRST noun phrase (grammatical subject) of source_quote?"
-- If it is an HTML filename, button name, UI component, or Javascript → keep
-- If it is app.py, a database, an algorithm, a passive process, or a data field → remove that item
+Skip these (reactions — they describe what happens when something else occurs):
+- "System redirects to login when session expires" — reaction to a condition
+- "Session is cleared when user logs out" — side effect of the logout action
+- "Error is shown when username is already taken" — reaction to a validation failure
+- "Page is inaccessible when user is not authenticated" — reaction to auth state
+- "Task list shows a message when no tasks exist" — reaction to an empty state
+- "Passwords are hashed before storing" — background process, no dedicated UI entry point
+- "Duplicate entries are prevented on form submission" — validation rule, no dedicated UI
+- "Tasks with done status sink to the bottom of the table" — automatic reordering, no UI
+- "The plus button opens the add-row form" — sub-affordance of the add-row capability, subsumed
 
 ---
 
 RULES
 
-1. Extract only from sentences matching subjects in the EXTRACTION RULE above.
-2. source_quote = one verbatim sentence containing the named UI element.
-3. One requirement per named UI entry point.
-4. No inference — description must be derivable from the source_quote alone.
-5. Priority: critical = foundational (max 1-2); high = core; medium = supporting; low = minor.
+1. Quote fidelity. source_quote must directly support the requirement. A quote about storing passwords does not evidence a uniqueness rule. A quote about database storage does not evidence a duplicate-prevention rule.
+
+2. No artificial splits. If one sentence describes two sides of the same capability ("done tasks sink to the bottom; active tasks rise to the top"), extract ONE requirement. Only split when each part requires a completely separate test.
+
+3. Decompose compound capabilities. "Users can register and log in" = two separate capabilities → two requirements, each with the same source quote.
+
+4. No inference. Extract only what is explicitly stated AS A USER-FACING CAPABILITY — something with a dedicated page, form, button, or view. Not every sentence in the documentation is a requirement. Explicitly documented technical behaviors (password hashing, duplicate prevention, automatic sorting) are Y-axis properties — do not extract them.
+
+5. Priority:
+   - critical: A foundational capability that many other features depend on. Without it the app does not work for any user. Use for at most 1-2 requirements per app.
+   - high: Core stated feature. Use for most requirements.
+   - medium: Supporting feature mentioned without emphasis.
+   - low: Minor or optional feature.
+
 6. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
-7. source: exact filename (e.g. "README.md") or "user_input".
-8. functional_area: short snake_case.
+
+7. source: The exact section label from the input — "user_input" for the USER REQUIREMENTS section, or the exact filename (e.g. "README.md"). If the same capability appears in both, extract it once and use "user_input".
+
+8. functional_area: A short snake_case label for the feature group this requirement belongs to (e.g. "auth", "task_management", "category_management"). Requirements that share the same page or backend model should share the same label. Use "general" only if the requirement spans the whole application.
+
+9. testable: Set false only if the item is so vague it cannot be expressed as pass/fail. Capabilities are almost always testable.
+
+---
 
 Return ONLY a valid JSON array. No markdown fences, no explanation, no other text:
 [{
   "req_id": "REQ-001",
-  "description": "System must [allow users to / display]...",
-  "source": "README.md",
-  "source_quote": "single verbatim sentence containing the named UI element",
+  "description": "System must [verb] [object]",
+  "source": "user_input",
+  "source_quote": "verbatim excerpt copied exactly from the source text",
   "tag": "stated",
   "priority": "high",
   "weight": 3.0,
@@ -252,10 +245,6 @@ def _validate_and_normalise(
             continue
 
         if _norm(quote) not in all_sources_norm:
-            dropped += 1
-            continue
-
-        if not _quote_has_ui_element(quote):
             dropped += 1
             continue
 

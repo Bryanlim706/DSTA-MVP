@@ -4,74 +4,98 @@ import anthropic
 
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst. Your job is to check 5 specific gaps in the stated requirements and generate a requirement only when a gap exists.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Generate obvious functional requirements for a software application — capabilities so fundamental that any user expects them, yet so self-evident that nobody writes them down.
 
-Answer each check YES or NO. Then output a JSON array containing ONLY the requirements for your NO answers. If all answers are YES, output [].
-
----
-
-CHECK 1 — HOME PAGE AFTER LOGIN
-Does the stated list include ANY requirement that mentions a home page, main page, or describes features displayed on the home page?
-Rule: If a requirement mentions "home page" or "home.html" — even when describing its content ("displays X on home page") — the home page IS stated. Answer YES and generate nothing.
-→ YES (any requirement mentions home page, home.html, or main page): SKIP, generate nothing
-→ NO (home page not mentioned anywhere in stated requirements): generate { description: "System must display a home page after successful login." }
-
-CHECK 2 — OUTPUT VIEWS
-For each stated add/create capability: is the created data shown in a stated list, table, or view?
-A stated view counts when ANY requirement describes:
-- A table, list, or navigation bar containing that data type (e.g. "table with goal columns", "navigation bar with all categories")
-- A page that displays that data (e.g. "category page with goal data table")
-If any of these patterns exist, answer YES for that data type — do NOT generate a separate view.
-→ YES for all: no item generated
-→ NO (data can only be added, nowhere to view it): generate { description: "System must display [type] in a list/view." }
-
-CHECK 3 — STATUS CHANGE CONTROL
-HARD RULE: Before generating anything for CHECK 3, you must quote an EXACT phrase from the stated requirements that describes items being SORTED or ORDERED by status (e.g. "sink to the bottom", "prioritised at the top", "sorted by status"). If you cannot quote such a phrase, you MUST output nothing for CHECK 3 — no exceptions, no substitutions.
-A status column in a table is NOT sufficient. "Users can add goals with a status field" is NOT sufficient.
-→ NO quotable sorting phrase: SKIP, output nothing for CHECK 3
-→ YES (you can quote an explicit sort phrase): is there a stated status change control?
-  → YES: no item generated
-  → NO: generate { description: "System must allow users to change the status of a [item]." }
-
-CHECK 4 — NAVIGATION TO ADD PAGES
-For each stated add/create capability: is there a stated button, link, or UI element that invokes it?
-Count as YES if any requirement describes a button, link, or page that allows users to do X from page Y — even if it does not explicitly say "navigate to". A stated button that triggers a capability IS the navigation.
-→ YES for all: no item generated
-→ NO (a create capability is stated but no button, link, or UI element to invoke it from any page): generate { description: "System must provide a way to reach [create page]." }
-
-CHECK 5 — BACK NAVIGATION
-For each stated sub-page or detail page (create/edit forms, category pages, etc.):
-Is back or home navigation already stated for it?
-→ YES for all: no item generated
-→ NO for a page: generate { description: "System must provide back/home navigation from [page]." }
+Each requirement you generate must be one of exactly two types. If an item does not fit either type, do not generate it.
 
 ---
 
-HARD STOP. Do not generate ANYTHING outside these 5 checks. Specifically excluded:
-- Auth guards, login redirects, session checks → not a check above
-- Empty state messages → not a check above
-- Error messages, validation feedback → not a check above
-- Data persistence, session management → not a check above
-- Anything phrased "System must X when/if Y" → not a check above
+TYPE A — RESULT OR STATE-CHANGE BRIDGE
 
-If you are unsure whether something fits a check: it does not. Output nothing for it.
+A dedicated page, view, or interactive control that either:
+(a) Shows the user the RESULT of a stated capability, making it observable and verifiable, OR
+(b) Lets the user change a value that a stated capability depends on to function.
+
+The key distinction is OUTPUT vs INPUT. Ask: is this the output side of a stated requirement, or the input/invocation side?
+
+Generate (output or state-change — the result side):
+- "User can view their task list" — the visible output of "user can add tasks"; without it the add cannot be confirmed
+- "User can toggle a task's completion status" — the state change that makes "tasks sort by status" verifiable
+
+Skip (input or invocation — this IS already the stated capability):
+- "System displays a login form" — the form is how login is invoked, not its output; it is the stated login requirement
+- "System provides a form to add categories" — the form is how add-category is invoked; it is the stated add requirement
+- "System shows a registration form" — the form is the stated registration capability itself
+
+---
+
+TYPE B — NAVIGATION AFFORDANCE
+
+A dedicated clickable element (button, link) that moves the user between screens the app already has, where no such navigation is covered by a stated requirement.
+
+Generate:
+- "User can navigate back to the home page from a category sub-page" — no back nav stated for sub-pages
+- "User can reach the registration page from the login page" — entry point not stated
+
+Skip:
+- "System redirects unauthenticated users to login when accessing protected pages" — automatic behavior, not user-clickable
+- "System redirects to login after logout" — automatic side-effect, not user-clickable
+
+---
+
+NEVER GENERATE
+
+Behavioral properties — they occur automatically without a user-clickable element:
+- Auth guards: redirecting unauthenticated users, blocking unauthorized access
+- Session management: clearing sessions on logout, persisting sessions across reloads
+- Data isolation: users seeing only their own data, server-side access control and authorization
+
+Reactions — what the system does when a condition is met:
+- Error feedback: "show error when login fails", "show error when duplicate category name"
+- Validation responses: "show error when username already taken"
+- Empty states: "show message when no items exist"
+- Any item that naturally phrases as "System must X when Y"
+
+---
+
+SEMANTIC DEDUPLICATION
+
+Do not regenerate any requirement that is semantically equivalent to a stated requirement, even if worded differently.
+
+Form/capability identity: A form or page that is the interface through which a stated capability is invoked is NOT a new obvious requirement — it is the stated capability viewed from the UI angle. Login form = login requirement. Add-category form = add-category requirement. Skip these.
 
 ---
 
 RULES
-1. reason field: state which check (1–5) this item answers and which stated requirement it bridges.
-2. Do not regenerate a stated requirement in different words.
-3. Maximum 5 items. Fewer is correct when stated requirements are complete.
-4. priority: critical = app unusable without it; high = needed; medium = helpful.
-5. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
-6. functional_area: short snake_case.
 
-Return ONLY a valid JSON array. No markdown, no explanation:
+1. Only generate Type A or Type B items (defined above). If an item does not fit either type, do not generate it.
+
+2. Do NOT generate: filtering, sorting, bulk operations, error handling, security behaviors, session behaviors, notifications, advanced settings. These belong in acceptance criteria or Step 3.
+
+3. Semantic deduplication: see above.
+
+4. Do not invent features beyond what the project type and stated requirements clearly imply.
+
+5. Generate 3–10 requirements. A high-quality small set beats a large set with wrong items. If stated requirements already cover all obvious output views and navigation, generate fewer.
+
+6. Priority:
+   - critical: Absence makes the entire application non-functional for its primary purpose. Use for at most 1-2 requirements.
+   - high: Core expected function. Use for most requirements.
+   - medium: Supporting function.
+   - low: Minor.
+
+7. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
+
+8. functional_area: A short snake_case label for the feature group (e.g. "auth", "task_management"). Requirements that share the same page or backend model share the same label.
+
+---
+
+Return ONLY a valid JSON array. No markdown fences, no explanation, no other text:
 [{
   "req_id": "OBV-001",
   "description": "System must [verb] [object]",
   "source": "obvious",
-  "reasoning": "CHECK [N] — [which stated req] present, [gap] missing",
+  "reasoning": "One sentence: which stated requirement this bridges to, and why it is required for that requirement to be user-verifiable",
   "tag": "obvious",
   "priority": "high",
   "weight": 3.0,
@@ -98,9 +122,9 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
         f"Project type: {project_type}\n"
         f"Frontend framework: {frontend}\n"
         f"Backend framework: {backend}\n\n"
-        f"=== STATED REQUIREMENTS (do not regenerate these) ===\n"
+        f"=== ALREADY STATED REQUIREMENTS (do not regenerate any of these) ===\n"
         f"{stated}\n\n"
-        f"Apply the gap-finding algorithm to generate obvious requirements for this application."
+        f"Generate obvious functional requirements for this application."
     )
 
 
@@ -110,19 +134,7 @@ def _parse_llm_response(raw: str) -> list:
         text = text.split("```json", 1)[1].split("```", 1)[0].strip()
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0].strip()
-    else:
-        # Skip any reasoning text before the JSON array
-        bracket_pos = text.find("[")
-        if bracket_pos > 0:
-            text = text[bracket_pos:]
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        last_close = text.rfind("},")
-        if last_close != -1:
-            parsed = json.loads(text[:last_close + 1] + "]")
-        else:
-            raise
+    parsed = json.loads(text)
     if not isinstance(parsed, list):
         raise ValueError("LLM returned non-array JSON")
     return parsed
