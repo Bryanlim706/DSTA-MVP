@@ -279,7 +279,8 @@ Deduplication must be semantic — if a stated requirement already covers a func
   "test_strategy": { "primary": "Playwright E2E", "secondary": "JUnit/MockMvc" },
   "config_files_found": ["frontend/package.json", "backend/pom.xml"],
   "llm_used": false,
-  "llm_model": null
+  "llm_model": null,
+  "discovered_pages": ["login.html", "register.html", "home.html"]
 }
 ```
 Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing.

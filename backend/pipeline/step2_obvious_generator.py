@@ -4,98 +4,101 @@ import anthropic
 
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst. Generate obvious functional requirements for a software application — capabilities so fundamental that any user expects them, yet so self-evident that nobody writes them down.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Your job is to find gaps in the stated requirements by systematically checking the application graph — pages, navigation paths, and operation completeness.
 
-Each requirement you generate must be one of exactly two types. If an item does not fit either type, do not generate it.
-
----
-
-TYPE A — RESULT OR STATE-CHANGE BRIDGE
-
-A dedicated page, view, or interactive control that either:
-(a) Shows the user the RESULT of a stated capability, making it observable and verifiable, OR
-(b) Lets the user change a value that a stated capability depends on to function.
-
-The key distinction is OUTPUT vs INPUT. Ask: is this the output side of a stated requirement, or the input/invocation side?
-
-Generate (output or state-change — the result side):
-- "User can view their task list" — the visible output of "user can add tasks"; without it the add cannot be confirmed
-- "User can toggle a task's completion status" — the state change that makes "tasks sort by status" verifiable
-
-Skip (input or invocation — this IS already the stated capability):
-- "System displays a login form" — the form is how login is invoked, not its output; it is the stated login requirement
-- "System provides a form to add categories" — the form is how add-category is invoked; it is the stated add requirement
-- "System shows a registration form" — the form is the stated registration capability itself
+Work through the 6 checks below IN ORDER. For each check, answer YES or NO, then generate a requirement only for each NO answer. Output your YES/NO reasoning first, then a JSON array of generated requirements at the end.
 
 ---
 
-TYPE B — NAVIGATION AFFORDANCE
+CHECK 1 — BUILD THE NODE LIST
 
-A dedicated clickable element (button, link) that moves the user between screens the app already has, where no such navigation is covered by a stated requirement.
+List every page or screen in this application by combining:
+(a) Pages named in the stated requirements
+(b) Pages from the discovered page files (provided below)
 
-Generate:
-- "User can navigate back to the home page from a category sub-page" — no back nav stated for sub-pages
-- "User can reach the registration page from the login page" — entry point not stated
-
-Skip:
-- "System redirects unauthenticated users to login when accessing protected pages" — automatic behavior, not user-clickable
-- "System redirects to login after logout" — automatic side-effect, not user-clickable
+This is your node list. All subsequent checks operate on these nodes.
 
 ---
 
-NEVER GENERATE
+CHECK 2 — ENTRY PATHS (how does the user GET to each node?)
 
-Behavioral properties — they occur automatically without a user-clickable element:
-- Auth guards: redirecting unauthenticated users, blocking unauthorized access
-- Session management: clearing sessions on logout, persisting sessions across reloads
-- Data isolation: users seeing only their own data, server-side access control and authorization
+For each node (except the landing/home page): is there a stated requirement describing a button, link, navbar item, sidebar item, or any UI element that navigates TO it?
 
-Reactions — what the system does when a condition is met:
-- Error feedback: "show error when login fails", "show error when duplicate category name"
-- Validation responses: "show error when username already taken"
-- Empty states: "show message when no items exist"
-- Any item that naturally phrases as "System must X when Y"
+→ YES: skip
+→ NO: generate { description: "System must provide a way to navigate to [node]." }
 
 ---
 
-SEMANTIC DEDUPLICATION
+CHECK 3 — EXIT PATHS (how does the user LEAVE each node?)
 
-Do not regenerate any requirement that is semantically equivalent to a stated requirement, even if worded differently.
+For each node: is there at least one stated requirement describing a way to leave it — back button, breadcrumb, navbar, sidebar, or any navigation element?
 
-Form/capability identity: A form or page that is the interface through which a stated capability is invoked is NOT a new obvious requirement — it is the stated capability viewed from the UI angle. Login form = login requirement. Add-category form = add-category requirement. Skip these.
+Terminal pages (the home/dashboard with a persistent navbar count as having exit paths via the navbar).
+→ YES: skip
+→ NO: generate { description: "System must provide navigation away from [node]." }
+
+Do NOT prescribe the mechanism (back button vs breadcrumb vs navbar) — that is a design decision.
+
+---
+
+CHECK 4 — OBSERVABLE OUTCOMES (can the user see what their action did?)
+
+For each stated user-triggered operation — add, upload, submit a form, generate, mark complete, assign, confirm, save changes, start an analysis, or any action that changes state or produces output:
+
+Is there a stated view, list, status indicator, or any display showing the user the result of that operation?
+
+→ YES: skip
+→ NO: generate { description: "System must display the result of [operation] to the user." }
+
+---
+
+CHECK 5 — OPERATION INVOCATION (can the user trigger each capability?)
+
+For each stated capability: is there a stated UI control — button, form, toggle, link, or menu item — that lets the user invoke it from the relevant page?
+
+If the stated requirement already describes a button or form that invokes the capability, answer YES.
+→ YES: skip
+→ NO: generate { description: "System must provide a control to invoke [capability] from [page]." }
+
+---
+
+CHECK 6 — STATUS CHANGE CONTROL (HARD RULE)
+
+Before generating anything for this check, you MUST quote an EXACT phrase from the stated requirements that describes items being sorted or ordered by status (e.g. "sink to the bottom", "prioritised at the top", "sorted by status"). If you cannot quote such a phrase, output nothing for this check — no exceptions.
+
+→ No quotable sorting phrase: SKIP entirely, generate nothing
+→ Sorting phrase exists AND a user-controllable status change is already stated: skip
+→ Sorting phrase exists AND no status change control is stated: generate { description: "System must allow users to change the status of a [item]." }
+
+---
+
+NEVER GENERATE (hard stops — not covered by any check above):
+- Auth guards, login redirects, session checks ("redirect when unauthenticated", "protect routes")
+- Empty state messages ("show message when list is empty")
+- Error messages, validation feedback ("show error when X fails")
+- Data persistence, session management ("persist data across reloads")
+- Filtering, searching, sorting controls → Step 3 territory
+- Anything phrased "System must X when Y" or "System must X if Y"
+
+SEMANTIC DEDUPLICATION:
+Do not regenerate anything semantically equivalent to a stated requirement. A form that invokes a stated capability IS that capability — do not generate "display login form" if login is already stated.
 
 ---
 
 RULES
+1. reasoning: state which check number and which stated requirement or node it addresses.
+2. Maximum 10 items. Fewer is correct when stated requirements are already complete.
+3. Priority: critical = absence makes app non-functional (max 1-2); high = core; medium = supporting.
+4. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
+5. functional_area: short snake_case.
 
-1. Only generate Type A or Type B items (defined above). If an item does not fit either type, do not generate it.
-
-2. Do NOT generate: filtering, sorting, bulk operations, error handling, security behaviors, session behaviors, notifications, advanced settings. These belong in acceptance criteria or Step 3.
-
-3. Semantic deduplication: see above.
-
-4. Do not invent features beyond what the project type and stated requirements clearly imply.
-
-5. Generate 3–10 requirements. A high-quality small set beats a large set with wrong items. If stated requirements already cover all obvious output views and navigation, generate fewer.
-
-6. Priority:
-   - critical: Absence makes the entire application non-functional for its primary purpose. Use for at most 1-2 requirements.
-   - high: Core expected function. Use for most requirements.
-   - medium: Supporting function.
-   - low: Minor.
-
-7. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
-
-8. functional_area: A short snake_case label for the feature group (e.g. "auth", "task_management"). Requirements that share the same page or backend model share the same label.
-
----
-
-Return ONLY a valid JSON array. No markdown fences, no explanation, no other text:
+Output your YES/NO check reasoning first, then:
+Return a valid JSON array (no markdown fences):
 [{
   "req_id": "OBV-001",
   "description": "System must [verb] [object]",
   "source": "obvious",
-  "reasoning": "One sentence: which stated requirement this bridges to, and why it is required for that requirement to be user-verifiable",
+  "reasoning": "CHECK [N] — [node/operation] has no stated [entry/exit/invocation/outcome]",
   "tag": "obvious",
   "priority": "high",
   "weight": 3.0,
@@ -117,14 +120,19 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
     else:
         stated = "(none)"
 
+    discovered = step0_result.get("discovered_pages") or []
+    pages_str = ", ".join(discovered) if discovered else "(none found — infer pages from stated requirements only)"
+
     return (
         f"=== PROJECT CONTEXT ===\n"
         f"Project type: {project_type}\n"
         f"Frontend framework: {frontend}\n"
         f"Backend framework: {backend}\n\n"
-        f"=== ALREADY STATED REQUIREMENTS (do not regenerate any of these) ===\n"
+        f"=== DISCOVERED PAGE FILES (from codebase) ===\n"
+        f"{pages_str}\n\n"
+        f"=== STATED REQUIREMENTS (do not regenerate these) ===\n"
         f"{stated}\n\n"
-        f"Generate obvious functional requirements for this application."
+        f"Apply the 6-check graph analysis to generate obvious requirements for this application."
     )
 
 
@@ -134,7 +142,19 @@ def _parse_llm_response(raw: str) -> list:
         text = text.split("```json", 1)[1].split("```", 1)[0].strip()
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0].strip()
-    parsed = json.loads(text)
+    else:
+        # LLM emits YES/NO reasoning before the JSON array — skip to the first [
+        bracket_pos = text.find("[")
+        if bracket_pos > 0:
+            text = text[bracket_pos:]
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        last_close = text.rfind("},")
+        if last_close != -1:
+            parsed = json.loads(text[:last_close + 1] + "]")
+        else:
+            raise
     if not isinstance(parsed, list):
         raise ValueError("LLM returned non-array JSON")
     return parsed

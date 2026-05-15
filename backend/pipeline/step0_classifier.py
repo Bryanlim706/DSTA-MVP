@@ -180,6 +180,41 @@ def _detect_service_layout(file_tree: list[str], project_type: str, template_eng
 
 _META_FW_WITH_ROUTES = {"Next.js", "Nuxt", "SvelteKit", "Remix"}
 
+_SPA_PAGE_DIRS = {"pages", "screens"}
+_STATIC_ASSET_DIRS = {"static", "public", "www", "assets"}
+_PAGE_COMPONENT_EXTS = {".tsx", ".jsx", ".vue", ".svelte"}
+
+
+def _discover_pages(file_tree: list[str], project_type: str, frontend_fw: str | None, template_engine: str | None) -> list[str]:
+    """Return deduplicated page/screen filenames found in the project file tree."""
+    seen: set[str] = set()
+    pages: list[str] = []
+
+    for path in file_tree:
+        parts = path.split("/")
+        filename = parts[-1]
+        parent = parts[-2] if len(parts) > 1 else ""
+
+        # SSR: HTML files in templates/ or views/
+        if filename.endswith(".html") and any(p in _VIEW_DIRS for p in parts[:-1]):
+            if filename not in seen:
+                seen.add(filename)
+                pages.append(filename)
+
+        # Vanilla HTML / static: HTML files at root or in static/, public/, etc.
+        elif filename.endswith(".html") and (len(parts) == 1 or parent in _STATIC_ASSET_DIRS):
+            if filename not in seen:
+                seen.add(filename)
+                pages.append(filename)
+
+        # SPA: component files in pages/ or screens/ directories
+        elif Path(filename).suffix.lower() in _PAGE_COMPONENT_EXTS and any(p in _SPA_PAGE_DIRS for p in parts[:-1]):
+            if filename not in seen:
+                seen.add(filename)
+                pages.append(filename)
+
+    return pages
+
 
 def _detect_server_routes(frontend_fw: str | None, file_tree: list[str]) -> bool:
     if frontend_fw not in _META_FW_WITH_ROUTES:
@@ -860,4 +895,10 @@ async def run(extract_to: Path, client: anthropic.AsyncAnthropic) -> dict:
     result["config_files_found"] = list(scan["config_files"].keys())
     result["llm_used"] = llm_called
     result["llm_model"] = llm_model
+    result["discovered_pages"] = _discover_pages(
+        scan.get("file_tree", []),
+        result.get("project_type", "unknown"),
+        result.get("frontend_framework"),
+        result.get("template_engine"),
+    )
     return result

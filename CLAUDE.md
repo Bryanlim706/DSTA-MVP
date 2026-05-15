@@ -36,7 +36,7 @@ See `PLAN.md` for the full pipeline design, 4-layer model, and scoring formulas.
 project_type, frontend_framework, frontend_tooling, backend_framework,
 template_engine, service_layout, server_routes_detected,
 confidence, reasoning, test_strategy,
-config_files_found, llm_used, llm_model
+config_files_found, llm_used, llm_model, discovered_pages
 runtime  (only for electron_app)
 ```
 `primary_language` is NOT in Step 0 output — Step 4 produces the authoritative `languages` array from source parsing.
@@ -57,14 +57,16 @@ runtime  (only for electron_app)
 - JSON truncation recovery: if response is cut off mid-array, recovers items up to last complete `},`
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
 - `functional_area` field on each requirement for cascade advisory grouping
-- **Prompt design (2D model):** Extracts X-axis roots — functions that map to a distinct UI screen or API endpoint. Behavioral properties (error handling, persistence, navigation affordances described as implementation details) are excluded — they belong on the Y axis as ACs. Quote must directly evidence the requirement (not topically adjacent). Two sides of the same behavior = one requirement, not two. `critical` flags root requirements with many dependents, not just urgency-signaled items.
-- **Capability vs reaction rule:** A requirement must be a capability the user can directly navigate to or interact with — its own page, form, button, or view. A reaction ("System must X when/if Y") is an AC, not a requirement. The "when/if" signal is the primary LLM-facing heuristic. See PLAN.md "Validity gate" section.
+- **Prompt design (graph model):** Extracts requirements grounded in sentences that name a specific UI element — a page/screen (by name or HTML filename), a named form, a named button/link, or a named UI component (nav bar, sidebar, data table). Subjects that are backend files, databases, or automatic processes are always skipped. Two sides of the same behavior = one requirement. `critical` flags root requirements with many dependents.
+- **Extraction rule:** Extract when the sentence names a specific page, screen, form, button, or UI component as the subject or focus. Skip when the subject is app.py, a database, an automatic behavior, or a data field. Source quote must be one verbatim sentence containing that named element.
 
 ### Step 2 — Obvious Requirement Generator (COMPLETE)
 - LLM generates requirements so fundamental users expect them but never write them down
 - Deduplicates against Step 1 stated requirements (semantic, not just string-match)
-- `functional_area` field on each requirement (same grouping scheme as Step 1); passed with descriptions in user message for better semantic dedup
-- **Prompt design (2D model):** Generates from two angles: (1) *dependency connectors* — what stated requirements depend on to be independently testable; (2) *app-type affordances* — dedicated screens, views, and navigation elements any user of this app type expects regardless of what is stated (e.g. back navigation from dead-end sub-pages). Both angles produce capabilities that map to a distinct UI element — behavioral reactions remain in the AC layer. Current prompt focus: full-stack web applications.
+- `functional_area` field on each requirement; passed with descriptions in user message for better semantic dedup
+- `discovered_pages` from Step 0 passed to LLM as ground-truth node inventory (codebase files)
+- **Prompt design (graph model):** 6-check graph traversal — (1) build node list from stated + discovered pages, (2) entry paths per node, (3) exit paths per node (mechanism-agnostic: back/breadcrumb/navbar/sidebar), (4) observable outcomes per stated operation, (5) invocation controls per stated capability, (6) status toggle only if explicit sort phrase quoted. Hard stops: auth guards, empty states, error messages, session management, filter/sort controls (Step 3), anything phrased "System must X when Y".
+- **Parser:** handles LLM YES/NO reasoning text before JSON array via bracket_pos search.
 
 ### Frontend (COMPLETE)
 - React + TypeScript + Vite + Tailwind CSS
