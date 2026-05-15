@@ -16,6 +16,7 @@ List every page or screen in this application by combining:
 (a) Pages named in the stated requirements
 (b) Pages from the discovered page files (provided below)
 
+Deduplicate: if the same page appears in both sources, list it once.
 This is your node list. All subsequent checks operate on these nodes.
 
 ---
@@ -43,20 +44,24 @@ Do NOT prescribe the mechanism (back button vs breadcrumb vs navbar) — that is
 
 CHECK 4 — OBSERVABLE OUTCOMES (can the user see what their action did?)
 
-For each stated user-triggered operation — add, upload, submit a form, generate, mark complete, assign, confirm, save changes, start an analysis, or any action that changes state or produces output:
+Go through the STATED REQUIREMENTS list item by item. For each stated requirement that describes a user-triggered operation — this includes any action that changes data, changes state, or produces visible output (add, edit, delete, upload, submit a form, filter, search, generate, mark complete, assign, confirm, save, start an analysis, or any other capability) — ask:
 
-Is there a stated view, list, status indicator, or any display showing the user the result of that operation?
+Is there another stated requirement that shows the user the result? This could be a view, list, table, status indicator, updated display, or any visible output confirming the operation happened.
 
-→ YES: skip
-→ NO: generate { description: "System must display the result of [operation] to the user." }
+→ YES (another stated requirement shows the result): skip
+→ NO (no stated requirement shows the result): generate { description: "System must display the result of [operation] to the user." }
+
+Note: filtering and searching produce visible output (filtered/searched results). If filtering is stated as a capability, a display of the filtered results is required.
 
 ---
 
 CHECK 5 — OPERATION INVOCATION (can the user trigger each capability?)
 
-For each stated capability: is there a stated UI control — button, form, toggle, link, or menu item — that lets the user invoke it from the relevant page?
+Go through the STATED REQUIREMENTS list item by item. For each stated capability, ask:
 
-If the stated requirement already describes a button or form that invokes the capability, answer YES.
+Is there a stated requirement describing a UI control — button, form, toggle, dropdown, link, menu item — that lets the user invoke this capability from the relevant page?
+
+If the stated requirement itself already describes the control that invokes it (e.g. "the plus button opens the add row form"), answer YES.
 → YES: skip
 → NO: generate { description: "System must provide a control to invoke [capability] from [page]." }
 
@@ -77,7 +82,6 @@ NEVER GENERATE (hard stops — not covered by any check above):
 - Empty state messages ("show message when list is empty")
 - Error messages, validation feedback ("show error when X fails")
 - Data persistence, session management ("persist data across reloads")
-- Filtering, searching, sorting controls → Step 3 territory
 - Anything phrased "System must X when Y" or "System must X if Y"
 
 SEMANTIC DEDUPLICATION:
@@ -87,7 +91,7 @@ Do not regenerate anything semantically equivalent to a stated requirement. A fo
 
 RULES
 1. reasoning: state which check number and which stated requirement or node it addresses.
-2. Maximum 10 items. Fewer is correct when stated requirements are already complete.
+2. Generate as many requirements as the checks identify — there is no upper limit. Quality is the constraint: only generate items that answer a definitive NO to one of the checks above.
 3. Priority: critical = absence makes app non-functional (max 1-2); high = core; medium = supporting.
 4. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
 5. functional_area: short snake_case.
