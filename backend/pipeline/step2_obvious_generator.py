@@ -77,6 +77,31 @@ Before generating anything for this check, you MUST quote an EXACT phrase from t
 
 ---
 
+CHECK 7 — COMPLEMENTARY CAPABILITIES (what stated feature makes this obviously necessary?)
+
+For each stated capability, ask: is there an obvious complementary capability that only makes sense BECAUSE this feature exists — something a user of this app type would be surprised to find missing?
+
+Rules:
+- The complementary capability must be a dedicated UI screen, view, or page a user can navigate to (NOT a behavioral property, NOT a reaction to a condition)
+- It must be directly implied by a specific STATED requirement — do not invent features from app type alone
+- It must not already be covered by a stated requirement or generated in checks 1–6
+
+Examples of valid complementary capabilities:
+- User authentication is stated → "System must display the logged-in user's account information or profile" (a dedicated profile/account screen is expected whenever login exists)
+- Data sync or offline mode is stated → "System must display sync status or allow users to view locally cached data" (a sync/offline view is expected when sync is a stated capability)
+- Multi-user data isolation is stated → "System must display whose data the user is currently viewing" (needed so users can tell they're seeing their own data)
+
+Do NOT generate under Check 7:
+- Auth guards or redirects (reactions)
+- Error messages or empty states (reactions)
+- Features with no stated evidence — if no stated requirement implies it, skip it
+- Anything phrased "System must X when Y"
+
+→ YES (already stated or covered): skip
+→ NO (clearly missing complement to a stated capability): generate it
+
+---
+
 NEVER GENERATE (hard stops — not covered by any check above):
 - Auth guards, login redirects, session checks ("redirect when unauthenticated", "protect routes")
 - Empty state messages ("show message when list is empty")
