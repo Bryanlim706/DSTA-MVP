@@ -68,6 +68,7 @@ runtime  (only for electron_app)
 - **`depends_on` field:** lists the REQ-XXX ids from stated requirements that make each obvious requirement necessary.
 - **Parser:** handles LLM YES/NO reasoning text before JSON array via bracket_pos search.
 - **`_build_user_message`:** stated requirements formatted with `[req_id]` prefix for `depends_on` linkage.
+- **Code-level enforcement:** `_validate_and_normalise` drops any item whose `reasoning` does not start with "CHECK 2" or "CHECK 3" — guards against LLM hallucinating CHECK 4/5 labels despite prompt instructions.
 
 ### Step 3 — Generated Requirement Generator (COMPLETE)
 - LLM generates both L1a candidates (confidence ≥ 0.80) and L1b advisory items (< 0.80)
