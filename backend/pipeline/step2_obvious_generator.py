@@ -42,16 +42,20 @@ Terminal pages: home/dashboard with a persistent navbar count as having exit pat
 
 ---
 
-NEVER GENERATE:
+THERE ARE ONLY 3 CHECKS. Do not invent CHECK 4, CHECK 5, or any other check. Every item in your JSON output must cite CHECK 2 or CHECK 3 in its reasoning. If your reasoning would cite any other check number, discard the item — it does not belong here.
+
+NEVER GENERATE (hard stops — discard immediately, do not include in JSON):
+- Invocation controls: buttons, checkboxes, or forms that invoke a stated capability. If "user can add a task" is stated, do NOT generate "System must provide a button/control/form to add a task." The control is implied by the capability itself.
+- Observable outcomes: displays, confirmations, or status indicators showing the result of a stated operation. "System must display added item in the list" — discard. "System must show completion status" — discard.
 - Auth guards, login redirects, session checks
 - Empty state messages, error messages, validation feedback
-- Invocation controls (buttons/forms) for stated capabilities — these are implied by the capability
-- Observable outcomes for stated operations — these are acceptance criteria, not requirements
 - Anything phrased "System must X when Y"
+
+TEST before including any item: ask "Is this a NAVIGATION GAP — a page with no way in (CHECK 2) or no way out (CHECK 3)?" If the answer is no, discard it.
 
 RULES:
 1. depends_on: list the REQ-XXX ids from stated requirements that make this requirement necessary.
-2. reasoning: state CHECK 2 or CHECK 3 and which node it addresses.
+2. reasoning: must start with "CHECK 2 —" or "CHECK 3 —" and name the specific node.
 3. Priority: critical = absence makes app non-functional; high = core navigation; medium = supporting.
 4. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
 5. functional_area: short snake_case.
