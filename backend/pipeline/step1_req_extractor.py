@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -282,26 +283,36 @@ async def run(
     except Exception:
         pass
 
-    try:
-        response = await client.messages.create(
-            model=model,
-            max_tokens=16000,
-            system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": _build_user_message(requirements_text, spec_docs)}],
-        )
-        raw_items = _parse_llm_response(response.content[0].text)
-        requirements, dropped = _validate_and_normalise(raw_items, requirements_text, spec_docs)
-    except Exception as exc:
-        return {
-            "requirements": [],
-            "total_count": 0,
-            "docs_used": list(spec_docs.keys()),
-            "truncated_docs": truncated_docs,
-            "excluded_docs_count": excluded_docs_count,
-            "llm_model": model,
-            "dropped_count": 0,
-            "error": str(exc),
-        }
+    last_exc = None
+    for attempt in range(3):
+        try:
+            response = await client.messages.create(
+                model=model,
+                max_tokens=8000,
+                system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": _build_user_message(requirements_text, spec_docs)}],
+            )
+            raw_items = _parse_llm_response(response.content[0].text)
+            requirements, dropped = _validate_and_normalise(raw_items, requirements_text, spec_docs)
+            break
+        except anthropic.APIStatusError as exc:
+            last_exc = exc
+            if exc.status_code == 529 and attempt < 2:
+                await asyncio.sleep(10 * (attempt + 1))
+                continue
+            return {
+                "requirements": [], "total_count": 0,
+                "docs_used": list(spec_docs.keys()), "truncated_docs": truncated_docs,
+                "excluded_docs_count": excluded_docs_count, "llm_model": model,
+                "dropped_count": 0, "error": str(exc),
+            }
+        except Exception as exc:
+            return {
+                "requirements": [], "total_count": 0,
+                "docs_used": list(spec_docs.keys()), "truncated_docs": truncated_docs,
+                "excluded_docs_count": excluded_docs_count, "llm_model": model,
+                "dropped_count": 0, "error": str(exc),
+            }
 
     return {
         "requirements": requirements,
