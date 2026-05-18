@@ -1,4 +1,4 @@
-type Stage = 'upload' | 'loading' | 'step_2_complete' | 'error'
+type Stage = 'upload' | 'loading' | 'step_3_complete' | 'error'
 
 const STEPS: { id: number; label: string; sub?: boolean }[] = [
   { id: -1,  label: 'Upload' },
@@ -23,20 +23,21 @@ const STEPS: { id: number; label: string; sub?: boolean }[] = [
   { id: 17,  label: 'Dashboard' },
 ]
 
-const BUILT = new Set([-1, 0, 1, 2])
+const BUILT = new Set([-1, 0, 1, 2, 3])
 
 function activeStepId(stage: Stage): number {
   if (stage === 'upload') return -1
   if (stage === 'loading') return 0
-  if (stage === 'step_2_complete') return 2
+  if (stage === 'step_3_complete') return 3
   return -1
 }
 
 function isComplete(id: number, stage: Stage): boolean {
-  if (id === -1) return stage === 'loading' || stage === 'step_2_complete'
-  if (id === 0)  return stage === 'step_2_complete'
-  if (id === 1)  return stage === 'step_2_complete'
-  if (id === 2)  return stage === 'step_2_complete'
+  if (id === -1) return stage === 'loading' || stage === 'step_3_complete'
+  if (id === 0)  return stage === 'step_3_complete'
+  if (id === 1)  return stage === 'step_3_complete'
+  if (id === 2)  return stage === 'step_3_complete'
+  if (id === 3)  return stage === 'step_3_complete'
   return false
 }
 
