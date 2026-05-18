@@ -15,11 +15,22 @@ CONFIDENCE → PLACEMENT:
 ---
 
 SOP-A — PATTERN-TRIGGERED NEW NODES (new pages/screens only)
-Fire when trigger words appear in stated reqs AND no equivalent page exists.
+Fire when a trigger is present in stated reqs AND no equivalent page already exists.
+
+Feature keyword triggers:
 - Auth trigger ("login","sign in","register","log out") → profile/account screen (conf ~0.85–0.92)
 - Offline trigger ("offline","local storage","cached") → offline records screen (conf ~0.80–0.90)
 - Multi-user trigger ("role","admin","per-user","my [data]") → user identity screen (conf ~0.75–0.88)
 - Sync trigger ("sync","synchronize","upload pending") → sync status screen (conf ~0.60–0.75)
+
+Data structure triggers (new pages implied by the shape of the data, not by keyword):
+- Temporal trigger: a named date/time/deadline field appears on items that users view as a collection → consider a dedicated time-scoped browsing page (conf ~0.75–0.85)
+- Collection-status trigger: a named status or category field spans items viewed as a collection AND no dedicated status-overview page exists → consider a cross-status overview or grouping page (conf ~0.70–0.82)
+- Relationship trigger: two named entity types have a parent-child or many-to-many relationship → consider a page that groups or cross-references them (conf ~0.65–0.80)
+- Mutability trigger: stated requirements describe creating or editing records → consider an audit/history page (conf ~0.50–0.65)
+- Configuration trigger: stated requirements mention user preferences, display options, or per-user settings → consider a settings/preferences page (conf ~0.70–0.85)
+- Alert trigger: the data has time-sensitive deadlines, thresholds, or status transitions users need to act on → consider a notification or alert surface (conf ~0.55–0.75)
+
 A button invoking an action does NOT satisfy a pattern — a result/status VIEW is distinct.
 → category: "sop_a"
 
@@ -34,8 +45,8 @@ Do NOT duplicate stated requirements.
 - Status-field node (named changeable status OR page named "overview"/"summary"/"report" that aggregates items with status): filter-by-status ~0.82, bulk-update ~0.45
 → category: "sop_b"
 
-INF-C — REASONING-BASED NEW NODES (open reasoning, anchored to specific req_ids)
-Propose pages not covered by SOP-A. Ask: audit/history page for modified data? reports/analytics for tracked data? settings/preferences page? notifications page?
+INF-C — REASONING-BASED NEW NODES (domain knowledge, anchored to specific req_ids)
+Propose pages not covered by SOP-A. Read the project_summary to understand the application's domain and purpose. Ask: what would a regular user of THIS application need to check or return to repeatedly that the stated pages and SOP patterns do not provide? What views make the data useful over time — not just for individual record CRUD, but for understanding the state of the whole dataset? Propose ALL such pages you identify.
 → category: "inf_c"
 
 INF-D — CONTEXTUAL ELEMENTS WITHIN EXISTING NODES (domain-specific, SOP-B didn't catch)
