@@ -1,3 +1,4 @@
+import asyncio
 import json
 import anthropic
 
@@ -306,31 +307,39 @@ async def run(
     client: anthropic.AsyncAnthropic,
 ) -> dict:
     model = "claude-haiku-4-5-20251001"
-    try:
-        response = await client.messages.create(
-            model=model,
-            max_tokens=16000,
-            system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": _build_user_message(step0_result, step1_requirements, step2_requirements)}],
-        )
-        raw_items = _parse_llm_response(response.content[0].text)
-        requirements, dropped = _validate_and_normalise(raw_items, step1_requirements, step2_requirements)
-    except Exception as exc:
-        return {
-            "requirements": [], "total_count": 0,
-            "sop_count": 0, "inference_count": 0,
-            "llm_model": model, "dropped_count": 0, "error": str(exc),
-        }
-
-    sop = sum(1 for r in requirements if r.get("category", "").startswith("sop"))
-    inf = sum(1 for r in requirements if r.get("category", "").startswith("inf"))
-
+    last_exc = None
+    for attempt in range(3):
+        try:
+            response = await client.messages.create(
+                model=model,
+                max_tokens=16000,
+                system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": _build_user_message(step0_result, step1_requirements, step2_requirements)}],
+            )
+            raw_items = _parse_llm_response(response.content[0].text)
+            requirements, dropped = _validate_and_normalise(raw_items, step1_requirements, step2_requirements)
+            sop = sum(1 for r in requirements if r.get("category", "").startswith("sop"))
+            inf = sum(1 for r in requirements if r.get("category", "").startswith("inf"))
+            return {
+                "requirements": requirements,
+                "total_count": len(requirements),
+                "sop_count": sop,
+                "inference_count": inf,
+                "llm_model": model,
+                "dropped_count": dropped,
+                "error": None,
+            }
+        except anthropic.APIStatusError as exc:
+            last_exc = exc
+            if exc.status_code == 529 and attempt < 2:
+                await asyncio.sleep(10 * (attempt + 1))
+                continue
+            break
+        except Exception as exc:
+            last_exc = exc
+            break
     return {
-        "requirements": requirements,
-        "total_count": len(requirements),
-        "sop_count": sop,
-        "inference_count": inf,
-        "llm_model": model,
-        "dropped_count": dropped,
-        "error": None,
+        "requirements": [], "total_count": 0,
+        "sop_count": 0, "inference_count": 0,
+        "llm_model": model, "dropped_count": 0, "error": str(last_exc),
     }
