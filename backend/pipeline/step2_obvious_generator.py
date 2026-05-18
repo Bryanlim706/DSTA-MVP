@@ -186,7 +186,7 @@ async def run(
         try:
             response = await client.messages.create(
                 model=model,
-                max_tokens=8192,
+                max_tokens=4096,
                 system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": _build_user_message(step0_result, step1_requirements)}],
             )
