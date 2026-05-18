@@ -26,7 +26,7 @@ export async function pollJob(
   jobId: string,
   onUpdate: (job: Job) => void,
   intervalMs = 2000,
-  timeoutMs = 120_000,
+  timeoutMs = 300_000,
 ): Promise<Job> {
   const deadline = Date.now() + timeoutMs
 
