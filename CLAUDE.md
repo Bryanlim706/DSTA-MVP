@@ -107,9 +107,19 @@ runtime  (only for electron_app)
 
 ---
 
+### Step 3.5 — Human Requirement Confirmation (COMPLETE)
+- Pipeline pauses at `waiting_for_confirmation` after Step 3; resumes when user POSTs to confirm endpoint
+- `POST /api/jobs/{job_id}/confirm` — validates job state, stores locked L1a as `step_results.step_3_5`, sets status to `confirmed`
+- Frontend `ConfirmationTable.tsx` — three-section review table:
+  - **Section 1 (L1a)**: stated + obvious pre-included; Step 3 l1a candidates pre-included but demotable. Priority dropdown updates weight live.
+  - **Section 2 (L1b Advisory)**: Step 3 l1b items, each promotable to L1a
+  - **Section 3**: inline add-requirement form → `CUSTOM-001` IDs
+- Action bar: **Skip** (stated + obvious only, `skipped=true`) and **Confirm (N in score)**
+- `step_3_5` result stored in job JSON: `confirmed_requirements`, `confirmed_at`, `skipped`, `l1a_count`, `promoted_count`, `deleted_count`, `added_count`
+- ResultPage shows a green summary banner with counts after confirmation
+
 ## What has NOT been built yet
 
-- Step 3.5 — Human Confirmation UI (pipeline pauses at `waiting_for_confirmation`)
 - Steps 4–17 (see PLAN.md for full pipeline)
 - Docker sandbox (Step 11)
 
@@ -145,6 +155,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
         RequirementsResult.tsx       # Step 1 result display
         ObviousRequirementsResult.tsx # Step 2 result display
         GeneratedRequirementsResult.tsx # Step 3 result display (L1a/L1b panels)
+        ConfirmationTable.tsx        # Step 3.5 review/edit table (promote/demote/add/delete)
       App.tsx                        # Stage state machine
   uploads/                           # Runtime — gitignored
   jobs/                              # Runtime — gitignored
@@ -224,8 +235,7 @@ Both files must be in the same commit as the code — not a follow-up commit. Th
 
 ## Next steps
 
-1. Build Step 3.5 — Human Confirmation UI (POST /api/jobs/{id}/confirm, frontend review table, pipeline pauses at `waiting_for_confirmation`)
-2. Build Step 4 — Repo Parser (outputs `languages`, `api_endpoints`, `database_models`)
+1. Build Step 4 — Repo Parser (outputs `languages`, `api_endpoints`, `database_models`)
 
 ---
 

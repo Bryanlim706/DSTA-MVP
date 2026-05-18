@@ -81,9 +81,10 @@ async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
             step2_result["requirements"],
             step0_result,
             client,
+            project_summary=step1_result.get("project_summary", ""),
         )
         add_step_result(job_id, "step_3", step3_result)
-        update_job(job_id, {"status": "step_3_complete", "current_step": 3})
+        update_job(job_id, {"status": "waiting_for_confirmation", "current_step": 3})
     except Exception as e:
         update_job(job_id, {"status": "error", "errors": [str(e)]})
 

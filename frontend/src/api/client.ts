@@ -1,4 +1,4 @@
-import type { Job } from '../types'
+import type { ConfirmedRequirement, Job } from '../types'
 
 const API_BASE = 'http://localhost:8000/api'
 
@@ -51,4 +51,20 @@ export async function pollJob(
   }
 
   throw new Error('Timed out waiting for analysis to complete')
+}
+
+export async function confirmRequirements(
+  jobId: string,
+  requirements: ConfirmedRequirement[],
+  skipped = false,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requirements, skipped }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Confirmation failed')
+  }
 }

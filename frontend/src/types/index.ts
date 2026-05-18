@@ -91,11 +91,34 @@ export interface Step3Result {
   error?: string | null
 }
 
+export interface ConfirmedRequirement {
+  req_id: string
+  description: string
+  tag: 'stated' | 'obvious' | 'generated' | 'custom'
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  weight: number
+  functional_area?: string
+  testable: boolean
+  source: string
+  promoted?: boolean
+}
+
+export interface Step35Result {
+  confirmed_requirements: ConfirmedRequirement[]
+  confirmed_at: string
+  skipped: boolean
+  l1a_count: number
+  promoted_count: number
+  deleted_count: number
+  added_count: number
+}
+
 export interface StepResults {
   step_0?: Step0Result
   step_1?: Step1Result
   step_2?: Step2Result
   step_3?: Step3Result
+  step_3_5?: Step35Result
 }
 
 export type JobStatus =
@@ -104,6 +127,7 @@ export type JobStatus =
   | 'step_2_complete'
   | 'step_3_complete'
   | 'waiting_for_confirmation'
+  | 'confirmed'
   | 'complete'
   | 'error'
 

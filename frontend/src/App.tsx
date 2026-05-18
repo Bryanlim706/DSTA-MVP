@@ -1,14 +1,15 @@
 import { useState } from 'react'
-import { pollJob } from './api/client'
+import { confirmRequirements, getJob, pollJob } from './api/client'
 import ClassificationResult from './components/ClassificationResult'
+import ConfirmationTable from './components/ConfirmationTable'
 import GeneratedRequirementsResult from './components/GeneratedRequirementsResult'
 import ObviousRequirementsResult from './components/ObviousRequirementsResult'
 import RequirementsResult from './components/RequirementsResult'
 import Sidebar from './components/Sidebar'
 import UploadPage from './pages/UploadPage'
-import type { Job } from './types'
+import type { ConfirmedRequirement, Job } from './types'
 
-type Stage = 'upload' | 'loading' | 'step_3_complete' | 'error'
+type Stage = 'upload' | 'loading' | 'confirming' | 'step_3_complete' | 'error'
 
 function LoadingView({ job }: { job: Job | null }) {
   const stepLabel =
@@ -57,6 +58,7 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
   const step1 = job.step_results.step_1!
   const step2 = job.step_results.step_2!
   const step3 = job.step_results.step_3
+  const step35 = job.step_results.step_3_5
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-12">
@@ -64,7 +66,7 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Steps 0–3 complete</p>
+            <p className="text-xs text-gray-400 mt-0.5">Steps 0–3.5 complete</p>
             <p className="text-[10px] text-gray-300 mt-0.5 font-mono">{job.job_id}</p>
           </div>
           <button
@@ -91,9 +93,31 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
           </div>
         )}
 
-        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-700">
-          <span className="font-medium">Next:</span> Step 3.5 — Human Confirmation (coming soon)
-        </div>
+        {step35 && (
+          <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-sm font-semibold text-green-800">Step 3.5 — L1a Locked</span>
+              {step35.skipped && (
+                <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">skipped</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-3 text-xs text-green-700">
+              <span><span className="font-medium">{step35.l1a_count}</span> requirements confirmed</span>
+              {step35.promoted_count > 0 && (
+                <span><span className="font-medium">{step35.promoted_count}</span> promoted from generated</span>
+              )}
+              {step35.deleted_count > 0 && (
+                <span><span className="font-medium">{step35.deleted_count}</span> removed</span>
+              )}
+              {step35.added_count > 0 && (
+                <span><span className="font-medium">{step35.added_count}</span> custom added</span>
+              )}
+              <span className="text-green-500">
+                {new Date(step35.confirmed_at).toLocaleTimeString()}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -109,9 +133,26 @@ export default function App() {
     try {
       const completed = await pollJob(jobId, (j) => setJob(j))
       setJob(completed)
-      setStage('step_3_complete')
+      if (completed.status === 'waiting_for_confirmation') {
+        setStage('confirming')
+      } else {
+        setStage('step_3_complete')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
+      setStage('error')
+    }
+  }
+
+  async function handleConfirm(requirements: ConfirmedRequirement[], skipped: boolean) {
+    if (!job) return
+    try {
+      await confirmRequirements(job.job_id, requirements, skipped)
+      const updated = await getJob(job.job_id)
+      setJob(updated)
+      setStage('step_3_complete')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Confirmation failed')
       setStage('error')
     }
   }
@@ -128,6 +169,7 @@ export default function App() {
       <main className="flex-1 overflow-y-auto">
         {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
         {stage === 'loading' && <LoadingView job={job} />}
+        {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
         {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} />}
         {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
       </main>

@@ -432,6 +432,7 @@ Note: Key accuracy step. Consider requirement dependencies and branching which w
 ---
 
 ### Step 3.5: Human Requirement Confirmation *(optional)*
+**Status: COMPLETE**
 **Phase: FCom setup — locks L1a**
 **Tools:** React UI, FastAPI endpoint, async job queue
 **Input:** Step 1 (stated) + Step 2 (obvious) + Step 3 (L1b with strength and weights)
@@ -800,7 +801,7 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCor — thei
 | Milestone | Steps | Status |
 |---|---|---|
 | 1 — Scaffold + Upload + Step 0 | Steps −1, 0, upload endpoint, job store, frontend | ✓ DONE |
-| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | Steps 1, 2, 3 ✓ DONE \| Step 3.5 not started |
+| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | ✓ DONE |
 | 3 — Repo Parser | Step 4 | Not started |
 | 4 — Inventory + Mapping + Completeness | Steps 5, 6, 7 | Not started |
 | 5 — AC Generation + Test Execution | Steps 8, 9, 10, 11, 12 | Not started |
