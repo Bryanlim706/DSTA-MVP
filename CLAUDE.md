@@ -57,21 +57,35 @@ runtime  (only for electron_app)
 - JSON truncation recovery: if response is cut off mid-array, recovers items up to last complete `},`
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
 - `functional_area` field on each requirement for cascade advisory grouping
-- **Prompt design (graph model):** Extracts requirements grounded in sentences that name a specific UI element — a page/screen (by name or HTML filename), a named form, a named button/link, or a named UI component (nav bar, sidebar, data table). Subjects that are backend files, databases, or automatic processes are always skipped. Two sides of the same behavior = one requirement. `critical` flags root requirements with many dependents.
-- **Extraction rule:** Extract when the sentence names a specific page, screen, form, button, or UI component as the subject or focus. Skip when the subject is app.py, a database, an automatic behavior, or a data field. Source quote must be one verbatim sentence containing that named element.
+- **Page-identity rule:** Named entities do NOT require `.html` filenames — "the contacts page shows..." is extractable even if no .html file is named.
+- **Behavioural decomposition rule:** Automatic behaviours that only make sense because the user can change a value → extract the user capability. "Rows with done status sink to the bottom" → extract "System must allow users to change the status of an item". The automatic behaviour sentence is the source_quote.
+- **Extraction rule:** Extract when the sentence describes what a named page, screen, form, or UI component DOES for the user. Skip when the subject is a backend file, database, automatic process, or data field.
 
 ### Step 2 — Obvious Requirement Generator (COMPLETE)
-- LLM generates requirements so fundamental users expect them but never write them down
-- Deduplicates against Step 1 stated requirements (semantic, not just string-match)
-- `functional_area` field on each requirement; passed with descriptions in user message for better semantic dedup
+- LLM finds graph connectivity gaps — pages that cannot be reached or cannot be left
 - `discovered_pages` from Step 0 passed to LLM as ground-truth node inventory (codebase files)
-- **Prompt design (graph model):** 6-check graph traversal — (1) build node list from stated + discovered pages, (2) entry paths per node, (3) exit paths per node (mechanism-agnostic: back/breadcrumb/navbar/sidebar), (4) observable outcomes per stated operation, (5) invocation controls per stated capability, (6) status toggle only if explicit sort phrase quoted. Hard stops: auth guards, empty states, error messages, session management, filter/sort controls (Step 3), anything phrased "System must X when Y".
+- **Prompt design (3-check deterministic):** (1) build node list from stated + discovered pages, (2) entry paths per node — is there a stated inbound navigation element? (3) exit paths per node — is there a stated way to leave it? (mechanism-agnostic). Hard stops: auth guards, invocation controls for stated capabilities, observable outcomes, error messages, anything phrased "System must X when Y".
+- **`depends_on` field:** lists the REQ-XXX ids from stated requirements that make each obvious requirement necessary.
 - **Parser:** handles LLM YES/NO reasoning text before JSON array via bracket_pos search.
+- **`_build_user_message`:** stated requirements formatted with `[req_id]` prefix for `depends_on` linkage.
+
+### Step 3 — Generated Requirement Generator (COMPLETE)
+- LLM generates both L1a candidates (confidence ≥ 0.80) and L1b advisory items (< 0.80)
+- **5 categories + structural edges:**
+  - SOP-A: pattern-triggered new nodes (auth → profile screen; offline → offline records screen; multi-user → user identity screen; sync → sync status screen)
+  - SOP-B: rule-triggered elements within existing nodes (filter/search/sort for list nodes; edit/delete for detail nodes; date-range/export for dashboards)
+  - INF-C: reasoning-based new nodes (audit history, reports/analytics, settings/preferences, notifications)
+  - INF-D: contextual elements within existing nodes (domain-specific, not covered by SOP-B)
+  - INF-E: missing edges between existing nodes (cross-links and shortcuts beyond Step 2 minimum)
+  - structural_edge: entry/exit edges for new nodes generated in SOP-A/INF-C (confidence: 1.0)
+- **Confidence → placement:** ≥ 0.80 → l1a; 0.60–0.79 → l1b strongly_implied; 0.40–0.59 → l1b medium; < 0.40 → l1b weak
+- **Result envelope fields:** `requirements`, `total_count`, `sop_count`, `inference_count`, `llm_model`, `dropped_count`, `error`
+- **Frontend:** `GeneratedRequirementsResult.tsx` — L1a panel (green, ≥ 80% confidence) and L1b panel (yellow advisory), category badges (blue=rule, purple=inferred, gray=nav-gap), expandable rows show reasoning + confidence_reason + depends_on
 
 ### Frontend (COMPLETE)
 - React + TypeScript + Vite + Tailwind CSS
 - Upload page: drag-and-drop zip + requirements textarea, file size display, validation
-- Results: ClassificationResult (Step 0), RequirementsResult (Step 1), ObviousRequirementsResult (Step 2)
+- Results: ClassificationResult (Step 0), RequirementsResult (Step 1), ObviousRequirementsResult (Step 2), GeneratedRequirementsResult (Step 3)
 - Each requirement row expands to show source quote / reasoning + functional_area badge
 - Job list endpoint `GET /api/jobs` lets you find the latest job_id without copying from the frontend
 
@@ -82,13 +96,12 @@ runtime  (only for electron_app)
 - `GET /api/jobs` — lists recent jobs (most-recent-first, default limit 10)
 - Job store: one JSON file per job in `./jobs/{job_id}.json`
 - Uploads stored in `./uploads/{job_id}/project.zip`
-- Pipeline runs Steps 0 → 1 → 2 as async background task; status tracked in job JSON
+- Pipeline runs Steps 0 → 1 → 2 → 3 as async background task; status tracked in job JSON (`step_3_complete`)
 
 ---
 
 ## What has NOT been built yet
 
-- Step 3 — L1b Implied Enhancement Generator
 - Step 3.5 — Human Confirmation UI (pipeline pauses at `waiting_for_confirmation`)
 - Steps 4–17 (see PLAN.md for full pipeline)
 - Docker sandbox (Step 11)
@@ -112,6 +125,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       step0_classifier.py            # Project type + framework classifier
       step1_req_extractor.py         # Stated requirement extractor
       step2_obvious_generator.py     # Obvious requirement generator
+      step3_implied_generator.py     # 5-category confidence-scored generator
     storage/
       job_store.py                   # JSON file job persistence + list_jobs()
   frontend/
@@ -123,6 +137,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
         ClassificationResult.tsx     # Step 0 result display
         RequirementsResult.tsx       # Step 1 result display
         ObviousRequirementsResult.tsx # Step 2 result display
+        GeneratedRequirementsResult.tsx # Step 3 result display (L1a/L1b panels)
       App.tsx                        # Stage state machine
   uploads/                           # Runtime — gitignored
   jobs/                              # Runtime — gitignored
@@ -202,9 +217,8 @@ Both files must be in the same commit as the code — not a follow-up commit. Th
 
 ## Next steps
 
-1. Build Step 3 — L1b Implied Enhancement Generator (`backend/pipeline/step3_implied_generator.py`)
-2. Build Step 3.5 — Human Confirmation UI (POST /api/jobs/{id}/confirm, frontend review table)
-3. Build Step 4 — Repo Parser (outputs `languages`, `api_endpoints`, `database_models`)
+1. Build Step 3.5 — Human Confirmation UI (POST /api/jobs/{id}/confirm, frontend review table, pipeline pauses at `waiting_for_confirmation`)
+2. Build Step 4 — Repo Parser (outputs `languages`, `api_endpoints`, `database_models`)
 
 ---
 

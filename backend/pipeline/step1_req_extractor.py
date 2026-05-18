@@ -38,17 +38,33 @@ WHAT TO SKIP: Technical and automatic behaviors — even when explicitly documen
 
 EXTRACTION RULE
 
-Extract a requirement only when the sentence names a specific UI element as the subject or focus:
-- A page or screen: "the login screen", "the dashboard", "the settings page", "login.html", "home.html"
-- A form: "the registration form", "the add-task form", "the checkout form"
-- A named button or link: "the 'logout' button", "the 'save changes' button", "the 'add category' link"
-- A named UI component: "the navigation bar", "the sidebar", "the category page", "the data table"
+Extract a requirement when the sentence describes what a named page, screen, form, or UI component DOES for the user. The source_quote must contain a reference to that named entity.
+
+Named entities include (not exhaustive):
+- Any named page or screen: "the login screen", "the dashboard", "the settings page", "login.html", "the contacts view"
+- Any named form: "the registration form", "the add-task form", "the checkout form"
+- Any named button or link: "the logout button", "the save changes button", "the add category link"
+- Any named UI component: "the navigation bar", "the sidebar", "the data table", "the task table"
+
+NOTE: Named entities do NOT require .html filenames. "The contacts page shows..." is extractable even if no .html file is named.
 
 SKIP sentences where the subject is:
 - A backend file: app.py, server.py, index.js, routes.py
 - A database or data store: "the database", "sqlite3", "Supabase"
-- An automatic process: hashing, sorting, redirecting, validating, clearing
+- An automatic process or reaction: hashing, sorting, redirecting, validating, clearing
 - A data field or passive noun: "passwords", "rows", "entries", "the input"
+
+---
+
+BEHAVIOURAL DECOMPOSITION RULE
+
+If the source describes an automatic behaviour that only makes sense because the user can change a value, extract the user capability that enables that behaviour:
+
+- "Rows with done status sink to the bottom of the table" → extract "System must allow users to change the status of an item"
+- "Tasks are ordered by priority" → extract "System must allow users to set the priority of a task"
+- "Entries are grouped by due date" → extract "System must allow users to set the due date of an entry"
+
+The automatic behaviour sentence IS the source_quote (it exists verbatim in the source). Tag these as `stated`.
 
 ---
 
@@ -57,16 +73,17 @@ EXAMPLES
 EXTRACT:
 - "The login page requires username and password" → login capability
 - "The dashboard displays the user's recent activity" → dashboard view
+- "The contacts view shows name, phone, and email for each contact" → contacts list view
 - "The 'add task' button opens a form to create a new task" → add task capability
 - "The navigation bar shows all user categories" → nav bar view
 - "Each category page has a back-to-home button and a task table" → back navigation + table view
 - "The settings screen allows users to change their password" → change password capability
+- "Rows with done status sink to the bottom of the table" → DECOMPOSE: user can change item status
 - "Javascript allows deletion of categories from the navigation bar" → delete category
 
 SKIP:
 - "Passwords are hashed before storing" → automatic process, no UI element named
 - "Duplicate entries are prevented on form submission" → validation rule, no UI element named
-- "Rows with done status sink to the bottom of the table" → automatic sorting, no UI element named
 - "app.py validates the input and blocks duplicate names" → backend file as subject
 - "The database stores user credentials" → data store as subject
 - "Users are redirected to login when unauthenticated" → automatic reaction, no UI element named
@@ -75,13 +92,13 @@ SKIP:
 
 DEDUPLICATION
 
-If two sentences describe the same user action from different angles (e.g. "the plus button opens add_row.html" and "add_row.html lets users add a task row"), extract ONE requirement.
+If two sentences describe the same user action from different angles, extract ONE requirement.
 
 ---
 
 RULES
 
-1. source_quote must be ONE sentence copied verbatim from the source. It must name a specific UI element as described above.
+1. source_quote must be ONE sentence copied verbatim from the source. It must name a specific UI element or describe an automatic behaviour that implies a user capability (per Behavioural Decomposition Rule).
 2. No inference — description must be derivable from source_quote alone.
 3. Decompose compound capabilities: "users can register and log in" = two requirements.
 4. No artificial splits: two sides of the same behavior = one requirement.

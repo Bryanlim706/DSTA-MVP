@@ -4,9 +4,9 @@ import anthropic
 
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst. Your job is to find gaps in the stated requirements by systematically checking the application graph — pages, navigation paths, and operation completeness.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Your job is to find graph connectivity gaps — pages that cannot be reached or cannot be left — in the application's stated requirements.
 
-Work through the 6 checks below IN ORDER. For each check, answer YES or NO, then generate a requirement only for each NO answer. Output your YES/NO reasoning first, then a JSON array of generated requirements at the end.
+Work through the 3 checks below IN ORDER. For each check, reason explicitly YES/NO per node, then output a JSON array.
 
 ---
 
@@ -16,123 +16,58 @@ List every page or screen in this application by combining:
 (a) Pages named in the stated requirements
 (b) Pages from the discovered page files (provided below)
 
-Deduplicate: if the same page appears in both sources, list it once.
+Deduplicate: if the same page appears in both, list it once.
 This is your node list. All subsequent checks operate on these nodes.
 
 ---
 
 CHECK 2 — ENTRY PATHS (how does the user GET to each node?)
 
-For each node (except the landing/home page): is there a stated requirement describing a button, link, navbar item, sidebar item, or any UI element that navigates TO it?
+For each node EXCEPT the landing/home page:
+Is there a stated requirement describing a button, link, navbar item, sidebar item, or any UI element that navigates TO this node?
 
 → YES: skip
-→ NO: generate { description: "System must provide a way to navigate to [node]." }
+→ NO: generate a requirement
 
 ---
 
 CHECK 3 — EXIT PATHS (how does the user LEAVE each node?)
 
-For each node: is there at least one stated requirement describing a way to leave it — back button, breadcrumb, navbar, sidebar, or any navigation element?
+For each node:
+Is there at least one stated requirement describing a way to leave it — back button, breadcrumb, navbar, sidebar, or any navigation element?
 
-Terminal pages (the home/dashboard with a persistent navbar count as having exit paths via the navbar).
+Terminal pages: home/dashboard with a persistent navbar count as having exit paths.
 → YES: skip
-→ NO: generate { description: "System must provide navigation away from [node]." }
-
-Do NOT prescribe the mechanism (back button vs breadcrumb vs navbar) — that is a design decision.
+→ NO: generate a requirement. Do NOT prescribe the mechanism — that is a design decision.
 
 ---
 
-CHECK 4 — OBSERVABLE OUTCOMES (can the user see what their action did?)
-
-Go through the STATED REQUIREMENTS list item by item. For each stated requirement that describes a user-triggered operation — this includes any action that changes data, changes state, or produces visible output (add, edit, delete, upload, submit a form, filter, search, generate, mark complete, assign, confirm, save, start an analysis, or any other capability) — ask:
-
-Is there another stated requirement that shows the user the result? This could be a view, list, table, status indicator, updated display, or any visible output confirming the operation happened.
-
-→ YES (another stated requirement shows the result): skip
-→ NO (no stated requirement shows the result): generate { description: "System must display the result of [operation] to the user." }
-
-Note: filtering and searching produce visible output (filtered/searched results). If filtering is stated as a capability, a display of the filtered results is required.
-
----
-
-CHECK 5 — OPERATION INVOCATION (can the user trigger each capability?)
-
-Go through the STATED REQUIREMENTS list item by item. For each stated capability, ask:
-
-Is there a stated requirement describing a UI control — button, form, toggle, dropdown, link, menu item — that lets the user invoke this capability from the relevant page?
-
-If the stated requirement itself already describes the control that invokes it (e.g. "the plus button opens the add row form"), answer YES.
-→ YES: skip
-→ NO: generate { description: "System must provide a control to invoke [capability] from [page]." }
-
----
-
-CHECK 6 — STATUS CHANGE CONTROL (HARD RULE)
-
-Before generating anything for this check, you MUST quote an EXACT phrase from the stated requirements that describes items being sorted or ordered by status (e.g. "sink to the bottom", "prioritised at the top", "sorted by status"). If you cannot quote such a phrase, output nothing for this check — no exceptions.
-
-→ No quotable sorting phrase: SKIP entirely, generate nothing
-→ Sorting phrase exists AND a user-controllable status change is already stated: skip
-→ Sorting phrase exists AND no status change control is stated: generate { description: "System must allow users to change the status of a [item]." }
-
----
-
-CHECK 7 — COMPLEMENTARY CAPABILITIES (what stated feature makes this obviously necessary?)
-
-For each stated capability, ask: is there an obvious complementary capability that only makes sense BECAUSE this feature exists — something a user of this app type would be surprised to find missing?
-
-Rules:
-- The complementary capability must be a dedicated UI screen, view, or page a user can navigate to (NOT a behavioral property, NOT a reaction to a condition)
-- It must be directly implied by a specific STATED requirement — do not invent features from app type alone
-- It must not already be covered by a stated requirement or generated in checks 1–6
-
-Examples of valid complementary capabilities:
-- User authentication is stated → "System must display the logged-in user's account information or profile" (a dedicated profile/account screen is expected whenever login exists)
-- Data sync or offline mode is stated → "System must display sync status or allow users to view locally cached data" (a sync/offline view is expected when sync is a stated capability)
-- Multi-user data isolation is stated → "System must display whose data the user is currently viewing" (needed so users can tell they're seeing their own data)
-
-Do NOT generate under Check 7:
-- Auth guards or redirects (reactions)
-- Error messages or empty states (reactions)
-- Features with no stated evidence — if no stated requirement implies it, skip it
+NEVER GENERATE:
+- Auth guards, login redirects, session checks
+- Empty state messages, error messages, validation feedback
+- Invocation controls (buttons/forms) for stated capabilities — these are implied by the capability
+- Observable outcomes for stated operations — these are acceptance criteria, not requirements
 - Anything phrased "System must X when Y"
 
-→ YES (already stated or covered): skip
-→ NO (clearly missing complement to a stated capability): generate it
-
----
-
-NEVER GENERATE (hard stops — not covered by any check above):
-- Auth guards, login redirects, session checks ("redirect when unauthenticated", "protect routes")
-- Empty state messages ("show message when list is empty")
-- Error messages, validation feedback ("show error when X fails")
-- Data persistence, session management ("persist data across reloads")
-- Anything phrased "System must X when Y" or "System must X if Y"
-
-SEMANTIC DEDUPLICATION:
-Do not regenerate anything semantically equivalent to a stated requirement. A form that invokes a stated capability IS that capability — do not generate "display login form" if login is already stated.
-
----
-
-RULES
-1. reasoning: state which check number and which stated requirement or node it addresses.
-2. Generate as many requirements as the checks identify — there is no upper limit. Quality is the constraint: only generate items that answer a definitive NO to one of the checks above.
-3. Priority: critical = absence makes app non-functional (max 1-2); high = core; medium = supporting.
+RULES:
+1. depends_on: list the REQ-XXX ids from stated requirements that make this requirement necessary.
+2. reasoning: state CHECK 2 or CHECK 3 and which node it addresses.
+3. Priority: critical = absence makes app non-functional; high = core navigation; medium = supporting.
 4. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
 5. functional_area: short snake_case.
 
-Output your YES/NO check reasoning first, then:
-Return a valid JSON array (no markdown fences):
+Output your YES/NO reasoning per node first, then a JSON array (no markdown fences):
 [{
   "req_id": "OBV-001",
-  "description": "System must [verb] [object]",
+  "description": "System must provide a way to navigate to [node].",
   "source": "obvious",
-  "reasoning": "CHECK [N] — [node/operation] has no stated [entry/exit/invocation/outcome]",
+  "reasoning": "CHECK 2 — [node] has no stated inbound navigation element",
   "tag": "obvious",
+  "depends_on": ["REQ-003"],
   "priority": "high",
   "weight": 3.0,
   "testable": true,
-  "functional_area": "task_management"
+  "functional_area": "navigation"
 }]"""
 
 
@@ -143,7 +78,7 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
 
     if step1_requirements:
         stated = "\n".join(
-            f"{i}. [{r.get('functional_area', 'general')}] {r['description']}"
+            f"{i}. [{r.get('req_id', f'REQ-{i:03d}')}] [{r.get('functional_area', 'general')}] {r['description']}"
             for i, r in enumerate(step1_requirements, start=1)
         )
     else:
@@ -161,7 +96,7 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
         f"{pages_str}\n\n"
         f"=== STATED REQUIREMENTS (do not regenerate these) ===\n"
         f"{stated}\n\n"
-        f"Apply the 6-check graph analysis to generate obvious requirements for this application."
+        f"Apply all 3 checks to find navigation gaps."
     )
 
 
@@ -172,7 +107,6 @@ def _parse_llm_response(raw: str) -> list:
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0].strip()
     else:
-        # LLM emits YES/NO reasoning before the JSON array — skip to the first [
         bracket_pos = text.find("[")
         if bracket_pos > 0:
             text = text[bracket_pos:]
@@ -191,6 +125,7 @@ def _parse_llm_response(raw: str) -> list:
 
 def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list, int]:
     stated_lower = {r["description"].lower() for r in step1_requirements}
+    valid_req_ids = {r.get("req_id", "") for r in step1_requirements}
     valid = []
     dropped = 0
 
@@ -198,17 +133,14 @@ def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list
         if not isinstance(item, dict):
             dropped += 1
             continue
-
         desc = str(item.get("description", "")).strip()
         if not desc:
             dropped += 1
             continue
-
         reasoning = str(item.get("reasoning", "")).strip()
         if not reasoning:
             dropped += 1
             continue
-
         if desc.lower() in stated_lower:
             dropped += 1
             continue
@@ -222,6 +154,10 @@ def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list
         item["source"] = "obvious"
         item.setdefault("testable", True)
         item.setdefault("functional_area", "general")
+
+        raw_deps = item.get("depends_on", [])
+        item["depends_on"] = [d for d in (raw_deps if isinstance(raw_deps, list) else []) if d in valid_req_ids]
+
         valid.append(item)
 
     for i, item in enumerate(valid, start=1):
@@ -236,7 +172,6 @@ async def run(
     client: anthropic.AsyncAnthropic,
 ) -> dict:
     model = "claude-haiku-4-5-20251001"
-
     try:
         response = await client.messages.create(
             model=model,
@@ -247,17 +182,6 @@ async def run(
         raw_items = _parse_llm_response(response.content[0].text)
         requirements, dropped = _validate_and_normalise(raw_items, step1_requirements)
     except Exception as exc:
-        return {
-            "requirements": [],
-            "total_count": 0,
-            "llm_model": model,
-            "dropped_count": 0,
-            "error": str(exc),
-        }
+        return {"requirements": [], "total_count": 0, "llm_model": model, "dropped_count": 0, "error": str(exc)}
 
-    return {
-        "requirements": requirements,
-        "total_count": len(requirements),
-        "llm_model": model,
-        "dropped_count": dropped,
-    }
+    return {"requirements": requirements, "total_count": len(requirements), "llm_model": model, "dropped_count": dropped}

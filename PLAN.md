@@ -334,27 +334,28 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (obvious)**
 **Tools:** Python, LLM (AsyncAnthropic)
 **Input:** Step 0 (project_type, framework) + Step 1 (stated requirements list)
-**Two-type whitelist (only these two types are generated):**
-- Type A — Result or state-change bridge: a dedicated view showing the OUTPUT of a stated capability (e.g. task list view makes "add task" verifiable), or a control letting the user change a value a stated capability depends on (e.g. status toggle makes "sort by status" verifiable). Input forms that invoke a stated capability are NOT Type A — they are the stated capability itself.
-- Type B — Navigation affordance: a dedicated clickable element moving the user between the app's existing screens where no such navigation is stated (e.g. back button on category sub-pages).
-**Never generate:** auth guards, session management, data isolation, error feedback, validation responses, empty state messages, or anything that phrases as "System must X when Y."
-**Logic:** LLM generates obvious functional requirements that any user of this app type would naturally expect — so fundamental a user would never write them down, yet surprised to find missing.
-**Deduplication:** Step 1 stated requirements passed as context (with functional_area prefix) — LLM must not regenerate items already stated, including paraphrases and form/capability identity duplicates ("display a login form" = the login capability stated from the UI angle; skip it).
-**ISO 25010 rationale:** Completeness covers "all specified tasks and user objectives." Obvious requirements are user objectives implied by the app's purpose even when not explicitly written.
+**3-check deterministic prompt (graph connectivity gaps only):**
+- Check 1 — Build node list: combine pages from stated requirements + discovered page files (deduplicated)
+- Check 2 — Entry paths: for each node except home, is there a stated inbound navigation element? If NO → generate
+- Check 3 — Exit paths: for each node, is there a stated way to leave it? If NO → generate (mechanism-agnostic)
+**Never generate:** auth guards, session management, invocation controls for stated capabilities, observable outcomes for stated operations, error messages, empty states, or anything phrased "System must X when Y."
+**Logic:** LLM reasons YES/NO per node per check, then outputs JSON. Deterministic — only graph connectivity gaps, not enhancements.
+**Deduplication:** Step 1 stated requirements passed as context (with req_id + functional_area prefix).
 **Tag:** `obvious` | **Weight:** derives from priority (critical=4.0, high=3.0, medium=2.0, low=1.0) — same as Step 1
 **Output:**
 ```json
 [
   {
     "req_id": "OBV-001",
-    "description": "User can delete a task",
+    "description": "System must provide a way to navigate to [node].",
     "source": "obvious",
-    "reasoning": "Any task management app user expects to be able to delete tasks",
+    "reasoning": "CHECK 2 — [node] has no stated inbound navigation element",
     "tag": "obvious",
+    "depends_on": ["REQ-003"],
     "priority": "high",
     "weight": 3.0,
     "testable": true,
-    "functional_area": "task_management"
+    "functional_area": "navigation"
   }
 ]
 ```
@@ -366,46 +367,59 @@ Note: Key accuracy step. Consider requirement dependencies and branching which w
 ---
 
 ### Step 3: L1b Implied Enhancement Generator
-**Phase: FCom setup — builds L1b**
+**Status: COMPLETE**
+**Phase: FCom setup — builds L1b (and L1a candidates)**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 0 (project type) + Step 1 + Step 2 (combined L1a)
-**Logic:** Generates advisory enhancements beyond L1a. LLM assigns a **strength rating** to each item, which maps directly to its FA weight.
+**Input:** Step 0 (project type) + Step 1 + Step 2 (combined L1a pool)
+**5-category confidence-scored generation:**
+- SOP-A — Pattern-triggered new nodes (auth, offline, multi-user, sync patterns)
+- SOP-B — Rule-triggered elements within existing nodes (filter/search/sort for list nodes; edit/delete for detail nodes; date-range/export for dashboards)
+- INF-C — Reasoning-based new nodes (audit history, reports, settings, notifications)
+- INF-D — Contextual elements within existing nodes (domain-specific, not covered by SOP-B)
+- INF-E — Missing edges between existing nodes (cross-links beyond Step 2 minimum)
+- Structural edges — Entry/exit edges for any new nodes generated in SOP-A or INF-C (confidence: 1.0)
 
-| Strength | FA weight (L1Cx) |
-|---|---|
-| strongly_implied | 3 |
-| medium | 2 |
-| weak | 1 |
+**Confidence → placement:**
+- ≥ 0.80 → `l1_recommendation: "l1a"` (promoted to FCom scoring pool at Step 3.5)
+- 0.60–0.79 → `l1b`, strength: `strongly_implied`, weight: 3.0
+- 0.40–0.59 → `l1b`, strength: `medium`, weight: 2.0
+- < 0.40 → `l1b`, strength: `weak`, weight: 1.0
 
-**Key distinction from Step 2:** Step 2 generates what a user *expects* to be present (obvious = "of course it has delete"). Step 3 generates what a user *might want* but wouldn't be surprised to find missing (implied = "it would be nice if it had bulk delete").
-**Advisory only:** Not scored unless promoted to L1a at Step 3.5. `strongly_implied` items auto-surfaced at Step 3.5 as promotion candidates.
-**Tag:** `implied`
+**Tag:** `generated`
 **Output:**
 ```json
 [
   {
-    "req_id": "L1B-001",
-    "description": "User can filter tasks by status",
-    "source": "implied",
-    "reasoning": "Common in task managers; improves usability at scale",
-    "tag": "implied",
-    "strength": "strongly_implied",
+    "req_id": "GEN-001",
+    "description": "System must display a profile or account information screen.",
+    "source": "generated",
+    "tag": "generated",
+    "category": "sop_a",
+    "reasoning": "Pattern A — login stated (REQ-001); no profile screen found in stated or obvious reqs",
+    "depends_on": ["REQ-001"],
+    "confidence_score": 0.88,
+    "confidence_reason": "Login is stated; users universally expect a profile/account screen in authenticated apps",
+    "l1_recommendation": "l1a",
+    "priority": "high",
+    "strength": null,
     "weight": 3.0,
-    "priority": "medium",
-    "testable": true
-  },
-  {
-    "req_id": "L1B-002",
-    "description": "User can bulk-delete multiple tasks",
-    "source": "implied",
-    "reasoning": "Power user feature; not expected by default",
-    "tag": "implied",
-    "strength": "weak",
-    "weight": 1.0,
-    "priority": "low",
-    "testable": true
+    "testable": true,
+    "functional_area": "auth"
   }
 ]
+```
+
+**Step 3 result envelope:**
+```json
+{
+  "requirements": [...],
+  "total_count": 12,
+  "sop_count": 5,
+  "inference_count": 7,
+  "llm_model": "claude-haiku-4-5-20251001",
+  "dropped_count": 2,
+  "error": null
+}
 ```
 
 ---
@@ -779,7 +793,7 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCor — thei
 | Milestone | Steps | Status |
 |---|---|---|
 | 1 — Scaffold + Upload + Step 0 | Steps −1, 0, upload endpoint, job store, frontend | ✓ DONE |
-| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | Steps 1, 2 ✓ DONE \| Steps 3, 3.5 not started |
+| 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | Steps 1, 2, 3 ✓ DONE \| Step 3.5 not started |
 | 3 — Repo Parser | Step 4 | Not started |
 | 4 — Inventory + Mapping + Completeness | Steps 5, 6, 7 | Not started |
 | 5 — AC Generation + Test Execution | Steps 8, 9, 10, 11, 12 | Not started |

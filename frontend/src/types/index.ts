@@ -52,6 +52,7 @@ export interface Step2Requirement {
   weight: number
   testable: boolean
   functional_area?: string
+  depends_on?: string[]
 }
 
 export interface Step2Result {
@@ -62,16 +63,46 @@ export interface Step2Result {
   error?: string
 }
 
+export interface Step3Requirement {
+  req_id: string
+  description: string
+  source: 'generated'
+  tag: 'generated'
+  category: 'sop_a' | 'sop_b' | 'inf_c' | 'inf_d' | 'inf_e' | 'structural_edge'
+  reasoning: string
+  depends_on: string[]
+  confidence_score: number
+  confidence_reason: string
+  l1_recommendation: 'l1a' | 'l1b'
+  priority?: 'critical' | 'high' | 'medium' | 'low'
+  strength?: 'strongly_implied' | 'medium' | 'weak' | null
+  weight: number
+  testable: boolean
+  functional_area?: string
+}
+
+export interface Step3Result {
+  requirements: Step3Requirement[]
+  total_count: number
+  sop_count: number
+  inference_count: number
+  llm_model: string | null
+  dropped_count: number
+  error?: string | null
+}
+
 export interface StepResults {
   step_0?: Step0Result
   step_1?: Step1Result
   step_2?: Step2Result
+  step_3?: Step3Result
 }
 
 export type JobStatus =
   | 'created'
   | 'running'
   | 'step_2_complete'
+  | 'step_3_complete'
   | 'waiting_for_confirmation'
   | 'complete'
   | 'error'

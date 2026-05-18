@@ -6,7 +6,7 @@ from pathlib import Path
 import aiofiles
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 
-from pipeline import step0_classifier, step1_req_extractor, step2_obvious_generator
+from pipeline import step0_classifier, step1_req_extractor, step2_obvious_generator, step3_implied_generator
 from storage.job_store import add_step_result, create_job, get_job, update_job
 
 router = APIRouter()
@@ -74,7 +74,16 @@ async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
             step1_result["requirements"], step0_result, client
         )
         add_step_result(job_id, "step_2", step2_result)
-        update_job(job_id, {"status": "step_2_complete", "current_step": 2})
+        update_job(job_id, {"status": "running", "current_step": 3})
+
+        step3_result = await step3_implied_generator.run(
+            step1_result["requirements"],
+            step2_result["requirements"],
+            step0_result,
+            client,
+        )
+        add_step_result(job_id, "step_3", step3_result)
+        update_job(job_id, {"status": "step_3_complete", "current_step": 3})
     except Exception as e:
         update_job(job_id, {"status": "error", "errors": [str(e)]})
 
