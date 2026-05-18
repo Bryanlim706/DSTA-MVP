@@ -5,149 +5,62 @@ import anthropic
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 VALID_CATEGORIES = {"sop_a", "sop_b", "inf_c", "inf_d", "inf_e", "structural_edge"}
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst generating implied and obvious requirements for a web application. Items span both L1a (FCom-scored) and L1b (FA-scored), determined by confidence score.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Generate implied requirements across 5 categories + structural edges.
 
 CONFIDENCE → PLACEMENT:
-- confidence ≥ 0.80 → l1_recommendation: "l1a"  (user prompted to add to confirmed requirements)
-- confidence 0.60–0.79 → l1_recommendation: "l1b", strength: "strongly_implied"
-- confidence 0.40–0.59 → l1_recommendation: "l1b", strength: "medium"
-- confidence < 0.40    → l1_recommendation: "l1b", strength: "weak"
-
-Work through the 5 categories + structural edges. Reason before each item.
+- ≥ 0.80 → l1_recommendation: "l1a" | 0.60–0.79 → "l1b" strength: "strongly_implied"
+- 0.40–0.59 → "l1b" strength: "medium" | < 0.40 → "l1b" strength: "weak"
 
 ---
 
-SOP-A — PATTERN-TRIGGERED NEW NODES [fires on vocabulary]
-
-Check stated requirements for trigger words. If a pattern fires AND no equivalent page is stated, generate the proposed node. These are new PAGES/SCREENS only.
-
-Pattern A — Authentication
-Trigger: "login", "sign in", "sign up", "register", "registration", "authentication", "log out"
-Proposed: profile or account information screen
-Typical confidence: 0.85–0.92
-
-Pattern B — Offline data collection
-Trigger: "offline", "without internet", "local storage", "cached", "offline [any operation]"
-Proposed: screen to view records collected while offline
-Typical confidence: 0.80–0.90
-
-Pattern C — Multi-user with distinct roles or data
-Trigger: "role", "admin", "teacher", "student", "per-user", "my [data type]"
-Proposed: screen showing current user identity or role
-Typical confidence: 0.75–0.88
-
-Pattern D — Data synchronization
-Trigger: "sync", "synchronize", "upload pending", "sync when connected"
-Proposed: sync status or sync history screen
-Typical confidence: 0.60–0.75
-
-Rule: a button that INVOKES an action does NOT satisfy a pattern — a result/status VIEW is distinct.
+SOP-A — PATTERN-TRIGGERED NEW NODES (new pages/screens only)
+Fire when trigger words appear in stated reqs AND no equivalent page exists.
+- Auth trigger ("login","sign in","register","log out") → profile/account screen (conf ~0.85–0.92)
+- Offline trigger ("offline","local storage","cached") → offline records screen (conf ~0.80–0.90)
+- Multi-user trigger ("role","admin","per-user","my [data]") → user identity screen (conf ~0.75–0.88)
+- Sync trigger ("sync","synchronize","upload pending") → sync status screen (conf ~0.60–0.75)
+A button invoking an action does NOT satisfy a pattern — a result/status VIEW is distinct.
 → category: "sop_a"
 
----
-
-SOP-B — RULE-TRIGGERED NEW ELEMENTS WITHIN EXISTING NODES [fires on node-type detection]
-
-For each existing node, identify its type from stated requirements, then apply the rule set.
-Only generate for nodes that have stated Step 1 content. Generate ELEMENTS within pages, not new pages.
-
-Node type detection:
-- List/collection node: shows multiple items of the same type (contacts, tasks, records)
-- Detail/view node: shows a single item's full details
-- Dashboard/summary node: shows aggregate counts or summary statistics
-
-LIST RULES (for list/collection nodes):
-- Filter: confidence 0.80–0.88 (higher if items have filterable attributes like status/category/date)
-- Search: confidence 0.78–0.85 (higher if list likely large)
-- Sort controls: confidence 0.65–0.75
-- Pagination: confidence 0.70–0.80 if data set likely large; 0.30–0.50 for small fixed sets
-
-DETAIL RULES (for detail/view nodes):
-- Edit control: confidence 0.70–0.82 (higher if edit capability exists elsewhere in L1a)
-- Delete control: confidence 0.65–0.78 (higher if delete exists elsewhere in L1a)
-
-DASHBOARD RULES (for dashboard/summary nodes):
-- Date range filter: confidence 0.60–0.72
-- Data export: confidence 0.45–0.60
-
-STATUS-FIELD RULE (node shows items with a named, changeable status field):
-- Filter by status: confidence 0.78–0.85
-- Bulk status update: confidence 0.40–0.55
-
-Do NOT generate elements already covered by stated requirements for that node.
+SOP-B — RULE-TRIGGERED ELEMENTS WITHIN EXISTING NODES (elements, not new pages)
+Only for nodes with stated Step 1 content. Do NOT duplicate stated requirements.
+- List node (multiple items same type): filter ~0.82, search ~0.80, sort ~0.68, pagination ~0.50–0.75
+- Detail node (single item): edit ~0.75, delete ~0.70
+- Dashboard node (aggregates): date-range filter ~0.65, export ~0.50
+- Status-field node (named changeable status): filter-by-status ~0.82, bulk-update ~0.45
 → category: "sop_b"
 
----
-
-INF-C — REASONING-BASED NEW NODES [open LLM reasoning]
-
-Reason over the full L1a graph. Propose new pages NOT covered by SOP-A patterns.
-Must be anchored to specific L1a req_ids — do not invent from app type alone.
-
-Ask: Is there data modified/deleted in L1a with no stated audit/history page?
-      Is there data tracked over time with no stated reports/analytics page?
-      Are there user-specific settings implied with no stated settings/preferences page?
-      Are there implied events/alerts with no stated notifications page?
-
+INF-C — REASONING-BASED NEW NODES (open reasoning, anchored to specific req_ids)
+Propose pages not covered by SOP-A. Ask: audit/history page for modified data? reports/analytics for tracked data? settings/preferences page? notifications page?
 → category: "inf_c"
 
----
-
-INF-D — CONTEXTUAL NEW ELEMENTS WITHIN EXISTING NODES [open LLM reasoning]
-
-Suggest elements within existing nodes that SOP-B rules did not catch — elements specific
-to this app's domain, data model, or combination of existing stated elements.
-Examples: CRM → export-to-CSV; scheduling app → calendar view; multi-language → language selector.
-Only generate if traceable to specific L1a requirements for that node.
-Confidence generally 0.40–0.75 (more speculative than SOP-B).
-
+INF-D — CONTEXTUAL ELEMENTS WITHIN EXISTING NODES (domain-specific, SOP-B didn't catch)
+Must be traceable to specific L1a reqs. Confidence 0.40–0.75.
 → category: "inf_d"
 
----
-
-INF-E — MISSING EDGES BETWEEN EXISTING NODES [open LLM reasoning]
-
-Step 2 guarantees minimum connectivity (every node reachable and escapable).
-INF-E asks: what navigation edges between EXISTING nodes do users reasonably expect beyond the minimum?
-Types: cross-links between related siblings, contextual links, multi-level shortcuts.
-Do NOT re-generate minimum entry/exit paths — Step 2 already covers those.
-Confidence: closely related cross-links 0.65–0.80; shortcuts 0.40–0.60.
-
+INF-E — MISSING EDGES BETWEEN EXISTING NODES (beyond Step 2 minimum)
+Cross-links, contextual links, shortcuts between nodes already in the graph. Do NOT re-generate Step 2 entry/exit paths.
 → category: "inf_e"
 
----
-
-STRUCTURAL EDGES FOR NEW NODES (do this last)
-
-For every new node you generated in SOP-A or INF-C:
-Check the stated and obvious requirements — is there already a stated entry path TO this node?
-Is there already a stated exit path FROM this node?
-If NO entry path stated → generate entry edge, confidence_score: 1.0
-If NO exit path stated → generate exit edge, confidence_score: 1.0
+STRUCTURAL EDGES (do last)
+For every new node from SOP-A or INF-C: if no stated entry path → generate one (conf 1.0); if no stated exit path → generate one (conf 1.0).
 → category: "structural_edge"
 
 ---
 
-NEVER GENERATE:
-- Auth guards, login redirects, session checks
-- Error messages, empty states, validation feedback
-- Anything phrased "System must X when Y"
-- Items already covered by stated or obvious requirements
-
-DEDUPLICATION: Do not regenerate items semantically equivalent to stated or Step 2 requirements.
+NEVER GENERATE: auth guards, error messages, empty states, validation feedback, "System must X when Y".
+DEDUPLICATION: skip anything semantically equivalent to stated or Step 2 requirements.
 
 RULES:
-1. depends_on: list REQ-XXX or OBV-XXX ids this item depends on.
-2. confidence_score: 0.0–1.0 per guidance above.
-3. confidence_reason: one sentence explaining the score.
-4. l1_recommendation: "l1a" if ≥ 0.80, else "l1b".
-5. strength: null for l1a; "strongly_implied"/"medium"/"weak" for l1b.
-6. priority: for l1a items only — critical/high/medium/low (determines FCom weight).
-7. weight: for l1a — priority-derived (4.0/3.0/2.0/1.0); for l1b — strength-derived (3.0/2.0/1.0).
-8. functional_area: short snake_case.
-9. category: one of "sop_a"/"sop_b"/"inf_c"/"inf_d"/"inf_e"/"structural_edge".
+1. depends_on: REQ-XXX or OBV-XXX ids this item depends on.
+2. confidence_score: 0.0–1.0. confidence_reason: one sentence.
+3. l1_recommendation / strength derived from confidence per bands above.
+4. priority: l1a items only (critical/high/medium/low → weight 4/3/2/1).
+5. weight: l1b items → strength-derived (strongly_implied=3, medium=2, weak=1).
+6. functional_area: short snake_case.
+7. category: "sop_a"/"sop_b"/"inf_c"/"inf_d"/"inf_e"/"structural_edge".
 
-Output your reasoning per category first, then a JSON array (no markdown fences):
+Output ONLY a JSON array (no markdown fences, no preamble text):
 [{
   "req_id": "GEN-001",
   "description": "System must [verb] [object]",

@@ -61,7 +61,7 @@ RULES:
 4. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
 5. functional_area: short snake_case.
 
-Output your YES/NO reasoning per node first, then a JSON array (no markdown fences):
+Output ONLY a JSON array (no markdown fences, no preamble text):
 [{
   "req_id": "OBV-001",
   "description": "System must provide a way to navigate to [node].",
