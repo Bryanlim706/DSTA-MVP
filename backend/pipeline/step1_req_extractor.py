@@ -29,97 +29,120 @@ MAX_DOCS = 30
 MAX_CHARS_PER_DOC = 12000
 MAX_README_DEPTH = 2
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract functional requirements that are explicitly stated in the provided documentation.
-
-WHAT TO EXTRACT: A requirement is a user-facing capability — something a user can navigate to, interact with, or observe in the interface. It must be grounded in a sentence that names a specific page, screen, form, button, or UI component.
-
-WHAT TO SKIP: Technical and automatic behaviors — even when explicitly documented — are not requirements. They are correctness properties that will be captured as test assertions later.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract stated requirements as graph entities — nodes, edges, or elements within nodes. Requirements are X-axis items (what exists in the UI). Behavioral properties (how well something works) are Y-axis items and must NOT be extracted.
 
 ---
 
-EXTRACTION RULE
+TAXONOMY
 
-Extract a requirement when the sentence describes what a named page, screen, form, or UI component DOES for the user. The source_quote must contain a reference to that named entity.
+node — A distinct page or screen a user can navigate to.
+  description: "System must provide a [Page Name]"
+  ui_node: the page name itself
 
-Named entities include (not exhaustive):
-- Any named page or screen: "the login screen", "the dashboard", "the settings page", "login.html", "the contacts view"
-- Any named form: "the registration form", "the add-task form", "the checkout form"
-- Any named button or link: "the logout button", "the save changes button", "the add category link"
-- Any named UI component: "the navigation bar", "the sidebar", "the data table", "the task table"
+element — A UI control, button, form, or feature that lives within a specific page.
+  description: "System must provide [element] on the [Page Name]"
+  ui_node: the containing page name
 
-NOTE: Named entities do NOT require .html filenames. "The contacts page shows..." is extractable even if no .html file is named.
+edge — An explicitly stated navigation path between two pages.
+  description: "System must provide a way to navigate from [Source] to [Destination]"
+  ui_node: the destination page name
 
-SKIP sentences where the subject is:
-- A backend file: app.py, server.py, index.js, routes.py
-- A database or data store: "the database", "sqlite3", "Supabase"
-- An automatic process or reaction: hashing, sorting, redirecting, validating, clearing
-- A data field or passive noun: "passwords", "rows", "entries", "the input"
+---
+
+WHAT TO EXTRACT
+
+Extract when the source text names a specific page, screen, form, button, or UI component and describes what it IS or what it provides. Every item must classify as node, edge, or element.
+
+Named entities include (not exhaustive): any named page or screen ("the login screen", "the dashboard"), any named form ("the add-task form"), any named button or link ("the logout button"), any named component ("the navigation bar", "the task table").
+
+Named entities do NOT require .html filenames — "the contacts page shows..." is extractable even if no .html file is named.
+
+---
+
+EXTRACTION GATE — before adding any item, ask: does the source text name a specific UI entity (page, screen, form, button, component) and describe what it IS or provides? If not, skip it.
+
+This gate rejects: automatic behaviors (hashing, redirecting, validating, sorting), backend subjects (app.py, server.py, database), reactions ("System must X when/if Y"), behavioral properties of existing entities (how something works, not what it is), and quality attributes (responsive, accessible, performant, secure) — none of these name a UI entity.
 
 ---
 
 BEHAVIOURAL DECOMPOSITION RULE
 
-If the source describes an automatic behaviour that only makes sense because the user can change a value, extract the user capability that enables that behaviour:
+If the source describes an automatic behaviour that only makes sense because the user can change a value, extract the element that enables it:
 
-- "Rows with done status sink to the bottom of the table" → extract "System must allow users to change the status of an item"
-- "Tasks are ordered by priority" → extract "System must allow users to set the priority of a task"
-- "Entries are grouped by due date" → extract "System must allow users to set the due date of an entry"
+- "Rows with done status sink to the bottom" → element: status-change control on [task list page]
+- "Tasks are ordered by priority" → element: priority-setting control on [task page]
+- "Entries are grouped by due date" → element: due-date control on [entries page]
 
-The automatic behaviour sentence IS the source_quote (it exists verbatim in the source). Tag these as `stated`.
+The automatic behaviour sentence IS the source_quote.
 
 ---
 
 EXAMPLES
 
 EXTRACT:
-- "The login page requires username and password" → login capability
-- "The dashboard displays the user's recent activity" → dashboard view
-- "The contacts view shows name, phone, and email for each contact" → contacts list view
-- "The 'add task' button opens a form to create a new task" → add task capability
-- "The navigation bar shows all user categories" → nav bar view
-- "Each category page has a back-to-home button and a task table" → back navigation + table view
-- "The settings screen allows users to change their password" → change password capability
-- "Rows with done status sink to the bottom of the table" → DECOMPOSE: user can change item status
-- "Javascript allows deletion of categories from the navigation bar" → delete category
+- "The login page requires username and password" → node: Login Page
+- "The dashboard displays the user's recent activity" → node: Dashboard
+- "The contacts view shows name, phone, and email for each contact" → node: Contacts View
+- "The 'add task' button opens a form to create a new task" → element: add-task button/form on [task list page]
+- "The navigation bar shows all user categories" → element: navigation bar on [home page]
+- "Each category page has a back-to-home button" → edge: navigate from Category Page to Home
+- "The settings screen allows users to change their password" → element: change-password control on Settings Page
+- "Rows with done status sink to the bottom" → DECOMPOSE → element: status-change control on [task list page]
+- "Javascript allows deletion of categories from the navigation bar" → element: delete-category control on [nav bar / home page]
 
 SKIP:
-- "Passwords are hashed before storing" → automatic process, no UI element named
-- "Duplicate entries are prevented on form submission" → validation rule, no UI element named
-- "app.py validates the input and blocks duplicate names" → backend file as subject
-- "The database stores user credentials" → data store as subject
-- "Users are redirected to login when unauthenticated" → automatic reaction, no UI element named
+- "Passwords are hashed before storing" → automatic process
+- "Duplicate entries are prevented on form submission" → validation rule
+- "app.py validates the input" → backend subject
+- "The database stores user credentials" → data store
+- "Users are redirected to login when unauthenticated" → reaction
+- "Responsive design" → non-functional quality attribute (not a graph entity)
+- "The app must be accessible on mobile and desktop" → non-functional quality attribute
 
 ---
 
 DEDUPLICATION
 
-If two sentences describe the same user action from different angles, extract ONE requirement.
+If two sentences describe the same entity, extract ONE requirement.
+
+---
+
+PROJECT SUMMARY
+
+Before extracting requirements, write a project_summary: 2–3 sentences covering what the app is, who uses it, and what problem it solves. Capture domain and purpose — not a feature list. Draw from the documentation only, no inference.
 
 ---
 
 RULES
 
-1. source_quote must be ONE sentence copied verbatim from the source. It must name a specific UI element or describe an automatic behaviour that implies a user capability (per Behavioural Decomposition Rule).
+1. source_quote: ONE verbatim sentence from the source naming the UI entity or describing the automatic behaviour (Decomposition Rule).
 2. No inference — description must be derivable from source_quote alone.
-3. Decompose compound capabilities: "users can register and log in" = two requirements.
-4. No artificial splits: two sides of the same behavior = one requirement.
-5. Priority: critical = foundational root (max 1-2); high = core feature; medium = supporting; low = minor.
+3. Decompose compound items: "register and log in" = two requirements (Registration Page node + Login Page node).
+4. No artificial splits: two sides of the same entity = one requirement.
+5. Priority: critical = foundational node with many dependents (max 1–2); high = core; medium = supporting; low = minor.
 6. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
 7. source: exact filename (e.g. "README.md") or "user_input".
 8. functional_area: short snake_case (e.g. "auth", "task_management").
+9. type: "node" | "edge" | "element"
+10. ui_node: for node — the page name itself; for element — the containing page; for edge — the destination page.
 
-Return ONLY a valid JSON array. No markdown fences, no explanation, no other text:
-[{
-  "req_id": "REQ-001",
-  "description": "System must [verb] [object]",
-  "source": "README.md",
-  "source_quote": "verbatim sentence naming the UI element",
-  "tag": "stated",
-  "priority": "high",
-  "weight": 3.0,
-  "testable": true,
-  "functional_area": "auth"
-}]"""
+Return ONLY a valid JSON object. No markdown fences, no explanation, no other text:
+{
+  "project_summary": "2-3 sentence description of what the app is, who uses it, and what problem it solves.",
+  "requirements": [{
+    "req_id": "REQ-001",
+    "description": "System must provide a Login Page",
+    "type": "node",
+    "ui_node": "Login Page",
+    "source": "README.md",
+    "source_quote": "verbatim sentence naming the UI entity",
+    "tag": "stated",
+    "priority": "high",
+    "weight": 3.0,
+    "testable": true,
+    "functional_area": "auth"
+  }]
+}"""
 
 
 def _find_project_root(extract_to: Path) -> Path:
@@ -204,25 +227,36 @@ def _build_user_message(requirements_text: str, spec_docs: dict[str, str]) -> st
     return "\n\n".join(parts)
 
 
-def _parse_llm_response(raw: str) -> list:
+def _parse_llm_response(raw: str) -> tuple[list, str]:
     text = raw.strip()
     if "```json" in text:
         text = text.split("```json", 1)[1].split("```", 1)[0].strip()
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0].strip()
+
+    # Full parse — expect {"project_summary": "...", "requirements": [...]}
     try:
         parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed.get("requirements", []), str(parsed.get("project_summary", ""))
+        if isinstance(parsed, list):
+            return parsed, ""
     except json.JSONDecodeError:
-        # LLM output was truncated mid-item (hit max_tokens). Recover everything before
-        # the last complete item so we return partial results instead of failing entirely.
-        last_close = text.rfind("},")
-        if last_close != -1:
-            parsed = json.loads(text[:last_close + 1] + "]")
-        else:
-            raise
-    if not isinstance(parsed, list):
-        raise ValueError("LLM returned non-array JSON")
-    return parsed
+        pass
+
+    # Truncation recovery: find the requirements array and recover partial results.
+    # project_summary is lost in this path but requirements are preserved.
+    bracket_pos = text.find("[")
+    if bracket_pos >= 0:
+        array_text = text[bracket_pos:]
+        try:
+            return json.loads(array_text), ""
+        except json.JSONDecodeError:
+            last_close = array_text.rfind("},")
+            if last_close != -1:
+                return json.loads(array_text[:last_close + 1] + "]"), ""
+
+    raise ValueError("Could not parse LLM response as requirements")
 
 
 def _validate_and_normalise(
@@ -259,6 +293,10 @@ def _validate_and_normalise(
         item.setdefault("source", "user_input")
         item.setdefault("functional_area", "general")
 
+        if item.get("type") not in {"node", "edge", "element"}:
+            item["type"] = "node"
+        item.setdefault("ui_node", "")
+
         valid.append(item)
 
     for i, item in enumerate(valid, start=1):
@@ -284,6 +322,7 @@ async def run(
         pass
 
     last_exc = None
+    project_summary = ""
     for attempt in range(3):
         try:
             response = await client.messages.create(
@@ -292,7 +331,7 @@ async def run(
                 system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": _build_user_message(requirements_text, spec_docs)}],
             )
-            raw_items = _parse_llm_response(response.content[0].text)
+            raw_items, project_summary = _parse_llm_response(response.content[0].text)
             requirements, dropped = _validate_and_normalise(raw_items, requirements_text, spec_docs)
             break
         except anthropic.APIStatusError as exc:
@@ -304,14 +343,14 @@ async def run(
                 "requirements": [], "total_count": 0,
                 "docs_used": list(spec_docs.keys()), "truncated_docs": truncated_docs,
                 "excluded_docs_count": excluded_docs_count, "llm_model": model,
-                "dropped_count": 0, "error": str(exc),
+                "dropped_count": 0, "project_summary": "", "error": str(exc),
             }
         except Exception as exc:
             return {
                 "requirements": [], "total_count": 0,
                 "docs_used": list(spec_docs.keys()), "truncated_docs": truncated_docs,
                 "excluded_docs_count": excluded_docs_count, "llm_model": model,
-                "dropped_count": 0, "error": str(exc),
+                "dropped_count": 0, "project_summary": "", "error": str(exc),
             }
 
     return {
@@ -322,4 +361,5 @@ async def run(
         "excluded_docs_count": excluded_docs_count,
         "llm_model": model,
         "dropped_count": dropped,
+        "project_summary": project_summary,
     }

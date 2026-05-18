@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import anthropic
 
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
@@ -23,11 +24,14 @@ A button invoking an action does NOT satisfy a pattern — a result/status VIEW 
 → category: "sop_a"
 
 SOP-B — RULE-TRIGGERED ELEMENTS WITHIN EXISTING NODES (elements, not new pages)
-Only for nodes with stated Step 1 content. Do NOT duplicate stated requirements.
-- List node (multiple items same type): filter ~0.82, search ~0.80, sort ~0.68, pagination ~0.50–0.75
+SCOPE: Only fires for page-level nodes that appear in the STATED REQUIREMENTS list (type=node from Step 1).
+- Do NOT apply SOP-B to Step 1 elements (type=element) — elements are sub-components, not pages.
+- Do NOT apply SOP-B to nodes you generate in SOP-A or INF-C during this pass. Those nodes get navigation paths via structural_edge only — applying SOP-B to them creates duplicate navigation requirements.
+Do NOT duplicate stated requirements.
+- List node (multiple items same type): filter ~0.82, search ~0.80, sort ~0.68, pagination ~0.50–0.75, edit item ~0.72, delete item ~0.65
 - Detail node (single item): edit ~0.75, delete ~0.70
 - Dashboard node (aggregates): date-range filter ~0.65, export ~0.50
-- Status-field node (named changeable status): filter-by-status ~0.82, bulk-update ~0.45
+- Status-field node (named changeable status OR page named "overview"/"summary"/"report" that aggregates items with status): filter-by-status ~0.82, bulk-update ~0.45
 → category: "sop_b"
 
 INF-C — REASONING-BASED NEW NODES (open reasoning, anchored to specific req_ids)
@@ -36,6 +40,8 @@ Propose pages not covered by SOP-A. Ask: audit/history page for modified data? r
 
 INF-D — CONTEXTUAL ELEMENTS WITHIN EXISTING NODES (domain-specific, SOP-B didn't catch)
 Must be traceable to specific L1a reqs. Confidence 0.40–0.75.
+INF-D elements are UI controls or data displays a user can directly see or interact with — not behavioral outcomes of using those controls. Ask: "Is this something a user taps, reads, or fills in?" If yes, it belongs here. If it is what the system does in response (feedback, side-effect, state change), it belongs in acceptance criteria.
+For action/form pages (any page whose name starts with a verb: "Take X", "Add X", "Record X", "Submit X", "Create X", "Edit X"): always consider what input fields the user must provide. Ask: does the action involve a subject/person being acted upon (→ selector/picker element)? does it require a date or time (→ date/time picker)? does it require a quantity or reference ID (→ number/text input)? Generate these as INF-D elements anchored to the action page node.
 → category: "inf_d"
 
 INF-E — MISSING EDGES BETWEEN EXISTING NODES (beyond Step 2 minimum)
@@ -48,7 +54,10 @@ For every new node from SOP-A or INF-C: if no stated entry path → generate one
 
 ---
 
-NEVER GENERATE: auth guards, error messages, empty states, validation feedback, "System must X when Y".
+GENERATION GATE — apply to every item before including it:
+"Can a user independently navigate to this, or directly invoke it (click, tap, fill, select) as a standalone UI entity that exists regardless of what the user just did?"
+→ YES: include it — it is a page, panel, form, button, input, or interactive control with its own place in the UI.
+→ NO: discard it — it is a Y-axis acceptance criterion, not a requirement. Items that only appear as a consequence of another action, describe HOW something works, or express a quality property have no dedicated UI home. The test: if the item cannot be described without the phrase "when X" or "after X", it is not a requirement.
 DEDUPLICATION: skip anything semantically equivalent to stated or Step 2 requirements.
 
 RULES:
@@ -80,7 +89,12 @@ Output ONLY a JSON array (no markdown fences, no preamble text):
 }]"""
 
 
-def _build_user_message(step0_result: dict, step1_requirements: list, step2_requirements: list) -> str:
+def _build_user_message(
+    step0_result: dict,
+    step1_requirements: list,
+    step2_requirements: list,
+    project_summary: str = "",
+) -> str:
     project_type = step0_result.get("project_type", "unknown")
     frontend = step0_result.get("frontend_framework") or "None"
     backend = step0_result.get("backend_framework") or "None"
@@ -95,12 +109,14 @@ def _build_user_message(step0_result: dict, step1_requirements: list, step2_requ
 
     discovered = step0_result.get("discovered_pages") or []
     pages_str = ", ".join(discovered) if discovered else "(none)"
+    summary_line = f"Project purpose: {project_summary}\n" if project_summary else ""
 
     return (
         f"=== PROJECT CONTEXT ===\n"
         f"Project type: {project_type}\n"
-        f"Frontend: {frontend} | Backend: {backend}\n\n"
-        f"=== DISCOVERED PAGES (Step 0) ===\n{pages_str}\n\n"
+        f"Frontend: {frontend} | Backend: {backend}\n"
+        f"{summary_line}"
+        f"\n=== DISCOVERED PAGES (Step 0) ===\n{pages_str}\n\n"
         f"=== STATED REQUIREMENTS (Step 1 — do not regenerate) ===\n"
         f"{fmt(step1_requirements, 'REQ')}\n\n"
         f"=== OBVIOUS REQUIREMENTS (Step 2 — do not regenerate) ===\n"
@@ -142,6 +158,9 @@ def _validate_and_normalise(
     stated_lower = {r["description"].lower() for r in all_reqs}
     valid = []
     dropped = 0
+    # Maps LLM-assigned GEN-XXX id → l1_recommendation for SOP-A/INF-C nodes,
+    # used below to propagate l1b status to their structural edges.
+    sop_inf_map: dict[str, str] = {}
 
     for item in items:
         if not isinstance(item, dict):
@@ -205,7 +224,24 @@ def _validate_and_normalise(
         raw_deps = item.get("depends_on", [])
         item["depends_on"] = [d for d in (raw_deps if isinstance(raw_deps, list) else []) if d in valid_req_ids]
 
+        if item.get("category") in {"sop_a", "inf_c"}:
+            orig_id = item.get("req_id", "")
+            if orig_id:
+                sop_inf_map[orig_id] = item["l1_recommendation"]
+
         valid.append(item)
+
+    # Fix: structural edges must inherit their parent node's l1_recommendation.
+    # A structural edge for an L1b node cannot itself be L1a.
+    for item in valid:
+        if item.get("category") == "structural_edge":
+            gen_refs = re.findall(r'GEN-\d+', item.get("reasoning", ""))
+            parent_l1 = next((sop_inf_map[r] for r in gen_refs if r in sop_inf_map), None)
+            if parent_l1 == "l1b":
+                item["l1_recommendation"] = "l1b"
+                item["strength"] = "strongly_implied"
+                item["weight"] = 3.0
+                item.pop("priority", None)
 
     for i, item in enumerate(valid, start=1):
         item["req_id"] = f"GEN-{i:03d}"
@@ -218,6 +254,7 @@ async def run(
     step2_requirements: list,
     step0_result: dict,
     client: anthropic.AsyncAnthropic,
+    project_summary: str = "",
 ) -> dict:
     model = "claude-haiku-4-5-20251001"
     last_exc = None
@@ -227,7 +264,7 @@ async def run(
                 model=model,
                 max_tokens=8000,
                 system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": _build_user_message(step0_result, step1_requirements, step2_requirements)}],
+                messages=[{"role": "user", "content": _build_user_message(step0_result, step1_requirements, step2_requirements, project_summary)}],
             )
             raw_items = _parse_llm_response(response.content[0].text)
             requirements, dropped = _validate_and_normalise(raw_items, step1_requirements, step2_requirements)

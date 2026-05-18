@@ -232,15 +232,18 @@ E()=0.4 (UI visible, no backend) sits lower than E()=0.5 (backend present, no UI
 
 The X/Y plane determines what each pipeline step's LLM should and should not do:
 
-**Step 1 (stated):** Extract the X-axis roots — functions that define what the app is. Every item must map to a distinct UI screen or API endpoint. Behavioral properties (error handling, persistence, navigation affordances described as implementation details) belong on the Y axis as ACs, not on the X axis as requirements. Priority `critical` should flag requirements that are roots with many dependents, not just items the source text labels as urgent.
+**Step 1 (stated):** Extract X-axis graph entities from stated requirements text — nodes (pages/screens), edges (stated navigation paths), and elements (controls/features within a page). Capabilities ("user can log in") are not the right abstraction — they conflate the node (Login Page) with its behavioral properties (validates credentials = Y-axis AC). Extract the entity, not the capability. Priority `critical` = foundational node with many dependents, not just items the source labels as urgent.
 
-**Step 2 (obvious):** Generate from two angles:
-- *Angle 1 — Dependency connectors:* For each stated requirement, what must be true for it to be independently testable end-to-end? (e.g. "user can view task list" enables testing "user can add task")
-- *Angle 2 — App-type usability:* What navigation, feedback, and affordance functions would any user expect regardless of what is stated? (e.g. back navigation from sub-pages with no navbar, empty states on list views, redirect-to-login for unauthenticated access) These are distinct UI/API functions, not behavioral properties of existing functions.
+**Step 2 (obvious):** Graph connectivity gaps only — no usability inference. Build a node inventory (stated pages + discovered files), then run two checks per node:
+- *Check 2 — Entry paths:* Is there a stated inbound navigation element? If NO → generate one.
+- *Check 3 — Exit paths:* Is there a stated way to leave? If NO → generate one (mechanism-agnostic).
 
-Deduplication must be semantic — if a stated requirement already covers a function (even if worded differently), the obvious requirement must not regenerate it.
+Never generate: auth guards, session management, invocation controls, observable outcomes (empty states, error messages), or anything phrased "System must X when Y." Those live on the Y axis. Deduplication is semantic — if a stated requirement already covers a navigation function (even if worded differently), do not regenerate it.
 
-**Step 3 (implied):** Generate second-order dependents — enhancements that improve the app but whose absence doesn't break the dependency tree. FA-scored (not FCom-scored). Strength rating maps to FA weight.
+**Step 3 (implied):** Generate enhancements organized as a three-tier graph taxonomy — FA-scored (not FCom-scored). Confidence ≥ 0.80 → promoted to L1a candidate at Step 3.5; below → L1b advisory. **Generation gate (positive framing):** Before including any item, test: "Can a user independently navigate to this, or directly invoke it as a standalone UI entity?" YES → include. NO → discard (Y-axis AC). Replaces the former NEVER GENERATE negative list. Three tiers:
+- *New nodes* — entire pages/screens not yet in the graph. SOP-A: pattern-triggered (auth → profile screen; offline → offline records screen; multi-user → user identity screen; sync → sync status screen). INF-C: reasoned additions (audit history, reports/analytics, settings, notifications).
+- *Elements within existing nodes* — features added to a page already in the graph, not a new page. SOP-B: rule-triggered, fires for **stated page nodes only** (`type=node` from Step 1) — not for Step 1 elements, not for nodes generated in SOP-A/INF-C in the same pass. Rules: list node → filter/search/sort/pagination/edit item/delete item; detail node → edit/delete; dashboard → date-range filter/export; status-field node (changeable status, OR page named "overview"/"summary"/"report" aggregating items with status) → filter-by-status/bulk-update. INF-D: domain-specific contextual elements SOP-B didn't cover; uses positive framing ("Is this something a user taps, reads, or fills in?") and an **action-page heuristic** (verb-prefix pages → always generate input field elements: subject selector, date/time picker, quantity/ID input).
+- *Edges between existing nodes* — INF-E: cross-links and shortcuts beyond the Step 2 minimum. Structural edges: mandatory entry/exit paths for every new node introduced in SOP-A or INF-C (confidence 1.0).
 
 **Step 8 (ACs):** ACs live on the Y axis — they measure Phase 2 correctness. ACs for dependent requirements should first assert prerequisites are satisfied. Persistence, error messages, and edge-case handling are ACs, not L1a requirements.
 
@@ -296,20 +299,23 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (stated)**
 **Tools:** Python, LLM (AsyncAnthropic, prompt caching)
 **Input:** Requirements text provided by user + README (read directly from zip) + any uploaded specification documents
-**Primary gate (UI entry-point rule):** Every extracted requirement must have a dedicated place in the UI — its own page, form, button, or view — that a user can navigate to. If no such place exists (the behavior happens automatically, is a background process, or is a side-effect of another action), it is a Y-axis property belonging in acceptance criteria. Do not extract it. Things that always fail: password hashing, validation rules (duplicate prevention, uniqueness), automatic reordering, UI trigger details for a capability already stated.
-**Secondary filter (when/if signal):** If the item naturally phrases as "System must X when/if condition", it is a reaction — skip it.
+**Entity taxonomy (X-axis only):** Every extracted requirement is one of three graph entity types — `node` (a distinct page/screen), `edge` (an explicitly stated navigation path between two pages), or `element` (a UI control or feature within a specific page). Behavioral properties (how well something works) are Y-axis items belonging in acceptance criteria — never extracted here.
+**Gate (positive framing):** Before extracting any item, test: "Does the source text name a specific UI entity and describe what it IS or provides?" Rejects: automatic behaviors, backend subjects, reactions ("System must X when/if Y"), behavioral properties of existing entities, and quality attributes (responsive, accessible, secure) — none of these name a UI entity. Implemented as a positive test rather than a negative list because LLMs ignore growing "what to skip" lists when training priors are strong.
+**Decomposition rule:** Compound items decomposed into atomic entities. "Register and log in" = two node requirements.
 **Rule:** Only extract requirements that are **explicitly stated**. No inference. No invention. Every item must include its source quote. Source quote verification uses whitespace-normalized comparison — the quote must appear verbatim in the source (anti-hallucination), but whitespace differences (newlines → spaces) are tolerated.
-**Decomposition rule:** General/meta requirements decomposed into atomic testable items, each retaining a reference to its parent.
 **Tag:** `stated`
 **Output (step_results.step_1):**
 ```json
 {
+  "project_summary": "A personal task and goal management web app where users create named categories and track goal rows with due dates, importance, and status.",
   "requirements": [
     {
       "req_id": "REQ-001",
-      "description": "User can register an account",
+      "description": "System must provide a Login Page",
+      "type": "node",
+      "ui_node": "Login Page",
       "source": "user_input",
-      "source_quote": "users should be able to register and log in",
+      "source_quote": "users should be able to log in",
       "tag": "stated",
       "priority": "high",
       "weight": 3.0,
@@ -339,6 +345,7 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 - Check 2 — Entry paths: for each node except home, is there a stated inbound navigation element? If NO → generate
 - Check 3 — Exit paths: for each node, is there a stated way to leave it? If NO → generate (mechanism-agnostic)
 **Never generate:** auth guards, session management, invocation controls for stated capabilities, observable outcomes for stated operations, error messages, empty states, or anything phrased "System must X when Y."
+**Root node detection:** `_identify_root_node()` detects the home/root page before prompting. Two heuristics: (1) only one `type=node` requirement → that page is root; (2) `discovered_pages = ["index.html"]` (single-route SPA) + at least one node req → first node is root. Detected root injected as `=== ROOT / HOME PAGE ===` section — LLM skips CHECK 2 for it (no phantom entry navigation generated).
 **Logic:** LLM reasons YES/NO per node per check, then outputs JSON. Deterministic — only graph connectivity gaps, not enhancements.
 **Deduplication:** Step 1 stated requirements passed as context (with req_id + functional_area prefix).
 **Tag:** `obvious` | **Weight:** derives from priority (critical=4.0, high=3.0, medium=2.0, low=1.0) — same as Step 1
@@ -370,14 +377,14 @@ Note: Key accuracy step. Consider requirement dependencies and branching which w
 **Status: COMPLETE**
 **Phase: FCom setup — builds L1b (and L1a candidates)**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 0 (project type) + Step 1 + Step 2 (combined L1a pool)
+**Input:** Step 0 (project type) + Step 1 (requirements + `project_summary`) + Step 2 (combined L1a pool)
 **5-category confidence-scored generation:**
 - SOP-A — Pattern-triggered new nodes (auth, offline, multi-user, sync patterns)
-- SOP-B — Rule-triggered elements within existing nodes (filter/search/sort for list nodes; edit/delete for detail nodes; date-range/export for dashboards)
+- SOP-B — Rule-triggered elements within existing nodes (filter/search/sort/edit item/delete item for list nodes; edit/delete for detail nodes; date-range/export for dashboards)
 - INF-C — Reasoning-based new nodes (audit history, reports, settings, notifications)
 - INF-D — Contextual elements within existing nodes (domain-specific, not covered by SOP-B)
 - INF-E — Missing edges between existing nodes (cross-links beyond Step 2 minimum)
-- Structural edges — Entry/exit edges for any new nodes generated in SOP-A or INF-C (confidence: 1.0)
+- Structural edges — Entry/exit edges for any new nodes generated in SOP-A or INF-C; inherits parent node's `l1_recommendation` (not always l1a)
 
 **Confidence → placement:**
 - ≥ 0.80 → `l1_recommendation: "l1a"` (promoted to FCom scoring pool at Step 3.5)

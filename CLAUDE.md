@@ -52,14 +52,17 @@ runtime  (only for electron_app)
 - Scans uploaded zip for README files (capped at depth ≤ 2) and spec docs (keyword-matched .md/.rst/.txt)
 - Ignores tool config dirs: `.claude`, `.cursor`, `.github`, `.vscode`, `.idea` (these waste slots)
 - MAX_DOCS = 30, MAX_CHARS_PER_DOC = 12000
-- LLM (claude-haiku) extracts only explicitly stated requirements; every item must include a verbatim source quote
+- LLM (claude-haiku) extracts stated requirements as **graph entities** — nodes, edges, or elements within nodes (not capability statements). Also extracts a `project_summary` (2–3 sentence domain/purpose description) in the same call. Every requirement must include a verbatim source quote.
 - Source quote verification uses whitespace-normalized comparison (`_norm()`) — collapses all whitespace to single space before substring check, so LLM quote normalization (newlines → spaces) doesn't cause false drops
 - JSON truncation recovery: if response is cut off mid-array, recovers items up to last complete `},`
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
 - `functional_area` field on each requirement for cascade advisory grouping
+- **Entity taxonomy:** `type` = `"node"` (a page/screen) | `"edge"` (stated navigation path) | `"element"` (control/feature within a page). `ui_node` = the page this entity belongs to (for nodes: itself; for elements: containing page; for edges: destination page).
 - **Page-identity rule:** Named entities do NOT require `.html` filenames — "the contacts page shows..." is extractable even if no .html file is named.
-- **Behavioural decomposition rule:** Automatic behaviours that only make sense because the user can change a value → extract the user capability. "Rows with done status sink to the bottom" → extract "System must allow users to change the status of an item". The automatic behaviour sentence is the source_quote.
-- **Extraction rule:** Extract when the sentence describes what a named page, screen, form, or UI component DOES for the user. Skip when the subject is a backend file, database, automatic process, or data field.
+- **Behavioural decomposition rule:** Automatic behaviours that only make sense because the user can change a value → extract the element that enables it. "Rows with done status sink to the bottom" → element: status-change control on [task list page]. The automatic behaviour sentence is the source_quote.
+- **X-axis only:** Capabilities ("user can log in") and behavioral properties (validation, redirects, persistence) are Y-axis items — never extracted. The entity is the extractable unit, not the capability it enables.
+- **Extraction gate (positive framing):** Before extracting any item, the LLM tests: "Does the source text name a specific UI entity and describe what it IS or provides?" Rejects: automatic behaviors (hashing, redirecting, validating, sorting), backend subjects (app.py, server.py, database), reactions ("System must X when/if Y"), behavioral properties of existing entities, and quality attributes (responsive, accessible, performant, secure) — none of these name a UI entity. This replaces a growing negative "what to skip" list, which LLMs ignore when their training priors are strong.
+- **`project_summary`** passed to Step 3 so INF-C/INF-D domain inference is purpose-aware (e.g. "task manager" → overdue tracking, completion %, progress view) rather than purely structural pattern matching.
 
 ### Step 2 — Obvious Requirement Generator (COMPLETE)
 - LLM finds graph connectivity gaps — pages that cannot be reached or cannot be left
@@ -69,16 +72,18 @@ runtime  (only for electron_app)
 - **Parser:** handles LLM YES/NO reasoning text before JSON array via bracket_pos search.
 - **`_build_user_message`:** stated requirements formatted with `[req_id]` prefix for `depends_on` linkage.
 - **Code-level enforcement:** `_validate_and_normalise` drops any item whose `reasoning` does not start with "CHECK 2" or "CHECK 3" — guards against LLM hallucinating CHECK 4/5 labels despite prompt instructions.
+- **Root node detection (`_identify_root_node()`):** Detects the home/root page before building the user message to prevent phantom entry navigation. Two heuristics: (1) only one `type=node` requirement → that page is root; (2) `discovered_pages = ["index.html"]` (single-route SPA) with at least one node req → first node is root. Detected root is injected as an explicit `=== ROOT / HOME PAGE ===` section instructing the LLM to skip CHECK 2 for it and not invent a phantom landing page to navigate from.
 
 ### Step 3 — Generated Requirement Generator (COMPLETE)
 - LLM generates both L1a candidates (confidence ≥ 0.80) and L1b advisory items (< 0.80)
 - **5 categories + structural edges:**
   - SOP-A: pattern-triggered new nodes (auth → profile screen; offline → offline records screen; multi-user → user identity screen; sync → sync status screen)
-  - SOP-B: rule-triggered elements within existing nodes (filter/search/sort for list nodes; edit/delete for detail nodes; date-range/export for dashboards)
+  - SOP-B: rule-triggered elements within existing **stated** nodes only (`type=node` from Step 1). Does NOT fire for Step 1 elements (`type=element`) — they are sub-components, not pages. Does NOT fire for nodes generated in SOP-A/INF-C in the same pass — those get structural_edge only. Rules: list node → filter ~0.82, search ~0.80, sort ~0.68, pagination ~0.50–0.75, edit item ~0.72, delete item ~0.65; detail node → edit ~0.75, delete ~0.70; dashboard node → date-range filter ~0.65, export ~0.50; status-field node (named changeable status, OR page named "overview"/"summary"/"report" aggregating items with status) → filter-by-status ~0.82, bulk-update ~0.45.
   - INF-C: reasoning-based new nodes (audit history, reports/analytics, settings/preferences, notifications)
-  - INF-D: contextual elements within existing nodes (domain-specific, not covered by SOP-B)
+  - INF-D: contextual elements within existing nodes (domain-specific, not covered by SOP-B). Positive framing: "Is this something a user taps, reads, or fills in?" — YES → include; NO (system response/feedback/side-effect) → it's an AC, discard. **Action-page heuristic:** pages whose name starts with a verb ("Take X", "Add X", "Record X", "Submit X", "Create X", "Edit X") → always consider input fields: does the action have a subject/person (→ selector/picker), a date or time (→ date/time picker), a quantity or reference ID (→ number/text input)? Generate these as INF-D elements.
   - INF-E: missing edges between existing nodes (cross-links and shortcuts beyond Step 2 minimum)
-  - structural_edge: entry/exit edges for new nodes generated in SOP-A/INF-C (confidence: 1.0)
+  - structural_edge: entry/exit edges for new nodes generated in SOP-A/INF-C — `l1_recommendation` inherits from parent node (l1b parent → l1b structural edge, not l1a)
+- **Generation gate (positive framing):** Before including any item, the LLM tests: "Can a user independently navigate to this, or directly invoke it (click, tap, fill, select) as a standalone UI entity that exists regardless of what the user just did?" YES → include. NO → discard (Y-axis AC). Items that only appear as a consequence of another action, describe HOW something works, or express a quality property have no dedicated UI home. This replaces the former NEVER GENERATE negative list, which LLMs circumvent when their training priors are strong.
 - **Confidence → placement:** ≥ 0.80 → l1a; 0.60–0.79 → l1b strongly_implied; 0.40–0.59 → l1b medium; < 0.40 → l1b weak
 - **Result envelope fields:** `requirements`, `total_count`, `sop_count`, `inference_count`, `llm_model`, `dropped_count`, `error`
 - **Frontend:** `GeneratedRequirementsResult.tsx` — L1a panel (green, ≥ 80% confidence) and L1b panel (yellow advisory), category badges (blue=rule, purple=inferred, gray=nav-gap), expandable rows show reasoning + confidence_reason + depends_on

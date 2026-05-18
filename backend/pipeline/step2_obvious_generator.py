@@ -76,6 +76,36 @@ Output ONLY a JSON array (no markdown fences, no preamble text):
 }]"""
 
 
+def _identify_root_node(step1_requirements: list, discovered_pages: list) -> str | None:
+    """
+    Returns the name of the root/home node when it can be determined unambiguously.
+    The root node is exempt from CHECK 2 — it IS the entry point; there is no page before it.
+    Heuristics (in priority order):
+    1. Only one node-type requirement exists → that page is the root.
+    2. discovered_pages contains only index.html (single-route SPA) → the sole stated node is root.
+    3. A node whose ui_node matches a common home name and is marked critical.
+    """
+    node_reqs = [r for r in step1_requirements if r.get("type") == "node"]
+    if len(node_reqs) == 1:
+        return node_reqs[0].get("ui_node") or node_reqs[0].get("description")
+
+    is_single_file_spa = (
+        len(discovered_pages) == 1
+        and any(p.lower() in ("index.html", "index.htm") for p in discovered_pages)
+    )
+    if is_single_file_spa and len(node_reqs) >= 1:
+        return node_reqs[0].get("ui_node") or node_reqs[0].get("description")
+
+    home_names = {"home", "landing", "index", "main", "dashboard", "root"}
+    for r in node_reqs:
+        if r.get("priority") == "critical":
+            name = (r.get("ui_node") or r.get("description") or "").lower()
+            if any(h in name for h in home_names):
+                return r.get("ui_node") or r.get("description")
+
+    return None
+
+
 def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
     project_type = step0_result.get("project_type", "unknown")
     frontend = step0_result.get("frontend_framework") or "None"
@@ -92,6 +122,17 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
     discovered = step0_result.get("discovered_pages") or []
     pages_str = ", ".join(discovered) if discovered else "(none found — infer pages from stated requirements only)"
 
+    root_node = _identify_root_node(step1_requirements, discovered)
+    if root_node:
+        root_section = (
+            f"=== ROOT / HOME PAGE ===\n"
+            f"'{root_node}' is the application entry point (home/root page).\n"
+            f"Do NOT apply CHECK 2 to it — there is no separate page before it.\n"
+            f"Do NOT invent a phantom landing page to navigate FROM.\n\n"
+        )
+    else:
+        root_section = ""
+
     return (
         f"=== PROJECT CONTEXT ===\n"
         f"Project type: {project_type}\n"
@@ -99,6 +140,7 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
         f"Backend framework: {backend}\n\n"
         f"=== DISCOVERED PAGE FILES (from codebase) ===\n"
         f"{pages_str}\n\n"
+        f"{root_section}"
         f"=== STATED REQUIREMENTS (do not regenerate these) ===\n"
         f"{stated}\n\n"
         f"Apply all 3 checks to find navigation gaps."
