@@ -89,6 +89,25 @@ Output ONLY a JSON array (no markdown fences, no preamble text):
 }]"""
 
 
+def _identify_root_node(step1_requirements: list, discovered_pages: list) -> str | None:
+    node_reqs = [r for r in step1_requirements if r.get("type") == "node"]
+    if len(node_reqs) == 1:
+        return node_reqs[0].get("ui_node") or node_reqs[0].get("description")
+    is_single_file_spa = (
+        len(discovered_pages) == 1
+        and any(p.lower() in ("index.html", "index.htm") for p in discovered_pages)
+    )
+    if is_single_file_spa and len(node_reqs) >= 1:
+        return node_reqs[0].get("ui_node") or node_reqs[0].get("description")
+    home_names = {"home", "landing", "index", "main", "dashboard", "root"}
+    for r in node_reqs:
+        if r.get("priority") == "critical":
+            name = (r.get("ui_node") or r.get("description") or "").lower()
+            if any(h in name for h in home_names):
+                return r.get("ui_node") or r.get("description")
+    return None
+
+
 def _build_user_message(
     step0_result: dict,
     step1_requirements: list,
@@ -111,12 +130,24 @@ def _build_user_message(
     pages_str = ", ".join(discovered) if discovered else "(none)"
     summary_line = f"Project purpose: {project_summary}\n" if project_summary else ""
 
+    root_node = _identify_root_node(step1_requirements, discovered)
+    if root_node:
+        root_section = (
+            f"=== ROOT / HOME PAGE ===\n"
+            f"'{root_node}' is the application entry point (home/root page).\n"
+            f"Do NOT generate INF-C nodes that treat it as a secondary page with a phantom home above it.\n"
+            f"Do NOT generate INF-E navigation TO it from a page that does not exist in the stated requirements.\n\n"
+        )
+    else:
+        root_section = ""
+
     return (
         f"=== PROJECT CONTEXT ===\n"
         f"Project type: {project_type}\n"
         f"Frontend: {frontend} | Backend: {backend}\n"
         f"{summary_line}"
         f"\n=== DISCOVERED PAGES (Step 0) ===\n{pages_str}\n\n"
+        f"{root_section}"
         f"=== STATED REQUIREMENTS (Step 1 — do not regenerate) ===\n"
         f"{fmt(step1_requirements, 'REQ')}\n\n"
         f"=== OBVIOUS REQUIREMENTS (Step 2 — do not regenerate) ===\n"
