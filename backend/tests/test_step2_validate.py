@@ -89,6 +89,52 @@ def test_missing_reasoning_dropped():
     assert dropped == 1
 
 
+def test_check4_reasoning_dropped():
+    items = [
+        {
+            "description": "System must display newly added items in the list.",
+            "reasoning": "CHECK 4 — Add operation has no stated observable outcome.",
+            "priority": "high",
+        }
+    ]
+    valid, dropped = _validate_and_normalise(items, STEP1)
+    assert len(valid) == 0
+    assert dropped == 1
+
+
+def test_check5_reasoning_dropped():
+    items = [
+        {
+            "description": "System must provide a button to mark a to-do item as complete.",
+            "reasoning": "CHECK 5 — Complete capability has no stated UI control.",
+            "priority": "high",
+        }
+    ]
+    valid, dropped = _validate_and_normalise(items, STEP1)
+    assert len(valid) == 0
+    assert dropped == 1
+
+
+def test_check2_and_check3_kept():
+    items = [
+        {
+            "description": "System must provide a way to navigate to the Settings page.",
+            "reasoning": "CHECK 2 — Settings page has no stated inbound navigation element.",
+            "depends_on": ["REQ-001"],
+            "priority": "critical",
+        },
+        {
+            "description": "System must provide a way to leave the Settings page.",
+            "reasoning": "CHECK 3 — Settings page has no stated exit path.",
+            "depends_on": [],
+            "priority": "high",
+        },
+    ]
+    valid, dropped = _validate_and_normalise(items, STEP1)
+    assert len(valid) == 2
+    assert dropped == 0
+
+
 if __name__ == "__main__":
     test_depends_on_filters_invalid_ids()
     test_depends_on_empty_list_when_none_provided()

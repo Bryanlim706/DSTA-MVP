@@ -145,6 +145,10 @@ def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list
         if not reasoning:
             dropped += 1
             continue
+        reasoning_up = reasoning.upper()
+        if not (reasoning_up.startswith("CHECK 2") or reasoning_up.startswith("CHECK 3")):
+            dropped += 1
+            continue
         if desc.lower() in stated_lower:
             dropped += 1
             continue
