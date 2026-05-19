@@ -67,13 +67,19 @@ category: "sop"
 
 PASS 2 — DOMAIN INFERENCE
 
-Read the project_summary and all stated functions. Ask three questions:
-1. What functions would a regular user of this specific app return to repeatedly that Pass 1 didn't cover?
-2. What functions complete the primary user workflow end-to-end that aren't yet covered?
-3. What proactive monitoring, alerting, or overview surface would help users stay on top of the data they manage in this app?
+Read the project_summary and all stated functions. Think about what a well-rounded, production-quality app in this domain would offer. Generate functions across ALL of these angles that Pass 1 did not cover:
 
-Pure open-ended domain reasoning — no pattern checklist.
-Do NOT re-generate functions already produced in Pass 1 or already stated in Step 1. Before writing each item, confirm it is genuinely new.
+1. RECURRING USE — What functions would a regular user return to repeatedly in normal workflow? (daily tasks, status checks, monitoring)
+2. WORKFLOW COMPLETENESS — What functions complete the primary user workflow end-to-end? (onboarding, confirmation flows, completion states, getting-started guidance)
+3. DATA MANAGEMENT — What functions help users manage, organise, or recover their data? (bulk operations, export, import, archive, restore, history)
+4. DOMAIN STANDARDS — What functions do comparable apps in this domain always offer as standard? Think: what would a competitor app have that isn't yet covered here?
+5. DISCOVERABILITY + HELP — What functions help users get oriented or get help? (help page, onboarding tour, empty-state guidance, documentation access)
+6. USER CONTROL — What functions give users control over their experience? (account settings, preferences, notification controls, display options, customisation)
+7. OVERVIEW + INSIGHT — What summary views, dashboards, or analytics would help users understand the state of their data at a glance?
+
+Be BOLD — generate functions even at confidence 0.50–0.70 if they represent genuine domain gaps. This pass drives FA (Functional Appropriateness) scoring: a well-calibrated app should have most of these; their absence is meaningful and scored. Aim for breadth — it is better to generate a function the reviewer demotes than to silently omit a real gap.
+
+Do NOT re-generate functions already produced in Pass 1, already stated in Step 1, or already covered by a Step 2 obvious function. Before writing each item, confirm the description is genuinely new.
 
 Gate: only generate functions a user can independently navigate to or invoke — a page, form, view, or feature with its own dedicated home in the UI. Do NOT generate system reactions or behavioral properties ("User sees validation error", "User receives confirmation message", "User is redirected when X") — those are acceptance criteria, not functions.
 

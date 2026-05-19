@@ -424,7 +424,16 @@ Fires only on nodes from Step 1 stated functions. Checks each node against the S
 Vague unpack targeting: functions with `vague: true` in Step 1 are priority targets — apply ALL applicable patterns and set `unpacks: "<parent_req_id>"` on each child.
 
 **Pass 2 — INF domain inference**
-Read `project_summary` and all stated functions. Ask: what functions would a regular user of this specific app return to repeatedly that Pass 1 didn't cover? Pure open-ended domain reasoning — no checklist.
+Read `project_summary` and all stated functions. Generate functions across 7 domain-completeness angles that Pass 1 did not cover:
+1. RECURRING USE — frequent/daily functions (status checks, monitoring)
+2. WORKFLOW COMPLETENESS — onboarding, getting-started, completion states
+3. DATA MANAGEMENT — bulk ops, export, import, archive, restore, history
+4. DOMAIN STANDARDS — what a comparable app always offers as standard
+5. DISCOVERABILITY + HELP — help page, onboarding tour, empty-state guidance
+6. USER CONTROL — settings, preferences, notification controls, customisation
+7. OVERVIEW + INSIGHT — dashboards, analytics, summary views
+
+Bold generation — generates at confidence 0.50–0.70 for genuine domain gaps; breadth over silence because this pass drives FA scoring.
 
 **Confidence → placement:**
 - ≥ 0.80 → `placement: "l1a"` (promoted to FCom scoring pool at Step 3.5)
