@@ -63,6 +63,7 @@ function IncludedRow({
   req,
   isGen,
   isL1aGen,
+  category,
   onPriority,
   onDemote,
   onDelete,
@@ -70,6 +71,7 @@ function IncludedRow({
   req: ConfirmedRequirement
   isGen: boolean
   isL1aGen: boolean
+  category?: 'sop' | 'inf'
   onPriority: (id: string, p: ConfirmedRequirement['priority']) => void
   onDemote?: (id: string) => void
   onDelete: (id: string) => void
@@ -87,6 +89,11 @@ function IncludedRow({
           {req.description}
           {req.vague && (
             <span className="ml-1 inline-block text-[10px] bg-orange-50 text-orange-600 px-1 py-0.5 rounded">vague</span>
+          )}
+          {isGen && category && (
+            <span className={`ml-1 inline-block text-[10px] font-semibold px-1 py-0.5 rounded ${category === 'sop' ? 'bg-blue-50 text-blue-500' : 'bg-purple-50 text-purple-500'}`}>
+              {category.toUpperCase()}
+            </span>
           )}
         </td>
         <td className="px-4 py-2">
@@ -147,8 +154,8 @@ function AdvisoryRow({
           )}
         </td>
         <td className="px-4 py-2">
-          <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-            {req.category === 'sop' ? 'Pattern' : 'Inferred'}
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${req.category === 'sop' ? 'bg-blue-50 text-blue-500' : 'bg-purple-50 text-purple-500'}`}>
+            {req.category.toUpperCase()}
           </span>
         </td>
         <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{confPct}%</td>
@@ -328,6 +335,7 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
               </thead>
               <tbody>
                 {orderedIncluded.map(req => {
+                  const step3Source = step3Reqs.find(r => r.req_id === req.req_id)
                   const isL1aGen = req.tag === 'generated' && step3L1a.some(r => r.req_id === req.req_id)
                   return (
                     <IncludedRow
@@ -335,6 +343,7 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
                       req={req}
                       isGen={req.tag === 'generated'}
                       isL1aGen={isL1aGen}
+                      category={step3Source?.category}
                       onPriority={updatePriority}
                       onDemote={isL1aGen ? demoteToAdvisory : undefined}
                       onDelete={deleteFromL1a}
