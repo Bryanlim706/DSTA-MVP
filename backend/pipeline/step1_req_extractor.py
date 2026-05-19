@@ -25,117 +25,113 @@ README_NAMES = {"readme.md", "readme.rst", "readme.txt", "readme"}
 
 def _norm(text: str) -> str:
     return re.sub(r'\s+', ' ', text.lower().strip())
+
+
 MAX_DOCS = 30
 MAX_CHARS_PER_DOC = 12000
 MAX_README_DEPTH = 2
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract stated requirements as graph entities — nodes, edges, or elements within nodes. Requirements are X-axis items (what exists in the UI). Behavioral properties (how well something works) are Y-axis items and must NOT be extracted.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract stated requirements as user-facing functions — each function describes a goal a user can directly perform in the UI.
 
 ---
 
-TAXONOMY
+EXTRACTION GATE
 
-node — A distinct page or screen a user can navigate to.
-  description: "System must provide a [Page Name]"
-  ui_node: the page name itself
+Before extracting any item, ask: "Does this text describe a goal a user can directly perform?"
+YES → extract as a function.
+NO → skip entirely.
 
-element — A UI control, button, form, or feature that lives within a specific page.
-  description: "System must provide [element] on the [Page Name]"
-  ui_node: the containing page name
-
-edge — An explicitly stated navigation path between two pages.
-  description: "System must provide a way to navigate from [Source] to [Destination]"
-  ui_node: the destination page name
+Rejects: backend subjects (app.py, database, server), quality attributes (responsive, secure, accessible, performant), automatic behaviors the user cannot directly invoke, system reactions ("X happens when Y" or "system must X when Y"). If an item cannot be described without a conditional, skip it.
 
 ---
 
-WHAT TO EXTRACT
+FUNCTION DESCRIPTION
 
-Extract when the source text names a specific page, screen, form, button, or UI component and describes what it IS or what it provides. Every item must classify as node, edge, or element.
-
-Named entities include (not exhaustive): any named page or screen ("the login screen", "the dashboard"), any named form ("the add-task form"), any named button or link ("the logout button"), any named component ("the navigation bar", "the task table").
-
-Named entities do NOT require .html filenames — "the contacts page shows..." is extractable even if no .html file is named.
+Active voice, user as subject: "User can [action]"
+Examples: "User can log in" | "User can add a task" | "User can view the dashboard"
 
 ---
 
-EXTRACTION GATE — before adding any item, ask: does the source text name a specific UI entity (page, screen, form, button, component) and describe what it IS or provides? If not, skip it.
+PATH CONSTRUCTION
 
-This gate rejects: automatic behaviors (hashing, redirecting, validating, sorting), backend subjects (app.py, server.py, database), reactions ("System must X when/if Y"), behavioral properties of existing entities (how something works, not what it is), and quality attributes (responsive, accessible, performant, secure) — none of these name a UI entity.
+Each function includes a path: an ordered list of UI entities the user traverses to complete the goal.
 
----
+Entity types:
+  node    — a page or screen ("Login Page", "Dashboard", "Task Detail")
+  element — a UI control, form, button, or input within a specific page
+  edge    — a navigation action between two pages
 
-BEHAVIOURAL DECOMPOSITION RULE
+Fields per entity:
+  type     — "node" | "element" | "edge"
+  label    — short human-readable name
+  primary  — true if this entity is what the function is fundamentally asserting; false if it is context
+  ui_node  — (elements only) the containing page name
+  from/to  — (edges only) source and destination page names
 
-If the source describes an automatic behaviour that only makes sense because the user can change a value, extract the element that enables it:
+PRIMARY ENTITY RULES:
+- Multi-hop flows (log in, register, checkout): ALL entities are primary — every step is load-bearing.
+- New page access (first function to assert a page exists): page node + entry edge are both primary.
+- Feature functions (add, filter, edit, delete on an existing page): the element(s) and submit edge are primary; the containing page node is primary: false if the page is stated by another function.
+- Navigation cross-links: the edge is primary; surrounding nodes are primary: false.
+- State-variant destination nodes ("Task List Page (filtered)", "Task List Page (updated)"): ALWAYS primary: false — they are UI state, not navigable routes.
 
-- "Rows with done status sink to the bottom" → element: status-change control on [task list page]
-- "Tasks are ordered by priority" → element: priority-setting control on [task page]
-- "Entries are grouped by due date" → element: due-date control on [entries page]
-
-The automatic behaviour sentence IS the source_quote.
-
----
-
-EXAMPLES
-
-EXTRACT:
-- "The login page requires username and password" → node: Login Page
-- "The dashboard displays the user's recent activity" → node: Dashboard
-- "The contacts view shows name, phone, and email for each contact" → node: Contacts View
-- "The 'add task' button opens a form to create a new task" → element: add-task button/form on [task list page]
-- "The navigation bar shows all user categories" → element: navigation bar on [home page]
-- "Each category page has a back-to-home button" → edge: navigate from Category Page to Home
-- "The settings screen allows users to change their password" → element: change-password control on Settings Page
-- "Rows with done status sink to the bottom" → DECOMPOSE → element: status-change control on [task list page]
-- "Javascript allows deletion of categories from the navigation bar" → element: delete-category control on [nav bar / home page]
-
-SKIP:
-- "Passwords are hashed before storing" → automatic process
-- "Duplicate entries are prevented on form submission" → validation rule
-- "app.py validates the input" → backend subject
-- "The database stores user credentials" → data store
-- "Users are redirected to login when unauthenticated" → reaction
-- "Responsive design" → non-functional quality attribute (not a graph entity)
-- "The app must be accessible on mobile and desktop" → non-functional quality attribute
+VAGUE REQUIREMENTS:
+If the text is too broad to construct a specific path (e.g. "users can manage their tasks"), set vague: true and use a minimal path with one node only. Step 3 will decompose it.
 
 ---
 
-DEDUPLICATION
+PATH EXAMPLES
 
-If two sentences describe the same entity, extract ONE requirement.
+"Users should be able to log in" — multi-hop, all primary:
+path: [
+  {"type": "node",    "label": "Login Page",         "primary": true},
+  {"type": "element", "label": "login form",         "primary": true, "ui_node": "Login Page"},
+  {"type": "edge",    "label": "submit credentials", "primary": true, "from": "Login Page", "to": "Dashboard"},
+  {"type": "node",    "label": "Dashboard",          "primary": true}
+]
 
----
+"The add-task button opens a form to create a new task" — element + edge primary; page context:
+path: [
+  {"type": "node",    "label": "Task List Page",           "primary": false},
+  {"type": "element", "label": "add task form",            "primary": true, "ui_node": "Task List Page"},
+  {"type": "edge",    "label": "submit new task",          "primary": true, "from": "Task List Page", "to": "Task List Page"},
+  {"type": "node",    "label": "Task List Page (updated)", "primary": false}
+]
 
-PROJECT SUMMARY
-
-Before extracting requirements, write a project_summary: 2–3 sentences covering what the app is, who uses it, and what problem it solves. Capture domain and purpose — not a feature list. Draw from the documentation only, no inference.
+"Users can manage their tasks" — vague, minimal path:
+path: [{"type": "node", "label": "Task Management Page", "primary": true}]
+vague: true
 
 ---
 
 RULES
 
-1. source_quote: ONE verbatim sentence from the source naming the UI entity or describing the automatic behaviour (Decomposition Rule).
-2. No inference — description must be derivable from source_quote alone.
-3. Decompose compound items: "register and log in" = two requirements (Registration Page node + Login Page node).
-4. No artificial splits: two sides of the same entity = one requirement.
-5. Priority: critical = foundational node with many dependents (max 1–2); high = core; medium = supporting; low = minor.
+1. source_quote: one verbatim sentence from the source. Must appear verbatim in the source text (whitespace differences OK).
+2. One function per user goal. "Register and log in" = two functions.
+3. No inference: path must be derivable from source_quote alone. If path requires invention, set vague: true.
+4. Decompose compound items: "register and log in" = Register function + Login function.
+5. priority: critical = foundational (1–2 max); high = core; medium = supporting; low = minor
 6. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
-7. source: exact filename (e.g. "README.md") or "user_input".
-8. functional_area: short snake_case (e.g. "auth", "task_management").
-9. type: "node" | "edge" | "element"
-10. ui_node: for node — the page name itself; for element — the containing page; for edge — the destination page.
+7. source: exact filename or "user_input"
+8. functional_area: short snake_case (e.g. "auth", "task_management")
 
-Return ONLY a valid JSON object. No markdown fences, no explanation, no other text:
+project_summary: Write 2–3 sentences before the requirements: what the app is, who uses it, what problem it solves. Domain and purpose — not a feature list.
+
+Return ONLY a valid JSON object (no markdown fences, no explanation):
 {
-  "project_summary": "2-3 sentence description of what the app is, who uses it, and what problem it solves.",
+  "project_summary": "2-3 sentence description.",
   "requirements": [{
     "req_id": "REQ-001",
-    "description": "System must provide a Login Page",
-    "type": "node",
-    "ui_node": "Login Page",
+    "description": "User can log in",
+    "path": [
+      {"type": "node",    "label": "Login Page",         "primary": true},
+      {"type": "element", "label": "login form",         "primary": true, "ui_node": "Login Page"},
+      {"type": "edge",    "label": "submit credentials", "primary": true, "from": "Login Page", "to": "Dashboard"},
+      {"type": "node",    "label": "Dashboard",          "primary": true}
+    ],
+    "vague": false,
     "source": "README.md",
-    "source_quote": "verbatim sentence naming the UI entity",
+    "source_quote": "users should be able to log in",
     "tag": "stated",
     "priority": "high",
     "weight": 3.0,
@@ -157,15 +153,6 @@ def _find_project_root(extract_to: Path) -> Path:
 
 
 def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str], int]:
-    """
-    Returns (docs, truncated_docs, excluded_count).
-    docs: {relative_posix_path: content} — README always first, then spec docs.
-    truncated_docs: relative paths of files that exceeded MAX_CHARS_PER_DOC.
-    excluded_count: spec docs found but dropped because MAX_DOCS was hit.
-    README files deeper than MAX_README_DEPTH are skipped to avoid sub-module READMEs
-    consuming all README slots.
-    Uses relative paths as keys so same-named files in different dirs never collide.
-    """
     readme_bucket: dict[str, str] = {}
     spec_bucket: dict[str, str] = {}
     truncated: list[str] = []
@@ -204,7 +191,6 @@ def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str], int]:
             except OSError:
                 pass
 
-    # README always first; spec docs fill remaining slots up to MAX_DOCS
     merged: dict[str, str] = {}
     for k, v in readme_bucket.items():
         if len(merged) >= MAX_DOCS:
@@ -223,7 +209,7 @@ def _build_user_message(requirements_text: str, spec_docs: dict[str, str]) -> st
     parts = [f"=== USER REQUIREMENTS ===\n{requirements_text}"]
     for label, content in spec_docs.items():
         parts.append(f"=== {label} ===\n{content}")
-    parts.append("Extract all explicitly stated functional requirements.")
+    parts.append("Extract all explicitly stated functional requirements as functions with paths.")
     return "\n\n".join(parts)
 
 
@@ -234,7 +220,6 @@ def _parse_llm_response(raw: str) -> tuple[list, str]:
     elif "```" in text:
         text = text.split("```", 1)[1].split("```", 1)[0].strip()
 
-    # Full parse — expect {"project_summary": "...", "requirements": [...]}
     try:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
@@ -244,8 +229,6 @@ def _parse_llm_response(raw: str) -> tuple[list, str]:
     except json.JSONDecodeError:
         pass
 
-    # Truncation recovery: find the requirements array and recover partial results.
-    # project_summary is lost in this path but requirements are preserved.
     bracket_pos = text.find("[")
     if bracket_pos >= 0:
         array_text = text[bracket_pos:]
@@ -257,6 +240,23 @@ def _parse_llm_response(raw: str) -> tuple[list, str]:
                 return json.loads(array_text[:last_close + 1] + "]"), ""
 
     raise ValueError("Could not parse LLM response as requirements")
+
+
+def _validate_path(path) -> list | None:
+    """Validate and normalise a path array. Returns cleaned path or None if invalid."""
+    if not isinstance(path, list) or len(path) == 0:
+        return None
+    clean = []
+    for entity in path:
+        if not isinstance(entity, dict):
+            continue
+        if entity.get("type") not in {"node", "element", "edge"}:
+            continue
+        if not str(entity.get("label", "")).strip():
+            continue
+        entity.setdefault("primary", True)
+        clean.append(entity)
+    return clean if clean else None
 
 
 def _validate_and_normalise(
@@ -282,6 +282,14 @@ def _validate_and_normalise(
             dropped += 1
             continue
 
+        path = _validate_path(item.get("path"))
+        if path is None:
+            dropped += 1
+            continue
+        item["path"] = path
+
+        item["vague"] = bool(item.get("vague", False))
+
         priority = item.get("priority", "medium")
         if priority not in WEIGHT_MAP:
             priority = "medium"
@@ -293,9 +301,9 @@ def _validate_and_normalise(
         item.setdefault("source", "user_input")
         item.setdefault("functional_area", "general")
 
-        if item.get("type") not in {"node", "edge", "element"}:
-            item["type"] = "node"
-        item.setdefault("ui_node", "")
+        # Remove old flat entity fields no longer part of the schema
+        item.pop("type", None)
+        item.pop("ui_node", None)
 
         valid.append(item)
 
@@ -323,6 +331,8 @@ async def run(
 
     last_exc = None
     project_summary = ""
+    requirements = []
+    dropped = 0
     for attempt in range(3):
         try:
             response = await client.messages.create(

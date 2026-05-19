@@ -1,13 +1,10 @@
 import { useState } from 'react'
 import type { Step3Requirement, Step3Result } from '../types'
+import { PathDisplay } from './PathDisplay'
 
 const CATEGORY_STYLES: Record<string, { label: string; style: string }> = {
-  sop_a:           { label: 'Rule · New page',    style: 'bg-blue-50 text-blue-700' },
-  sop_b:           { label: 'Rule · Element',      style: 'bg-blue-50 text-blue-700' },
-  inf_c:           { label: 'Inferred · New page', style: 'bg-purple-50 text-purple-700' },
-  inf_d:           { label: 'Inferred · Element',  style: 'bg-purple-50 text-purple-700' },
-  inf_e:           { label: 'Inferred · Edge',     style: 'bg-purple-50 text-purple-700' },
-  structural_edge: { label: 'Nav gap',             style: 'bg-gray-100 text-gray-500' },
+  sop: { label: 'Pattern',   style: 'bg-blue-50 text-blue-700' },
+  inf: { label: 'Inferred',  style: 'bg-purple-50 text-purple-700' },
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -40,28 +37,37 @@ function RequirementRow({ req }: { req: Step3Requirement }) {
       </tr>
       {expanded && (
         <tr className="bg-gray-50 border-t border-gray-100">
-          <td colSpan={5} className="px-4 pb-3 pt-1 space-y-1.5">
-            {req.functional_area && (
-              <span className="inline-block text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono">
-                {req.functional_area}
-              </span>
-            )}
-            {req.priority && (
-              <span className={`inline-block ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase ${PRIORITY_STYLES[req.priority] ?? PRIORITY_STYLES.medium}`}>
-                {req.priority}
-              </span>
-            )}
-            {req.strength && (
-              <span className="inline-block ml-1 text-[10px] bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded">
-                {req.strength}
-              </span>
-            )}
-            <p className="text-xs text-gray-500 font-medium">Reasoning</p>
+          <td colSpan={5} className="px-4 pb-3 pt-2 space-y-1.5">
+            <div className="flex flex-wrap gap-1 mb-1">
+              {req.functional_area && (
+                <span className="inline-block text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono">
+                  {req.functional_area}
+                </span>
+              )}
+              {req.priority && (
+                <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase ${PRIORITY_STYLES[req.priority] ?? PRIORITY_STYLES.medium}`}>
+                  {req.priority}
+                </span>
+              )}
+              {req.strength && (
+                <span className="inline-block text-[10px] bg-yellow-50 text-yellow-700 px-1.5 py-0.5 rounded">
+                  {req.strength}
+                </span>
+              )}
+              {req.unpacks && (
+                <span className="inline-block text-[10px] bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded">
+                  unpacks {req.unpacks}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 font-medium">Traversal path</p>
+            <PathDisplay path={req.path} />
+            <p className="text-xs text-gray-500 font-medium mt-1">Reasoning</p>
             <p className="text-xs text-gray-700 italic">{req.reasoning}</p>
             <p className="text-xs text-gray-500 font-medium">Confidence: {confPct}%</p>
             <p className="text-xs text-gray-700 italic">{req.confidence_reason}</p>
             {req.depends_on?.length > 0 && (
-              <p className="text-xs text-gray-500">Depends on: {req.depends_on.join(', ')}</p>
+              <p className="text-xs text-gray-400">Depends on: {req.depends_on.join(', ')}</p>
             )}
           </td>
         </tr>
@@ -79,7 +85,7 @@ function ReqTable({ reqs }: { reqs: Step3Requirement[] }) {
           <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
             <th className="px-4 py-2">ID</th>
             <th className="px-4 py-2">Type</th>
-            <th className="px-4 py-2">Description</th>
+            <th className="px-4 py-2">Function</th>
             <th className="px-4 py-2">Confidence</th>
             <th className="px-4 py-2"></th>
           </tr>
@@ -93,15 +99,15 @@ function ReqTable({ reqs }: { reqs: Step3Requirement[] }) {
 }
 
 export default function GeneratedRequirementsResult({ result }: { result: Step3Result }) {
-  const l1a = result.requirements.filter(r => r.l1_recommendation === 'l1a')
-  const l1b = result.requirements.filter(r => r.l1_recommendation === 'l1b')
+  const l1a = result.requirements.filter(r => r.placement === 'l1a')
+  const l1b = result.requirements.filter(r => r.placement === 'l1b')
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
-        <h2 className="text-sm font-semibold text-gray-800">Generated Requirements</h2>
+        <h2 className="text-sm font-semibold text-gray-800">Generated Functions</h2>
         <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{result.total_count} generated</span>
-        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{result.sop_count} rule-based</span>
+        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{result.sop_count} pattern</span>
         <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">{result.inference_count} inferred</span>
         {result.dropped_count > 0 && (
           <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">{result.dropped_count} dropped</span>
@@ -113,7 +119,7 @@ export default function GeneratedRequirementsResult({ result }: { result: Step3R
 
       {result.requirements.length === 0 ? (
         <div className="px-5 py-10 text-center text-sm text-gray-400">
-          {result.error ? `Generation failed: ${result.error}` : 'No generated requirements.'}
+          {result.error ? `Generation failed: ${result.error}` : 'No generated functions.'}
         </div>
       ) : (
         <>
@@ -139,7 +145,7 @@ export default function GeneratedRequirementsResult({ result }: { result: Step3R
       )}
 
       <div className="px-5 py-2.5 border-t border-gray-100">
-        <span className="text-[10px] text-gray-400">Click a row to see reasoning and confidence detail</span>
+        <span className="text-[10px] text-gray-400">Click a row to see traversal path, reasoning, and confidence detail</span>
       </div>
     </div>
   )

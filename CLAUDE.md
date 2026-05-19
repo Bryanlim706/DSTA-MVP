@@ -52,48 +52,46 @@ runtime  (only for electron_app)
 - Scans uploaded zip for README files (capped at depth ≤ 2) and spec docs (keyword-matched .md/.rst/.txt)
 - Ignores tool config dirs: `.claude`, `.cursor`, `.github`, `.vscode`, `.idea` (these waste slots)
 - MAX_DOCS = 30, MAX_CHARS_PER_DOC = 12000
-- LLM (claude-haiku) extracts stated requirements as **graph entities** — nodes, edges, or elements within nodes (not capability statements). Also extracts a `project_summary` (2–3 sentence domain/purpose description) in the same call. Every requirement must include a verbatim source quote.
-- Source quote verification uses whitespace-normalized comparison (`_norm()`) — collapses all whitespace to single space before substring check, so LLM quote normalization (newlines → spaces) doesn't cause false drops
+- LLM (claude-haiku) extracts stated requirements as **functions** — "User can [action]" active voice. Also extracts `project_summary` (2–3 sentence domain/purpose description) in the same call. Every function must include a verbatim source quote.
+- **Function+path model:** Each function includes `path: PathEntity[]` — ordered UI entities traversed to complete the goal. PathEntity: `{type: "node"|"element"|"edge", label, primary: boolean, ui_node?, from?, to?}`. `primary: true` = entity fundamentally asserted by this function (scored if absent); `primary: false` = context already asserted by another function.
+- **Vague flag:** Source text too broad to build a specific path (e.g. "users can manage tasks") → `vague: true`, minimal single-node path. Step 3 decomposes via `unpacks` targeting. Vague functions never enter FCom scoring.
+- **State-variant nodes** (labels with parentheticals like "(filtered)", "(sorted)") always `primary: false` — UI state, not navigable routes; Step 6 skips L2 route matching for them.
+- **Extraction gate (positive framing):** "Does this text describe a goal a user can directly perform?" Rejects: backend subjects, quality attributes, automatic behaviors, system reactions ("X happens when/if Y"). Positive gate replaces growing negative lists.
+- Source quote verification uses whitespace-normalized comparison (`_norm()`) — collapses all whitespace to single space; newlines → spaces tolerated
 - JSON truncation recovery: if response is cut off mid-array, recovers items up to last complete `},`
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
-- `functional_area` field on each requirement for cascade advisory grouping
-- **Entity taxonomy:** `type` = `"node"` (a page/screen) | `"edge"` (stated navigation path) | `"element"` (control/feature within a page). `ui_node` = the page this entity belongs to (for nodes: itself; for elements: containing page; for edges: destination page).
-- **Page-identity rule:** Named entities do NOT require `.html` filenames — "the contacts page shows..." is extractable even if no .html file is named.
-- **Behavioural decomposition rule:** Automatic behaviours that only make sense because the user can change a value → extract the element that enables it. "Rows with done status sink to the bottom" → element: status-change control on [task list page]. The automatic behaviour sentence is the source_quote.
-- **X-axis only:** Capabilities ("user can log in") and behavioral properties (validation, redirects, persistence) are Y-axis items — never extracted. The entity is the extractable unit, not the capability it enables.
-- **Extraction gate (positive framing):** Before extracting any item, the LLM tests: "Does the source text name a specific UI entity and describe what it IS or provides?" Rejects: automatic behaviors (hashing, redirecting, validating, sorting), backend subjects (app.py, server.py, database), reactions ("System must X when/if Y"), behavioral properties of existing entities, and quality attributes (responsive, accessible, performant, secure) — none of these name a UI entity. This replaces a growing negative "what to skip" list, which LLMs ignore when their training priors are strong.
-- **`project_summary`** passed to Step 3 so INF-C/INF-D domain inference is purpose-aware (e.g. "task manager" → overdue tracking, completion %, progress view) rather than purely structural pattern matching.
+- `functional_area` field on each function for cascade advisory grouping
+- **`project_summary`** passed to Step 3 so INF domain inference is purpose-aware
 
 ### Step 2 — Obvious Requirement Generator (COMPLETE)
 - LLM finds graph connectivity gaps — pages that cannot be reached or cannot be left
 - `discovered_pages` from Step 0 passed to LLM as ground-truth node inventory (codebase files)
-- **Prompt design (3-check deterministic):** (1) build node list from stated + discovered pages, (2) entry paths per node — is there a stated inbound navigation element? (3) exit paths per node — is there a stated way to leave it? (mechanism-agnostic). Hard stops: auth guards, invocation controls for stated capabilities, observable outcomes, error messages, anything phrased "System must X when Y".
-- **`depends_on` field:** lists the REQ-XXX ids from stated requirements that make each obvious requirement necessary.
+- **Path-aware node extraction:** `_extract_nodes_from_paths()` parses node inventory from Step 1 function path arrays (state-variant labels excluded via `_is_state_variant()`). Step 2 no longer reads a flat `type=node` field — it parses path arrays.
+- **Output format:** navigation functions with `path: PathEntity[]`. CHECK 2 → edge `{primary: true, from: null}` + destination node `{primary: false}`. CHECK 3 → source node `{primary: false}` + exit edge `{primary: true, to: null}`.
+- **`depends_on` field:** lists the REQ-XXX ids from stated functions that make each obvious function necessary.
 - **Parser:** handles LLM YES/NO reasoning text before JSON array via bracket_pos search.
-- **`_build_user_message`:** stated requirements formatted with `[req_id]` prefix for `depends_on` linkage.
-- **Code-level enforcement:** `_validate_and_normalise` drops any item whose `reasoning` does not start with "CHECK 2" or "CHECK 3" — guards against LLM hallucinating CHECK 4/5 labels despite prompt instructions.
-- **Root node detection (`_identify_root_node()`):** Detects the home/root page before building the user message to prevent phantom entry navigation. Two heuristics: (1) only one `type=node` requirement → that page is root; (2) `discovered_pages = ["index.html"]` (single-route SPA) with at least one node req → first node is root. Detected root is injected as an explicit `=== ROOT / HOME PAGE ===` section instructing the LLM to skip CHECK 2 for it and not invent a phantom landing page to navigate from.
+- **`_build_user_message`:** stated functions formatted with `[req_id]` prefix for `depends_on` linkage; node inventory and edge inventory provided explicitly.
+- **Code-level enforcement:** `_validate_and_normalise` drops any item whose `reasoning` does not start with "CHECK 2" or "CHECK 3"; validates path arrays; defaults edge entities to `primary: true`.
+- **Root node detection (`_identify_root_node()`):** Detects the home/root page by parsing nodes from Step 1 path arrays. Two heuristics: (1) only one stated node in all paths → root; (2) `discovered_pages = ["index.html"]` (single-route SPA) + at least one stated node → first node is root. Detected root injected as `=== ROOT / HOME PAGE ===` — LLM skips CHECK 2 for it.
 
 ### Step 3 — Generated Requirement Generator (COMPLETE)
 - LLM generates both L1a candidates (confidence ≥ 0.80) and L1b advisory items (< 0.80)
-- **5 categories + structural edges:**
-  - SOP-A: pattern-triggered new nodes — three trigger types: (1) feature keywords (auth → profile; offline → offline records; multi-user → user identity; sync → sync status); (2) data structure patterns (temporal field → time-scoped browsing page ~0.75–0.85; collection-status/category field → cross-status overview page ~0.70–0.82; parent-child/many-to-many relationship → grouping page ~0.65–0.80); (3) lifecycle patterns (mutable records → audit/history page ~0.50–0.65; user-configurable preferences → settings page ~0.70–0.85; time-sensitive deadlines/thresholds → notification surface ~0.55–0.75)
-  - SOP-B: rule-triggered elements within existing **stated** nodes only (`type=node` from Step 1). Does NOT fire for Step 1 elements (`type=element`) — they are sub-components, not pages. Does NOT fire for nodes generated in SOP-A/INF-C in the same pass — those get structural_edge only. Rules: list node → filter ~0.82, search ~0.80, sort ~0.68, pagination ~0.50–0.75, edit item ~0.72, delete item ~0.65; detail node → edit ~0.75, delete ~0.70; dashboard node → date-range filter ~0.65, export ~0.50; status-field node (named changeable status, OR page named "overview"/"summary"/"report" aggregating items with status) → filter-by-status ~0.82, bulk-update ~0.45.
-  - INF-C: domain-knowledge new nodes — reads `project_summary` to understand the app's domain and purpose, then asks what a regular user would return to repeatedly that stated pages and SOP patterns don't provide; no fixed checklist — pure open-ended domain reasoning
-  - INF-D: contextual elements within existing nodes (domain-specific, not covered by SOP-B). Positive framing: "Is this something a user taps, reads, or fills in?" — YES → include; NO (system response/feedback/side-effect) → it's an AC, discard. **Action-page heuristic:** pages whose name starts with a verb ("Take X", "Add X", "Record X", "Submit X", "Create X", "Edit X") → always consider input fields: does the action have a subject/person (→ selector/picker), a date or time (→ date/time picker), a quantity or reference ID (→ number/text input)? Generate these as INF-D elements.
-  - INF-E: missing edges between existing nodes (cross-links and shortcuts beyond Step 2 minimum)
-  - structural_edge: entry/exit edges for new nodes generated in SOP-A/INF-C — `l1_recommendation` inherits from parent node (l1b parent → l1b structural edge, not l1a)
-- **Generation gate (positive framing):** Before including any item, the LLM tests: "Can a user independently navigate to this, or directly invoke it (click, tap, fill, select) as a standalone UI entity that exists regardless of what the user just did?" YES → include. NO → discard (Y-axis AC). Items that only appear as a consequence of another action, describe HOW something works, or express a quality property have no dedicated UI home. This replaces the former NEVER GENERATE negative list, which LLMs circumvent when their training priors are strong.
-- **Root node detection (`_identify_root_node()`):** Same logic as Step 2 — detects the home/root page and injects a ROOT/HOME PAGE section into the Step 3 user message. Guards against INF-C fabricating a phantom home/landing page above the SPA root, and INF-E generating navigation to the root from a page that doesn't exist.
-- **Confidence → placement:** ≥ 0.80 → l1a; 0.60–0.79 → l1b strongly_implied; 0.40–0.59 → l1b medium; < 0.40 → l1b weak
+- **Two-pass generation — each output is a complete function with traversal path:**
+  - **Pass 1 — SOP pattern-triggered (`category: "sop"`):** Fires on nodes from Step 1 stated functions. Pattern table: list node → filter ~0.82, search ~0.80, sort ~0.68, edit item ~0.72, delete item ~0.65; detail node → edit ~0.75, delete ~0.70; auth present → account management / profile ~0.87; named changeable status → cross-status overview ~0.75, filter-by-status ~0.82; temporal field → time-scoped view ~0.75; mutable records → audit/history ~0.60; user preferences → settings ~0.82; time-sensitive deadlines → notification surface ~0.65; multi-user data → user profile ~0.82. Vague Step 1 functions (`vague: true`) are priority unpack targets — all applicable patterns fire with `unpacks: "<parent_req_id>"`.
+  - **Pass 2 — INF domain inference (`category: "inf"`):** Reads `project_summary` + all stated functions. Pure open-ended domain reasoning — what would a regular user return to repeatedly that Pass 1 didn't cover? No checklist.
+- **Path construction:** Every generated function has a complete `path[]` with entry edge, body entities, and exit edge baked in. No `structural_edge` category — entry/exit are part of the function's path. State-variant nodes always `primary: false`.
+- **Root node detection (`_identify_root_node()`):** Parses nodes from Step 1 path arrays; injects `=== ROOT / HOME PAGE ===` section to prevent phantom landing page generation.
+- **Confidence → placement:** ≥ 0.80 → `placement: "l1a"`; 0.60–0.79 → `placement: "l1b"` strength: `strongly_implied`; 0.40–0.59 → `l1b` strength: `medium`; < 0.40 → `l1b` strength: `weak`
+- **`unpacks` field:** Links Step 3 children to their vague Step 1 parent (`"REQ-xxx"` or `null`). Step 3.5 auto-includes unpacking children and excludes the vague parent.
 - **Result envelope fields:** `requirements`, `total_count`, `sop_count`, `inference_count`, `llm_model`, `dropped_count`, `error`
-- **Frontend:** `GeneratedRequirementsResult.tsx` — L1a panel (green, ≥ 80% confidence) and L1b panel (yellow advisory), category badges (blue=rule, purple=inferred, gray=nav-gap), expandable rows show reasoning + confidence_reason + depends_on
+- **Frontend:** `GeneratedRequirementsResult.tsx` — L1a panel (green, ≥ 80%) and L1b panel (yellow advisory), category badges (blue=Pattern, purple=Inferred), expandable rows show traversal path (PathDisplay) + reasoning + confidence_reason + unpacks badge + depends_on
 
 ### Frontend (COMPLETE)
 - React + TypeScript + Vite + Tailwind CSS
 - Upload page: drag-and-drop zip + requirements textarea, file size display, validation
 - Results: ClassificationResult (Step 0), RequirementsResult (Step 1), ObviousRequirementsResult (Step 2), GeneratedRequirementsResult (Step 3)
-- Each requirement row expands to show source quote / reasoning + functional_area badge
+- **PathDisplay component (`PathDisplay.tsx`):** Shared component rendering traversal path arrays as type-coded badges with › separators. node=sky, element=violet, edge=amber. Secondary entities (primary=false) rendered at 40% opacity. Each entity shows its label; edges show `from → to`; elements show `ui_node`.
+- Each function row expands to show traversal path (PathDisplay), reasoning, confidence, source quote. Vague badge shown inline for `vague: true` functions.
 - Job list endpoint `GET /api/jobs` lets you find the latest job_id without copying from the frontend
 
 ### Backend infrastructure (COMPLETE)
@@ -110,11 +108,13 @@ runtime  (only for electron_app)
 ### Step 3.5 — Human Requirement Confirmation (COMPLETE)
 - Pipeline pauses at `waiting_for_confirmation` after Step 3; resumes when user POSTs to confirm endpoint
 - `POST /api/jobs/{job_id}/confirm` — validates job state, stores locked L1a as `step_results.step_3_5`, sets status to `confirmed`
+- `ConfirmedRequirement` Pydantic model includes `path: list[PathEntity]`, `vague: bool`, `unpacks: str | None`
 - Frontend `ConfirmationTable.tsx` — three-section review table:
-  - **Section 1 (L1a)**: stated + obvious pre-included; Step 3 l1a candidates pre-included but demotable. Priority dropdown updates weight live.
-  - **Section 2 (L1b Advisory)**: Step 3 l1b items, each promotable to L1a
-  - **Section 3**: inline add-requirement form → `CUSTOM-001` IDs
-- Action bar: **Skip** (stated + obvious only, `skipped=true`) and **Confirm (N in score)**
+  - **Section 1 (L1a)**: stated (non-vague) + obvious pre-included; Step 3 `placement: "l1a"` candidates pre-included but demotable. Expandable popdown shows PathDisplay + reasoning. Priority dropdown updates weight live.
+  - **Section 2 (L1b Advisory)**: Step 3 `placement: "l1b"` items, each promotable to L1a. Expandable popdown shows PathDisplay + reasoning.
+  - **Section 3**: inline add-function form → `CUSTOM-001` IDs; placeholder path: `[{type: "node", label: "TBD", primary: true}]`
+- **Vague auto-replace:** Vague Step 1 functions excluded from initial L1a state. Step 3 functions with `unpacks` pointing to a vague parent are auto-included in L1a, replacing the parent. UI notice: "N vague stated function(s) were auto-replaced by their Step 3 children."
+- Action bar: **Skip** (stated non-vague + obvious only, `skipped=true`) and **Confirm (N in score)**
 - `step_3_5` result stored in job JSON: `confirmed_requirements`, `confirmed_at`, `skipped`, `l1a_count`, `promoted_count`, `deleted_count`, `added_count`
 - ResultPage shows a green summary banner with counts after confirmation
 
@@ -142,7 +142,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       step0_classifier.py            # Project type + framework classifier
       step1_req_extractor.py         # Stated requirement extractor
       step2_obvious_generator.py     # Obvious requirement generator
-      step3_implied_generator.py     # 5-category confidence-scored generator
+      step3_implied_generator.py     # Two-pass SOP/INF confidence-scored generator
     storage/
       job_store.py                   # JSON file job persistence + list_jobs()
   frontend/
@@ -152,10 +152,11 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       pages/UploadPage.tsx           # Upload form
       components/
         ClassificationResult.tsx     # Step 0 result display
-        RequirementsResult.tsx       # Step 1 result display
-        ObviousRequirementsResult.tsx # Step 2 result display
-        GeneratedRequirementsResult.tsx # Step 3 result display (L1a/L1b panels)
-        ConfirmationTable.tsx        # Step 3.5 review/edit table (promote/demote/add/delete)
+        PathDisplay.tsx              # Shared traversal path badge renderer (node/element/edge)
+        RequirementsResult.tsx       # Step 1 result display (function rows + path expand)
+        ObviousRequirementsResult.tsx # Step 2 result display (navigation gap functions)
+        GeneratedRequirementsResult.tsx # Step 3 result display (L1a/L1b panels + path expand)
+        ConfirmationTable.tsx        # Step 3.5 review/edit table (promote/demote/add/delete + vague auto-replace)
       App.tsx                        # Stage state machine
   uploads/                           # Runtime — gitignored
   jobs/                              # Runtime — gitignored
@@ -212,6 +213,8 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **New deterministic fields** — `frontend_tooling`, `template_engine`, `service_layout`, `server_routes_detected` computed by pure helpers from the file tree and config contents. Populated for both rule-based and LLM results. See `docs/step0-edge-case-audit.md`.
 - **Test strategy primary/secondary** — for `backend_api_only`, primary is always the HTTP-level test tool (Pytest API tests / Jest/Supertest / JUnit/MockMvc / PHPUnit / RSpec), not a unit test runner. Unit tests are never the right primary for verifying user-facing API requirements. Secondary is `null` for API-only (deduped away) and the backend test tool for full-stack apps (Playwright primary + backend tool secondary).
 - **Step 1 truncation recovery** — `_parse_llm_response` recovers requirements from truncated JSON responses rather than failing with 0 results
+- **Function+path model (Steps 1–3.5)** — Requirements are functions ("User can [action]") with a `path: PathEntity[]` traversal array, not atomic graph entities. `primary: boolean` distinguishes entities fundamentally asserted by a function from context nodes already covered by another. E() is function-level, aggregated as `0.7 × [primary avg] + 0.3 × [secondary avg]`. State-variant nodes (labels with parentheticals) always `primary: false`. Vague functions (`vague: true`) never enter FCom scoring — Step 3 decomposes them via `unpacks` field.
+- **Two-pass Step 3** — SOP (pattern table fires on Step 1 stated nodes) + INF (pure domain reasoning from `project_summary`). No 5-category taxonomy. No `structural_edge` — entry/exit baked into function paths. `placement` replaces `l1_recommendation`. Step 3 does not re-apply Step 2 connectivity checks.
 
 ---
 

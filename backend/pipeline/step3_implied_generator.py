@@ -1,121 +1,162 @@
 import asyncio
 import json
-import re
+
 import anthropic
 
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
-VALID_CATEGORIES = {"sop_a", "sop_b", "inf_c", "inf_d", "inf_e", "structural_edge"}
+VALID_CATEGORIES = {"sop", "inf"}
 
-LLM_SYSTEM_PROMPT = """You are a requirements analyst. Generate implied requirements across 5 categories + structural edges.
+LLM_SYSTEM_PROMPT = """You are a requirements analyst. Generate implied user-facing functions in two structured passes.
 
-CONFIDENCE → PLACEMENT:
-- ≥ 0.80 → l1_recommendation: "l1a" | 0.60–0.79 → "l1b" strength: "strongly_implied"
-- 0.40–0.59 → "l1b" strength: "medium" | < 0.40 → "l1b" strength: "weak"
+Each output is a complete function with a traversal path (entry + body + exit baked in). The path is the Playwright test sequence for this function.
 
 ---
 
-SOP-A — PATTERN-TRIGGERED NEW NODES (new pages/screens only)
-Fire when a trigger is present in stated reqs AND no equivalent page already exists.
+CONFIDENCE → PLACEMENT (direct decision):
+≥ 0.80 → placement: "l1a"   (goes into completeness scoring, Section 1 of confirmation)
+< 0.80 → placement: "l1b"   (advisory only, Section 2 of confirmation)
 
-Feature keyword triggers:
-- Auth trigger ("login","sign in","register","log out") → profile/account screen (conf ~0.85–0.92)
-- Offline trigger ("offline","local storage","cached") → offline records screen (conf ~0.80–0.90)
-- Multi-user trigger ("role","admin","per-user","my [data]") → user identity screen (conf ~0.75–0.88)
-- Sync trigger ("sync","synchronize","upload pending") → sync status screen (conf ~0.60–0.75)
-
-Data structure triggers (new pages implied by the shape of the data, not by keyword):
-- Temporal trigger: a named date/time/deadline field appears on items that users view as a collection → consider a dedicated time-scoped browsing page (conf ~0.75–0.85)
-- Collection-status trigger: a named status or category field spans items viewed as a collection AND no dedicated status-overview page exists → consider a cross-status overview or grouping page (conf ~0.70–0.82)
-- Relationship trigger: two named entity types have a parent-child or many-to-many relationship → consider a page that groups or cross-references them (conf ~0.65–0.80)
-- Mutability trigger: stated requirements describe creating or editing records → consider an audit/history page (conf ~0.50–0.65)
-- Configuration trigger: stated requirements mention user preferences, display options, or per-user settings → consider a settings/preferences page (conf ~0.70–0.85)
-- Alert trigger: the data has time-sensitive deadlines, thresholds, or status transitions users need to act on → consider a notification or alert surface (conf ~0.55–0.75)
-
-A button invoking an action does NOT satisfy a pattern — a result/status VIEW is distinct.
-→ category: "sop_a"
-
-SOP-B — RULE-TRIGGERED ELEMENTS WITHIN EXISTING NODES (elements, not new pages)
-SCOPE: Only fires for page-level nodes that appear in the STATED REQUIREMENTS list (type=node from Step 1).
-- Do NOT apply SOP-B to Step 1 elements (type=element) — elements are sub-components, not pages.
-- Do NOT apply SOP-B to nodes you generate in SOP-A or INF-C during this pass. Those nodes get navigation paths via structural_edge only — applying SOP-B to them creates duplicate navigation requirements.
-Do NOT duplicate stated requirements.
-- List node (multiple items same type): filter ~0.82, search ~0.80, sort ~0.68, pagination ~0.50–0.75, edit item ~0.72, delete item ~0.65
-- Detail node (single item): edit ~0.75, delete ~0.70
-- Dashboard node (aggregates): date-range filter ~0.65, export ~0.50
-- Status-field node (named changeable status OR page named "overview"/"summary"/"report" that aggregates items with status): filter-by-status ~0.82, bulk-update ~0.45
-→ category: "sop_b"
-
-INF-C — REASONING-BASED NEW NODES (domain knowledge, anchored to specific req_ids)
-Propose pages not covered by SOP-A. Read the project_summary to understand the application's domain and purpose. Ask: what would a regular user of THIS application need to check or return to repeatedly that the stated pages and SOP patterns do not provide? What views make the data useful over time — not just for individual record CRUD, but for understanding the state of the whole dataset? Propose ALL such pages you identify.
-→ category: "inf_c"
-
-INF-D — CONTEXTUAL ELEMENTS WITHIN EXISTING NODES (domain-specific, SOP-B didn't catch)
-Must be traceable to specific L1a reqs. Confidence 0.40–0.75.
-INF-D elements are UI controls or data displays a user can directly see or interact with — not behavioral outcomes of using those controls. Ask: "Is this something a user taps, reads, or fills in?" If yes, it belongs here. If it is what the system does in response (feedback, side-effect, state change), it belongs in acceptance criteria.
-For action/form pages (any page whose name starts with a verb: "Take X", "Add X", "Record X", "Submit X", "Create X", "Edit X"): always consider what input fields the user must provide. Ask: does the action involve a subject/person being acted upon (→ selector/picker element)? does it require a date or time (→ date/time picker)? does it require a quantity or reference ID (→ number/text input)? Generate these as INF-D elements anchored to the action page node.
-→ category: "inf_d"
-
-INF-E — MISSING EDGES BETWEEN EXISTING NODES (beyond Step 2 minimum)
-Cross-links, contextual links, shortcuts between nodes already in the graph. Do NOT re-generate Step 2 entry/exit paths.
-→ category: "inf_e"
-
-STRUCTURAL EDGES (do last)
-For every new node from SOP-A or INF-C: if no stated entry path → generate one (conf 1.0); if no stated exit path → generate one (conf 1.0).
-→ category: "structural_edge"
+strength (l1b only): ≥ 0.60 → "strongly_implied" | ≥ 0.40 → "medium" | < 0.40 → "weak"
 
 ---
 
-GENERATION GATE — apply to every item before including it:
-"Can a user independently navigate to this, or directly invoke it (click, tap, fill, select) as a standalone UI entity that exists regardless of what the user just did?"
-→ YES: include it — it is a page, panel, form, button, input, or interactive control with its own place in the UI.
-→ NO: discard it — it is a Y-axis acceptance criterion, not a requirement. Items that only appear as a consequence of another action, describe HOW something works, or express a quality property have no dedicated UI home. The test: if the item cannot be described without the phrase "when X" or "after X", it is not a requirement.
-DEDUPLICATION: skip anything semantically equivalent to stated or Step 2 requirements.
+PASS 1 — SOP-TRIGGERED FUNCTIONS
 
-RULES:
-1. depends_on: REQ-XXX or OBV-XXX ids this item depends on.
-2. confidence_score: 0.0–1.0. confidence_reason: one sentence.
-3. l1_recommendation / strength derived from confidence per bands above.
-4. priority: l1a items only (critical/high/medium/low → weight 4/3/2/1).
-5. weight: l1b items → strength-derived (strongly_implied=3, medium=2, weak=1).
-6. functional_area: short snake_case.
-7. category: "sop_a"/"sop_b"/"inf_c"/"inf_d"/"inf_e"/"structural_edge".
+For each node that appears in Step 1 stated functions, check whether any pattern below applies. Generate the corresponding function if it is not already covered by a stated or obvious function.
 
-Output ONLY a JSON array (no markdown fences, no preamble text):
+Fires ONLY on nodes from Step 1 stated functions — NOT on nodes you generate in this pass.
+
+PATTERN TABLE:
+
+Stated node type → Generate these functions (confidence):
+- List node (shows multiple items of same type):
+    filter by attribute (~0.82), search (~0.80), sort (~0.68), edit item (~0.72), delete item (~0.65)
+- Detail node (shows single item):
+    edit (~0.75), delete (~0.70)
+- Auth present (login or register stated):
+    account management / profile page (~0.87)
+- Named changeable status field:
+    cross-status overview page (~0.75), filter-by-status element (~0.82)
+- Temporal field (dates, deadlines on listed items):
+    time-scoped view / calendar view (~0.75)
+- Mutable records (edit/update stated):
+    audit / history page (~0.60)
+- User-configurable preferences stated:
+    settings page (~0.82)
+- Time-sensitive deadlines or thresholds:
+    notification surface (~0.65)
+- Multi-user / per-user data stated:
+    user profile / identity page (~0.82)
+
+VAGUE FUNCTION UNPACKING:
+Functions marked vague: true in Step 1 are priority unpack targets. Apply ALL applicable patterns against their node and generate specific child functions. Set unpacks: "<parent_req_id>" on each child.
+
+category: "sop"
+
+---
+
+PASS 2 — DOMAIN INFERENCE
+
+Read the project_summary and all stated functions. Ask: what functions would a regular user of this specific app return to repeatedly that Pass 1 didn't cover? Pure open-ended domain reasoning — no pattern checklist.
+
+category: "inf"
+
+---
+
+PATH CONSTRUCTION RULES (both passes):
+
+1. Every function must have a complete path with entry + body + exit.
+   - If introducing a page NOT in Step 1: first path entity MUST be an edge from an existing stated page (never null, never fabricated origin).
+   - Include the body elements the user interacts with.
+   - Include an exit edge back to an existing stated page.
+
+2. Primary entity flags:
+   - SOP list/detail element functions (filter, edit, delete): element = primary, containing page = primary: false
+   - SOP element + submit edge: both element and edge are primary
+   - New page introductions: entry edge + destination page = both primary; exit edge = primary: false
+   - Multi-hop flows: all entities primary
+   - State-variant destination nodes ("Task List Page (filtered)"): ALWAYS primary: false
+
+3. Step 3 NEVER re-applies Step 2 connectivity checks — entry/exit are already in the path.
+
+4. structural_edge category is REMOVED — entry/exit are part of the function path.
+
+---
+
+OUTPUT SCHEMA:
+
 [{
   "req_id": "GEN-001",
-  "description": "System must [verb] [object]",
+  "description": "User can [action]",
+  "path": [
+    {"type": "edge",    "label": "navigate to account",  "primary": true,  "from": "Dashboard", "to": "Account Page"},
+    {"type": "node",    "label": "Account Page",          "primary": true},
+    {"type": "element", "label": "profile information",  "primary": true,  "ui_node": "Account Page"},
+    {"type": "element", "label": "change password form", "primary": true,  "ui_node": "Account Page"},
+    {"type": "edge",    "label": "return to dashboard",  "primary": false, "from": "Account Page", "to": "Dashboard"}
+  ],
   "source": "generated",
   "tag": "generated",
-  "category": "sop_a",
-  "reasoning": "Pattern A — login stated (REQ-001); no profile screen found in stated or obvious reqs",
+  "category": "sop",
+  "reasoning": "Auth pattern — login stated (REQ-001); no account management page in stated or obvious reqs",
+  "unpacks": null,
   "depends_on": ["REQ-001"],
   "confidence_score": 0.88,
-  "confidence_reason": "Login is stated; users universally expect a profile/account screen in authenticated apps",
-  "l1_recommendation": "l1a",
+  "confidence_reason": "Login stated; account management is a standard paired function in authenticated apps",
+  "placement": "l1a",
   "priority": "high",
   "strength": null,
   "weight": 3.0,
   "testable": true,
   "functional_area": "auth"
-}]"""
+}]
+
+FIELD NOTES:
+- unpacks: parent REQ-xxx id if this decomposes a vague Step 1 function; null otherwise
+- placement: "l1a" if confidence_score ≥ 0.80, "l1b" otherwise (NOT "l1_recommendation")
+- strength: null for l1a; "strongly_implied" / "medium" / "weak" for l1b per bands above
+- priority and weight: set for l1a items; for l1b items set weight from strength (strongly_implied=3.0, medium=2.0, weak=1.0)
+
+Output ONLY a JSON array (no markdown fences, no preamble)."""
+
+
+def _is_state_variant(label: str) -> bool:
+    return "(" in label and label.rstrip().endswith(")")
+
+
+def _extract_nodes_from_paths(requirements: list) -> list[str]:
+    seen: dict[str, bool] = {}
+    for func in requirements:
+        for entity in func.get("path", []):
+            if entity.get("type") == "node":
+                label = str(entity.get("label", "")).strip()
+                if label and not _is_state_variant(label) and label not in seen:
+                    seen[label] = True
+    return list(seen.keys())
 
 
 def _identify_root_node(step1_requirements: list, discovered_pages: list) -> str | None:
-    node_reqs = [r for r in step1_requirements if r.get("type") == "node"]
-    if len(node_reqs) == 1:
-        return node_reqs[0].get("ui_node") or node_reqs[0].get("description")
+    unique_nodes = _extract_nodes_from_paths(step1_requirements)
+
+    if len(unique_nodes) == 1:
+        return unique_nodes[0]
+
     is_single_file_spa = (
         len(discovered_pages) == 1
         and any(p.lower() in ("index.html", "index.htm") for p in discovered_pages)
     )
-    if is_single_file_spa and len(node_reqs) >= 1:
-        return node_reqs[0].get("ui_node") or node_reqs[0].get("description")
+    if is_single_file_spa and unique_nodes:
+        return unique_nodes[0]
+
     home_names = {"home", "landing", "index", "main", "dashboard", "root"}
-    for r in node_reqs:
-        if r.get("priority") == "critical":
-            name = (r.get("ui_node") or r.get("description") or "").lower()
-            if any(h in name for h in home_names):
-                return r.get("ui_node") or r.get("description")
+    for func in step1_requirements:
+        if func.get("priority") == "critical":
+            for entity in func.get("path", []):
+                if entity.get("type") == "node" and entity.get("primary"):
+                    label = str(entity.get("label", ""))
+                    if any(h in label.lower() for h in home_names):
+                        return label
+
     return None
 
 
@@ -129,28 +170,32 @@ def _build_user_message(
     frontend = step0_result.get("frontend_framework") or "None"
     backend = step0_result.get("backend_framework") or "None"
 
-    def fmt(reqs, prefix):
-        if not reqs:
-            return "(none)"
-        return "\n".join(
-            f"{i}. [{r.get('req_id', f'{prefix}-{i:03d}')}] [{r.get('functional_area', 'general')}] {r['description']}"
-            for i, r in enumerate(reqs, start=1)
-        )
-
     discovered = step0_result.get("discovered_pages") or []
     pages_str = ", ".join(discovered) if discovered else "(none)"
     summary_line = f"Project purpose: {project_summary}\n" if project_summary else ""
 
     root_node = _identify_root_node(step1_requirements, discovered)
+    root_section = ""
     if root_node:
         root_section = (
             f"=== ROOT / HOME PAGE ===\n"
-            f"'{root_node}' is the application entry point (home/root page).\n"
-            f"Do NOT generate INF-C nodes that treat it as a secondary page with a phantom home above it.\n"
-            f"Do NOT generate INF-E navigation TO it from a page that does not exist in the stated requirements.\n\n"
+            f"'{root_node}' is the application entry point.\n"
+            f"Do NOT generate functions that treat it as a secondary page with a phantom home above it.\n"
+            f"Do NOT generate navigation TO it from a page that does not exist in the stated functions.\n\n"
         )
-    else:
-        root_section = ""
+
+    def fmt_funcs(reqs, prefix):
+        if not reqs:
+            return "(none)"
+        lines = []
+        for i, r in enumerate(reqs, start=1):
+            vague_tag = " [VAGUE — priority unpack target]" if r.get("vague") else ""
+            lines.append(f"{i}. [{r.get('req_id', f'{prefix}-{i:03d}')}] {r['description']}{vague_tag}")
+        return "\n".join(lines)
+
+    # Show node inventory for SOP pass
+    nodes = _extract_nodes_from_paths(step1_requirements)
+    nodes_str = ", ".join(nodes) if nodes else "(none)"
 
     return (
         f"=== PROJECT CONTEXT ===\n"
@@ -159,11 +204,13 @@ def _build_user_message(
         f"{summary_line}"
         f"\n=== DISCOVERED PAGES (Step 0) ===\n{pages_str}\n\n"
         f"{root_section}"
-        f"=== STATED REQUIREMENTS (Step 1 — do not regenerate) ===\n"
-        f"{fmt(step1_requirements, 'REQ')}\n\n"
-        f"=== OBVIOUS REQUIREMENTS (Step 2 — do not regenerate) ===\n"
-        f"{fmt(step2_requirements, 'OBV')}\n\n"
-        f"Apply all 5 categories + structural edges."
+        f"=== STATED FUNCTIONS (Step 1 — do not regenerate) ===\n"
+        f"{fmt_funcs(step1_requirements, 'REQ')}\n\n"
+        f"=== STATED NODE INVENTORY (for SOP pattern matching) ===\n"
+        f"{nodes_str}\n\n"
+        f"=== OBVIOUS FUNCTIONS (Step 2 — do not regenerate) ===\n"
+        f"{fmt_funcs(step2_requirements, 'OBV')}\n\n"
+        f"Run Pass 1 (SOP patterns) then Pass 2 (domain inference)."
     )
 
 
@@ -190,6 +237,22 @@ def _parse_llm_response(raw: str) -> list:
     return parsed
 
 
+def _validate_path(path) -> list | None:
+    if not isinstance(path, list) or len(path) == 0:
+        return None
+    clean = []
+    for entity in path:
+        if not isinstance(entity, dict):
+            continue
+        if entity.get("type") not in {"node", "element", "edge"}:
+            continue
+        if not str(entity.get("label", "")).strip():
+            continue
+        entity.setdefault("primary", True)
+        clean.append(entity)
+    return clean if clean else None
+
+
 def _validate_and_normalise(
     items: list,
     step1_requirements: list,
@@ -198,11 +261,9 @@ def _validate_and_normalise(
     all_reqs = step1_requirements + step2_requirements
     valid_req_ids = {r.get("req_id", "") for r in all_reqs}
     stated_lower = {r["description"].lower() for r in all_reqs}
+    valid_step1_ids = {r.get("req_id", "") for r in step1_requirements}
     valid = []
     dropped = 0
-    # Maps LLM-assigned GEN-XXX id → l1_recommendation for SOP-A/INF-C nodes,
-    # used below to propagate l1b status to their structural edges.
-    sop_inf_map: dict[str, str] = {}
 
     for item in items:
         if not isinstance(item, dict):
@@ -234,8 +295,15 @@ def _validate_and_normalise(
             dropped += 1
             continue
 
+        path = _validate_path(item.get("path"))
+        if path is None:
+            dropped += 1
+            continue
+        item["path"] = path
+
+        # Placement from confidence
         if conf >= 0.80:
-            item["l1_recommendation"] = "l1a"
+            item["placement"] = "l1a"
             item["strength"] = None
             priority = item.get("priority", "medium")
             if priority not in WEIGHT_MAP:
@@ -243,20 +311,23 @@ def _validate_and_normalise(
             item["priority"] = priority
             item["weight"] = WEIGHT_MAP[priority]
         elif conf >= 0.60:
-            item["l1_recommendation"] = "l1b"
+            item["placement"] = "l1b"
             item["strength"] = "strongly_implied"
             item["weight"] = 3.0
             item.pop("priority", None)
         elif conf >= 0.40:
-            item["l1_recommendation"] = "l1b"
+            item["placement"] = "l1b"
             item["strength"] = "medium"
             item["weight"] = 2.0
             item.pop("priority", None)
         else:
-            item["l1_recommendation"] = "l1b"
+            item["placement"] = "l1b"
             item["strength"] = "weak"
             item["weight"] = 1.0
             item.pop("priority", None)
+
+        # Remove old field if LLM still emits it
+        item.pop("l1_recommendation", None)
 
         item["tag"] = "generated"
         item["source"] = "generated"
@@ -266,24 +337,14 @@ def _validate_and_normalise(
         raw_deps = item.get("depends_on", [])
         item["depends_on"] = [d for d in (raw_deps if isinstance(raw_deps, list) else []) if d in valid_req_ids]
 
-        if item.get("category") in {"sop_a", "inf_c"}:
-            orig_id = item.get("req_id", "")
-            if orig_id:
-                sop_inf_map[orig_id] = item["l1_recommendation"]
+        # Validate unpacks pointer
+        unpacks = item.get("unpacks")
+        if unpacks and unpacks not in valid_step1_ids:
+            item["unpacks"] = None
+        else:
+            item.setdefault("unpacks", None)
 
         valid.append(item)
-
-    # Fix: structural edges must inherit their parent node's l1_recommendation.
-    # A structural edge for an L1b node cannot itself be L1a.
-    for item in valid:
-        if item.get("category") == "structural_edge":
-            gen_refs = re.findall(r'GEN-\d+', item.get("reasoning", ""))
-            parent_l1 = next((sop_inf_map[r] for r in gen_refs if r in sop_inf_map), None)
-            if parent_l1 == "l1b":
-                item["l1_recommendation"] = "l1b"
-                item["strength"] = "strongly_implied"
-                item["weight"] = 3.0
-                item.pop("priority", None)
 
     for i, item in enumerate(valid, start=1):
         item["req_id"] = f"GEN-{i:03d}"
@@ -306,12 +367,14 @@ async def run(
                 model=model,
                 max_tokens=8000,
                 system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": _build_user_message(step0_result, step1_requirements, step2_requirements, project_summary)}],
+                messages=[{"role": "user", "content": _build_user_message(
+                    step0_result, step1_requirements, step2_requirements, project_summary
+                )}],
             )
             raw_items = _parse_llm_response(response.content[0].text)
             requirements, dropped = _validate_and_normalise(raw_items, step1_requirements, step2_requirements)
-            sop = sum(1 for r in requirements if r.get("category", "").startswith("sop"))
-            inf = sum(1 for r in requirements if r.get("category", "").startswith("inf"))
+            sop = sum(1 for r in requirements if r.get("category") == "sop")
+            inf = sum(1 for r in requirements if r.get("category") == "inf")
             return {
                 "requirements": requirements,
                 "total_count": len(requirements),

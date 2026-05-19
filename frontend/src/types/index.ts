@@ -20,9 +20,20 @@ export interface Step0Result {
   runtime?: string
 }
 
+export interface PathEntity {
+  type: 'node' | 'element' | 'edge'
+  label: string
+  primary: boolean
+  ui_node?: string
+  from?: string | null
+  to?: string | null
+}
+
 export interface Step1Requirement {
   req_id: string
   description: string
+  path: PathEntity[]
+  vague: boolean
   source: string
   source_quote: string
   tag: 'stated'
@@ -39,12 +50,14 @@ export interface Step1Result {
   truncated_docs: string[]
   llm_model: string
   dropped_count: number
+  project_summary?: string
   error?: string
 }
 
 export interface Step2Requirement {
   req_id: string
   description: string
+  path: PathEntity[]
   source: 'obvious'
   reasoning: string
   tag: 'obvious'
@@ -66,14 +79,16 @@ export interface Step2Result {
 export interface Step3Requirement {
   req_id: string
   description: string
+  path: PathEntity[]
   source: 'generated'
   tag: 'generated'
-  category: 'sop_a' | 'sop_b' | 'inf_c' | 'inf_d' | 'inf_e' | 'structural_edge'
+  category: 'sop' | 'inf'
   reasoning: string
+  unpacks: string | null
   depends_on: string[]
   confidence_score: number
   confidence_reason: string
-  l1_recommendation: 'l1a' | 'l1b'
+  placement: 'l1a' | 'l1b'
   priority?: 'critical' | 'high' | 'medium' | 'low'
   strength?: 'strongly_implied' | 'medium' | 'weak' | null
   weight: number
@@ -94,6 +109,8 @@ export interface Step3Result {
 export interface ConfirmedRequirement {
   req_id: string
   description: string
+  path: PathEntity[]
+  vague: boolean
   tag: 'stated' | 'obvious' | 'generated' | 'custom'
   priority: 'critical' | 'high' | 'medium' | 'low'
   weight: number
@@ -101,6 +118,7 @@ export interface ConfirmedRequirement {
   testable: boolean
   source: string
   promoted?: boolean
+  unpacks?: string | null
 }
 
 export interface Step35Result {

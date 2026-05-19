@@ -29,15 +29,27 @@ A system that evaluates software **Functional Suitability (ISO 25010)** by analy
 FCom = ∑(E(L1x) × L1Cx) / ∑ L1Cx      [x ∈ L1a]
 ```
 
-| E(L1x) | Condition |
+**E(L1x) is function-level** — aggregated from the path entities of function x:
+
+```
+E(L1x) = α × [∑ E(primary_i) / P] + (1−α) × [∑ E(secondary_j) / S]
+```
+
+where α = 0.7, P = count of primary entities, S = count of secondary entities. If S = 0, weight is 100% primary (α = 1.0).
+
+Per-entity E() values:
+
+| E(entity) | Condition |
 |---|---|
-| 1.0 | x ∈ L2 AND x ∈ L3 — accessible and implemented |
-| 0.5 | x ∈ L3 only — implemented but not accessible |
-| 0.4 | x ∈ L2 only — UI visible, backend missing/broken |
+| 1.0 | entity ∈ L2 AND entity ∈ L3 — accessible and implemented |
+| 0.5 | entity ∈ L3 only — implemented but not UI-accessible |
+| 0.4 | entity ∈ L2 only — UI visible, backend missing/broken |
 | 0.25 | Partial or unclear evidence in either layer |
 | 0.0 | Not found anywhere |
 
 `L1Cx` = confidence weight (critical = 4, high = 3, medium = 2, low = 1; default 1.0)
+
+State-variant nodes (labels with parentheticals like "(filtered)", "(sorted)", "(updated)") always have `primary: false` — Step 6 skips L2 route matching for them; they serve as Step 9 AC hints only.
 
 ### Functional Appropriateness (FA) — L1b vs (L2 ∪ L3)
 
@@ -232,18 +244,19 @@ E()=0.4 (UI visible, no backend) sits lower than E()=0.5 (backend present, no UI
 
 The X/Y plane determines what each pipeline step's LLM should and should not do:
 
-**Step 1 (stated):** Extract X-axis graph entities from stated requirements text — nodes (pages/screens), edges (stated navigation paths), and elements (controls/features within a page). Capabilities ("user can log in") are not the right abstraction — they conflate the node (Login Page) with its behavioral properties (validates credentials = Y-axis AC). Extract the entity, not the capability. Priority `critical` = foundational node with many dependents, not just items the source labels as urgent.
+**Step 1 (stated):** Extract user-facing functions from stated requirements text. Each function is expressed in active voice ("User can [action]") and includes a `path: PathEntity[]` — the ordered traversal of UI entities the user visits to complete the goal. `primary: true` = entity fundamentally asserted by this function (scored); `primary: false` = context node asserted by another function. Vague functions that cannot yield a specific path get `vague: true` and a minimal single-node path; Step 3 decomposes them. Gate (positive framing): "Does this text describe a goal a user can directly perform?" — rejects backend subjects, quality attributes, automatic behaviors, and system reactions.
 
-**Step 2 (obvious):** Graph connectivity gaps only — no usability inference. Build a node inventory (stated pages + discovered files), then run two checks per node:
-- *Check 2 — Entry paths:* Is there a stated inbound navigation element? If NO → generate one.
-- *Check 3 — Exit paths:* Is there a stated way to leave? If NO → generate one (mechanism-agnostic).
+**Step 2 (obvious):** Graph connectivity gaps only — no usability inference. Extract node inventory from Step 1 function path arrays (state-variant labels excluded). Run two checks per node:
+- *Check 2 — Entry paths:* Is there a stated inbound navigation? If NO → generate a navigation function with edge (`primary: true, from: null`) + destination node (`primary: false`).
+- *Check 3 — Exit paths:* Is there a stated exit? If NO → generate a navigation function with source node (`primary: false`) + exit edge (`primary: true, to: null`).
 
-Never generate: auth guards, session management, invocation controls, observable outcomes (empty states, error messages), or anything phrased "System must X when Y." Those live on the Y axis. Deduplication is semantic — if a stated requirement already covers a navigation function (even if worded differently), do not regenerate it.
+Never generate: auth guards, session management, invocation controls, observable outcomes, error messages, empty states, or anything phrased "System must X when Y." Deduplication is semantic — if a stated function already covers the navigation, do not regenerate it.
 
-**Step 3 (implied):** Generate enhancements organized as a three-tier graph taxonomy — FA-scored (not FCom-scored). Confidence ≥ 0.80 → promoted to L1a candidate at Step 3.5; below → L1b advisory. **Generation gate (positive framing):** Before including any item, test: "Can a user independently navigate to this, or directly invoke it as a standalone UI entity?" YES → include. NO → discard (Y-axis AC). Replaces the former NEVER GENERATE negative list. Three tiers:
-- *New nodes* — entire pages/screens not yet in the graph. SOP-A: pattern-triggered (auth → profile screen; offline → offline records screen; multi-user → user identity screen; sync → sync status screen). INF-C: reasoned additions (audit history, reports/analytics, settings, notifications).
-- *Elements within existing nodes* — features added to a page already in the graph, not a new page. SOP-B: rule-triggered, fires for **stated page nodes only** (`type=node` from Step 1) — not for Step 1 elements, not for nodes generated in SOP-A/INF-C in the same pass. Rules: list node → filter/search/sort/pagination/edit item/delete item; detail node → edit/delete; dashboard → date-range filter/export; status-field node (changeable status, OR page named "overview"/"summary"/"report" aggregating items with status) → filter-by-status/bulk-update. INF-D: domain-specific contextual elements SOP-B didn't cover; uses positive framing ("Is this something a user taps, reads, or fills in?") and an **action-page heuristic** (verb-prefix pages → always generate input field elements: subject selector, date/time picker, quantity/ID input).
-- *Edges between existing nodes* — INF-E: cross-links and shortcuts beyond the Step 2 minimum. Structural edges: mandatory entry/exit paths for every new node introduced in SOP-A or INF-C (confidence 1.0).
+**Step 3 (implied):** Two-pass generation — each output is a complete function with traversal path (entry + body + exit). FA-scored (not FCom-scored). Confidence ≥ 0.80 → `placement: "l1a"` candidate at Step 3.5; below → `placement: "l1b"` advisory. Gate: "Can a user independently perform this goal?" YES → include. NO → discard.
+- *Pass 1 — SOP pattern-triggered:* Fires on Step 1 stated nodes against a fixed pattern table (list→filter/sort/edit/delete; auth→profile; status-field→cross-status overview; temporal→calendar view; etc.). Vague Step 1 functions are priority unpack targets — all applicable patterns fire, with `unpacks: "<parent_req_id>"`.
+- *Pass 2 — INF domain inference:* Pure open-ended reasoning from `project_summary` — what would a regular user return to repeatedly that Pass 1 didn't cover? No checklist.
+
+No `structural_edge` category — entry/exit paths are baked into each function's path array.
 
 **Step 8 (ACs):** ACs live on the Y axis — they measure Phase 2 correctness. ACs for dependent requirements should first assert prerequisites are satisfied. Persistence, error messages, and edge-case handling are ACs, not L1a requirements.
 
@@ -299,10 +312,15 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Phase: FCom setup — builds L1a (stated)**
 **Tools:** Python, LLM (AsyncAnthropic, prompt caching)
 **Input:** Requirements text provided by user + README (read directly from zip) + any uploaded specification documents
-**Entity taxonomy (X-axis only):** Every extracted requirement is one of three graph entity types — `node` (a distinct page/screen), `edge` (an explicitly stated navigation path between two pages), or `element` (a UI control or feature within a specific page). Behavioral properties (how well something works) are Y-axis items belonging in acceptance criteria — never extracted here.
-**Gate (positive framing):** Before extracting any item, test: "Does the source text name a specific UI entity and describe what it IS or provides?" Rejects: automatic behaviors, backend subjects, reactions ("System must X when/if Y"), behavioral properties of existing entities, and quality attributes (responsive, accessible, secure) — none of these name a UI entity. Implemented as a positive test rather than a negative list because LLMs ignore growing "what to skip" lists when training priors are strong.
-**Decomposition rule:** Compound items decomposed into atomic entities. "Register and log in" = two node requirements.
-**Rule:** Only extract requirements that are **explicitly stated**. No inference. No invention. Every item must include its source quote. Source quote verification uses whitespace-normalized comparison — the quote must appear verbatim in the source (anti-hallucination), but whitespace differences (newlines → spaces) are tolerated.
+**Function model:** Every extracted requirement is a **function** — a user-facing goal described in active voice ("User can log in"). Each function includes a `path: PathEntity[]` — an ordered traversal of UI entities the user visits to complete the goal.
+**PathEntity schema:**
+```
+{ type: "node"|"element"|"edge", label: string, primary: boolean, ui_node?: string, from?: string, to?: string }
+```
+`primary: true` = this entity is fundamentally asserted by this function (E() penalises its absence). `primary: false` = context node already asserted by another function.
+**Gate (positive framing):** Before extracting any item, test: "Does this text describe a goal a user can directly perform?" Rejects: backend subjects, quality attributes, automatic behaviors, system reactions ("X happens when/if Y"). Implemented as a positive test — LLMs ignore growing negative lists when priors are strong.
+**Vague flag:** If source text is too broad to build a specific path (e.g. "users can manage tasks"), set `vague: true` with a minimal single-node path. Step 3 decomposes vague functions via `unpacks` targeting.
+**Rule:** Only extract what is **explicitly stated**. No inference. Every item must include its verbatim source quote. Source quote verification uses whitespace-normalised comparison (anti-hallucination; newlines → spaces tolerated).
 **Tag:** `stated`
 **Output (step_results.step_1):**
 ```json
@@ -311,9 +329,16 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
   "requirements": [
     {
       "req_id": "REQ-001",
-      "description": "System must provide a Login Page",
-      "type": "node",
-      "ui_node": "Login Page",
+      "description": "User can log in",
+      "path": [
+        {"type": "edge",    "label": "navigate to login",  "primary": true, "from": null,         "to": "Login Page"},
+        {"type": "node",    "label": "Login Page",         "primary": true},
+        {"type": "element", "label": "email input",        "primary": true, "ui_node": "Login Page"},
+        {"type": "element", "label": "password input",     "primary": true, "ui_node": "Login Page"},
+        {"type": "element", "label": "login button",       "primary": true, "ui_node": "Login Page"},
+        {"type": "edge",    "label": "navigate to dashboard", "primary": true, "from": "Login Page", "to": "Dashboard"}
+      ],
+      "vague": false,
       "source": "user_input",
       "source_quote": "users should be able to log in",
       "tag": "stated",
@@ -339,24 +364,28 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Status: COMPLETE**
 **Phase: FCom setup — builds L1a (obvious)**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 0 (project_type, framework) + Step 1 (stated requirements list)
+**Input:** Step 0 (project_type, framework) + Step 1 (stated requirements with path arrays)
 **3-check deterministic prompt (graph connectivity gaps only):**
-- Check 1 — Build node list: combine pages from stated requirements + discovered page files (deduplicated)
-- Check 2 — Entry paths: for each node except home, is there a stated inbound navigation element? If NO → generate
-- Check 3 — Exit paths: for each node, is there a stated way to leave it? If NO → generate (mechanism-agnostic)
-**Never generate:** auth guards, session management, invocation controls for stated capabilities, observable outcomes for stated operations, error messages, empty states, or anything phrased "System must X when Y."
-**Root node detection:** `_identify_root_node()` detects the home/root page before prompting. Two heuristics: (1) only one `type=node` requirement → that page is root; (2) `discovered_pages = ["index.html"]` (single-route SPA) + at least one node req → first node is root. Detected root injected as `=== ROOT / HOME PAGE ===` section — LLM skips CHECK 2 for it (no phantom entry navigation generated).
-**Logic:** LLM reasons YES/NO per node per check, then outputs JSON. Deterministic — only graph connectivity gaps, not enhancements.
-**Deduplication:** Step 1 stated requirements passed as context (with req_id + functional_area prefix).
+- Check 1 — Build node list: extract nodes from Step 1 function path arrays + discovered page files (deduplicated, state-variant labels excluded)
+- Check 2 — Entry paths: for each node except home, is there a stated inbound navigation element? If NO → generate a navigation function with an edge (`primary: true, from: null`) + destination node (`primary: false`)
+- Check 3 — Exit paths: for each node, is there a stated way to leave it? If NO → generate a navigation function with a source node (`primary: false`) + exit edge (`primary: true, to: null`)
+**Never generate:** auth guards, session management, invocation controls for stated capabilities, observable outcomes, error messages, empty states, or anything phrased "System must X when Y."
+**Root node detection:** `_identify_root_node()` detects the home/root page by parsing nodes from Step 1 path arrays. Detected root injected as `=== ROOT / HOME PAGE ===` — LLM skips CHECK 2 for it.
+**Logic:** LLM reasons YES/NO per node per check, then outputs JSON functions with path arrays. Deterministic — only graph connectivity gaps.
+**Deduplication:** Step 1 stated functions passed with req_id prefix for reference.
 **Tag:** `obvious` | **Weight:** derives from priority (critical=4.0, high=3.0, medium=2.0, low=1.0) — same as Step 1
 **Output:**
 ```json
 [
   {
     "req_id": "OBV-001",
-    "description": "System must provide a way to navigate to [node].",
+    "description": "User can navigate to Task List Page",
+    "path": [
+      {"type": "edge", "label": "navigate to task list", "primary": true, "from": null, "to": "Task List Page"},
+      {"type": "node", "label": "Task List Page", "primary": false}
+    ],
     "source": "obvious",
-    "reasoning": "CHECK 2 — [node] has no stated inbound navigation element",
+    "reasoning": "CHECK 2 — Task List Page has no stated inbound navigation element",
     "tag": "obvious",
     "depends_on": ["REQ-003"],
     "priority": "high",
@@ -377,36 +406,57 @@ Note: Key accuracy step. Consider requirement dependencies and branching which w
 **Status: COMPLETE**
 **Phase: FCom setup — builds L1b (and L1a candidates)**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 0 (project type) + Step 1 (requirements + `project_summary`) + Step 2 (combined L1a pool)
-**5-category confidence-scored generation:**
-- SOP-A — Pattern-triggered new nodes (auth, offline, multi-user, sync patterns)
-- SOP-B — Rule-triggered elements within existing nodes (filter/search/sort/edit item/delete item for list nodes; edit/delete for detail nodes; date-range/export for dashboards)
-- INF-C — Reasoning-based new nodes (audit history, reports, settings, notifications)
-- INF-D — Contextual elements within existing nodes (domain-specific, not covered by SOP-B)
-- INF-E — Missing edges between existing nodes (cross-links beyond Step 2 minimum)
-- Structural edges — Entry/exit edges for any new nodes generated in SOP-A or INF-C; inherits parent node's `l1_recommendation` (not always l1a)
+**Input:** Step 0 (project type) + Step 1 (functions + `project_summary`) + Step 2 (combined L1a pool)
+**Two-pass generation — each output is a complete function with traversal path:**
+
+**Pass 1 — SOP pattern-triggered functions**
+Fires only on nodes from Step 1 stated functions. Checks each node against the SOP pattern table:
+- List node → filter (~0.82), search (~0.80), sort (~0.68), edit item (~0.72), delete item (~0.65)
+- Detail node → edit (~0.75), delete (~0.70)
+- Auth present → account management / profile page (~0.87)
+- Named changeable status field → cross-status overview page (~0.75), filter-by-status element (~0.82)
+- Temporal field (dates, deadlines) → time-scoped view / calendar view (~0.75)
+- Mutable records (edit/update stated) → audit / history page (~0.60)
+- User-configurable preferences stated → settings page (~0.82)
+- Time-sensitive deadlines or thresholds → notification surface (~0.65)
+- Multi-user / per-user data → user profile / identity page (~0.82)
+
+Vague unpack targeting: functions with `vague: true` in Step 1 are priority targets — apply ALL applicable patterns and set `unpacks: "<parent_req_id>"` on each child.
+
+**Pass 2 — INF domain inference**
+Read `project_summary` and all stated functions. Ask: what functions would a regular user of this specific app return to repeatedly that Pass 1 didn't cover? Pure open-ended domain reasoning — no checklist.
 
 **Confidence → placement:**
-- ≥ 0.80 → `l1_recommendation: "l1a"` (promoted to FCom scoring pool at Step 3.5)
-- 0.60–0.79 → `l1b`, strength: `strongly_implied`, weight: 3.0
-- 0.40–0.59 → `l1b`, strength: `medium`, weight: 2.0
-- < 0.40 → `l1b`, strength: `weak`, weight: 1.0
+- ≥ 0.80 → `placement: "l1a"` (promoted to FCom scoring pool at Step 3.5)
+- 0.60–0.79 → `placement: "l1b"`, strength: `strongly_implied`, weight: 3.0
+- 0.40–0.59 → `placement: "l1b"`, strength: `medium`, weight: 2.0
+- < 0.40 → `placement: "l1b"`, strength: `weak`, weight: 1.0
 
-**Tag:** `generated`
+**Path construction:** Every generated function includes a complete `path[]` with entry edge, body entities, and exit edge. New-page introductions: entry edge + destination node both `primary: true`; exit edge `primary: false`. Element functions: element(s) + submit edge `primary: true`, containing page `primary: false`. State-variant nodes always `primary: false`. No `structural_edge` category — entry/exit are baked into the function's path.
+
+**Tag:** `generated` | **Categories:** `"sop"` | `"inf"`
 **Output:**
 ```json
 [
   {
     "req_id": "GEN-001",
-    "description": "System must display a profile or account information screen.",
+    "description": "User can view account information",
+    "path": [
+      {"type": "edge",    "label": "navigate to account",   "primary": true,  "from": "Dashboard",    "to": "Account Page"},
+      {"type": "node",    "label": "Account Page",           "primary": true},
+      {"type": "element", "label": "profile information",   "primary": true,  "ui_node": "Account Page"},
+      {"type": "element", "label": "change password form",  "primary": true,  "ui_node": "Account Page"},
+      {"type": "edge",    "label": "return to dashboard",   "primary": false, "from": "Account Page", "to": "Dashboard"}
+    ],
     "source": "generated",
     "tag": "generated",
-    "category": "sop_a",
-    "reasoning": "Pattern A — login stated (REQ-001); no profile screen found in stated or obvious reqs",
+    "category": "sop",
+    "reasoning": "Auth pattern — login stated (REQ-001); no account management page in stated or obvious reqs",
+    "unpacks": null,
     "depends_on": ["REQ-001"],
     "confidence_score": 0.88,
-    "confidence_reason": "Login is stated; users universally expect a profile/account screen in authenticated apps",
-    "l1_recommendation": "l1a",
+    "confidence_reason": "Login stated; account management is a standard paired function in authenticated apps",
+    "placement": "l1a",
     "priority": "high",
     "strength": null,
     "weight": 3.0,
@@ -435,27 +485,24 @@ Note: Key accuracy step. Consider requirement dependencies and branching which w
 **Status: COMPLETE**
 **Phase: FCom setup — locks L1a**
 **Tools:** React UI, FastAPI endpoint, async job queue
-**Input:** Step 1 (stated) + Step 2 (obvious) + Step 3 (L1b with strength and weights)
+**Input:** Step 1 (stated functions) + Step 2 (obvious functions) + Step 3 (L1b with placement and weights)
 **Architecture:** Pipeline pauses with status `waiting_for_confirmation`. Resumes when user submits confirmed list.
 
 **User can:**
-- Confirm, edit, delete, reprioritise any L1a item
-- Adjust confidence weights (critical=4, high=3, medium=2, low=1)
-- Promote L1b items to L1a (adds them to FCom and FCor scoring)
-- Add entirely new requirements
+- Confirm, edit, delete, reprioritise any L1a function
+- Adjust priority weights (critical=4, high=3, medium=2, low=1)
+- Promote L1b functions to L1a (adds them to FCom and FCor scoring)
+- Add entirely new functions
 
-**Display format:**
-| Requirement | Tag | In score? | Priority | Weight |
-|---|---|---|---|---|
-| User can register | stated | Yes (L1a) | High | 3 |
-| User can delete a task | obvious | Yes (L1a) | Medium | 2 |
-| User can filter tasks | implied — strongly_implied | Advisory | Medium | 3 |
-| User can bulk-delete | implied — weak | Advisory | Low | 1 |
+**Display — three sections:**
+1. **L1a Section** — stated + obvious pre-included; Step 3 `placement: "l1a"` candidates also pre-included but demotable. Each row shows req_id, description, tag badge, priority dropdown. Expandable popdown reveals traversal path (PathDisplay), reasoning, and confidence detail.
+2. **L1b Advisory Section** — Step 3 `placement: "l1b"` items, each promotable to L1a. Expandable popdown shows path, reasoning, confidence.
+3. **Add Function** — inline form producing `CUSTOM-001` IDs.
 
-`strongly_implied` L1b items are highlighted with a "+ Add to requirements" prompt. Medium and weak items are listed below without auto-prompting.
+**Vague auto-replace:** Vague Step 1 functions (`vague: true`) are excluded from the initial L1a state. Any Step 3 functions with `unpacks: "REQ-xxx"` pointing to a vague parent are auto-included in L1a Section, replacing the parent. A notice shows "N vague stated function(s) were auto-replaced by their Step 3 children."
 
 **After confirmation:** L1a is locked. Pipeline resumes.
-**If skipped:** All stated + obvious items treated as L1a at default weights. L1b remains advisory.
+**If skipped:** All stated (non-vague) + obvious functions treated as L1a at default weights. L1b remains advisory.
 
 ---
 

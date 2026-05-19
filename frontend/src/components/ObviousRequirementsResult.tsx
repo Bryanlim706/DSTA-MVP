@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Step2Requirement, Step2Result } from '../types'
+import { PathDisplay } from './PathDisplay'
 
 const PRIORITY_STYLES: Record<string, string> = {
   critical: 'bg-red-100 text-red-700',
@@ -33,16 +34,19 @@ function RequirementRow({ req }: { req: Step2Requirement }) {
       </tr>
       {expanded && (
         <tr className="bg-gray-50 border-t border-gray-100">
-          <td colSpan={5} className="px-4 pb-3 pt-1">
+          <td colSpan={5} className="px-4 pb-3 pt-2">
             {req.functional_area && (
-              <p className="mb-1.5">
-                <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono">
-                  {req.functional_area}
-                </span>
-              </p>
+              <span className="inline-block text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono mb-2">
+                {req.functional_area}
+              </span>
             )}
-            <p className="text-xs text-gray-500 font-medium mb-1">Reasoning</p>
+            <p className="text-xs text-gray-500 font-medium mb-1">Traversal path</p>
+            <PathDisplay path={req.path} />
+            <p className="text-xs text-gray-500 font-medium mt-2 mb-1">Reasoning</p>
             <p className="text-xs text-gray-700 italic">{req.reasoning}</p>
+            {req.depends_on && req.depends_on.length > 0 && (
+              <p className="text-xs text-gray-400 mt-1">Depends on: {req.depends_on.join(', ')}</p>
+            )}
           </td>
         </tr>
       )}
@@ -54,7 +58,7 @@ export default function ObviousRequirementsResult({ result }: { result: Step2Res
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
-        <h2 className="text-sm font-semibold text-gray-800">Obvious Requirements</h2>
+        <h2 className="text-sm font-semibold text-gray-800">Navigation Gap Functions</h2>
         <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
           {result.total_count} generated
         </span>
@@ -77,7 +81,7 @@ export default function ObviousRequirementsResult({ result }: { result: Step2Res
         <div className="px-5 py-10 text-center text-sm text-gray-400">
           {result.error
             ? `Generation failed: ${result.error}`
-            : 'No obvious requirements generated — stated requirements appear to cover all fundamentals.'}
+            : 'No navigation gaps found — stated functions cover all connectivity.'}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -86,7 +90,7 @@ export default function ObviousRequirementsResult({ result }: { result: Step2Res
               <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
                 <th className="px-4 py-2">ID</th>
                 <th className="px-4 py-2">Priority</th>
-                <th className="px-4 py-2">Description</th>
+                <th className="px-4 py-2">Function</th>
                 <th className="px-4 py-2 text-center">Testable</th>
                 <th className="px-4 py-2"></th>
               </tr>
@@ -101,7 +105,7 @@ export default function ObviousRequirementsResult({ result }: { result: Step2Res
       )}
 
       <div className="px-5 py-2.5 border-t border-gray-100">
-        <span className="text-[10px] text-gray-400">Click a row to see reasoning</span>
+        <span className="text-[10px] text-gray-400">Click a row to see traversal path and reasoning</span>
       </div>
     </div>
   )
