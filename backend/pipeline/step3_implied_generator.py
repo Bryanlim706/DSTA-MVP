@@ -32,6 +32,8 @@ DEDUPLICATION RULES — skip a pattern if any of these apply:
 3. A new-page SOP pattern (auth → profile page; preferences → settings page; etc.) fires on a node that already EXISTS as a stated node with stated sub-functions. If the page already exists, the pattern is satisfied — do not re-generate its contents as new functions.
 4. The function would only assert that a page/element exists as a prerequisite for interactions already stated. Do not generate "User can view list" or "User can select item" when the stated functions already have those as primary path entities.
 
+5. MULTI-OBJECT TYPES: When the app manages multiple distinct named object types (e.g., "categories" AND "tasks"), fire ALL applicable patterns independently for EACH object type. "User can edit a task" and "User can edit a category name" are distinct functions — generate both. Never conflate two different object types into one function.
+
 Do NOT skip just because functions share elements — edit-item and delete-item both touch the same list item but are distinct interactions. When in doubt, generate.
 
 Fires ONLY on nodes from Step 1 stated functions — NOT on nodes you generate in this pass.
@@ -72,16 +74,16 @@ Read the project_summary and all stated functions. Think about what a well-round
 1. RECURRING USE — What functions would a regular user return to repeatedly in normal workflow? (daily tasks, status checks, monitoring)
 2. WORKFLOW COMPLETENESS — What functions complete the primary user workflow end-to-end? (onboarding, confirmation flows, completion states, getting-started guidance)
 3. DATA MANAGEMENT — What functions help users manage, organise, or recover their data? (bulk operations, export, import, archive, restore, history)
-4. DOMAIN STANDARDS — What functions do comparable apps in this domain always offer as standard? Think: what would a competitor app have that isn't yet covered here?
-5. DISCOVERABILITY + HELP — What functions help users get oriented or get help? (help page, onboarding tour, empty-state guidance, documentation access)
-6. USER CONTROL — What functions give users control over their experience? (account settings, preferences, notification controls, display options, customisation)
+4. DOMAIN STANDARDS — Name the app's domain from project_summary. Exhaustively list ALL standard features a top-tier competitor app in that domain offers that are NOT yet covered, and generate a function for each. Do not cap the count — comprehensive L1b coverage is what makes FA scoring meaningful. The point is to surface every gap, even if you're unsure the codebase implements them.
+5. DISCOVERABILITY + HELP — What functions help users get oriented or get help? (help page, onboarding tour, empty-state guidance, keyboard shortcuts reference)
+6. USER CONTROL — What functions give users control over their experience? (account settings, preferences, notification controls, display options, theme, language)
 7. OVERVIEW + INSIGHT — What summary views, dashboards, or analytics would help users understand the state of their data at a glance?
 
 Be BOLD — generate functions even at confidence 0.50–0.70 if they represent genuine domain gaps. This pass drives FA (Functional Appropriateness) scoring: a well-calibrated app should have most of these; their absence is meaningful and scored. Aim for breadth — it is better to generate a function the reviewer demotes than to silently omit a real gap.
 
 Do NOT re-generate functions already produced in Pass 1, already stated in Step 1, or already covered by a Step 2 obvious function. Before writing each item, confirm the description is genuinely new.
 
-Gate: only generate functions a user can independently navigate to or invoke — a page, form, view, or feature with its own dedicated home in the UI. Do NOT generate system reactions or behavioral properties ("User sees validation error", "User receives confirmation message", "User is redirected when X") — those are acceptance criteria, not functions.
+Gate: only generate functions a user can independently navigate to or invoke — a page, form, modal, view, panel, or interactive feature. Do NOT generate system reactions or behavioral properties ("User sees validation error", "User receives confirmation message", "User is redirected when X") — those are acceptance criteria, not functions.
 
 category: "inf"
 
