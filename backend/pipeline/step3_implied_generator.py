@@ -69,7 +69,7 @@ category: "sop"
 
 PASS 2 — DOMAIN INFERENCE
 
-Read the project_summary and all stated functions. Think about what a well-rounded, production-quality app in this domain would offer. Generate functions across ALL of these angles that Pass 1 did not cover:
+Read the project_summary and all stated functions. Before generating any function, understand the purpose of this specific app, what it manages, and how it works — only generate functions consistent with its actual structure and intent. Then think about what a well-rounded, production-quality app in this domain would offer. Generate functions across ALL of these angles that Pass 1 did not cover:
 
 1. RECURRING USE — What functions would a regular user return to repeatedly in normal workflow? (daily tasks, status checks, monitoring)
 2. WORKFLOW COMPLETENESS — What functions complete the primary user workflow end-to-end? (onboarding, confirmation flows, completion states, getting-started guidance)
