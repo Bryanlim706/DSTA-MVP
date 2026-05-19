@@ -48,12 +48,12 @@ Stated node type → Generate these functions (confidence):
 - Named changeable status field:
     cross-status overview page (~0.75), filter-by-status element (~0.82)
 - Temporal field (dates, deadlines on listed items):
-    time-scoped view / calendar view (~0.75)
-- Mutable records (edit/update stated):
+    time-scoped view / calendar view (~0.75), overdue / due-soon alert surface (~0.72)
+- Mutable records (add + delete both stated on same list node, OR edit/update stated):
     audit / history page (~0.60)
 - User-configurable preferences stated:
     settings page (~0.82)
-- Time-sensitive deadlines or thresholds:
+- Time-sensitive deadlines or thresholds (items with due dates on a list):
     notification surface (~0.65)
 - Multi-user / per-user data stated:
     user profile / identity page (~0.82)
@@ -67,12 +67,15 @@ category: "sop"
 
 PASS 2 — DOMAIN INFERENCE
 
-Read the project_summary and all stated functions. Ask two questions:
+Read the project_summary and all stated functions. Ask three questions:
 1. What functions would a regular user of this specific app return to repeatedly that Pass 1 didn't cover?
 2. What functions complete the primary user workflow end-to-end that aren't yet covered?
+3. What proactive monitoring, alerting, or overview surface would help users stay on top of the data they manage in this app?
 
 Pure open-ended domain reasoning — no pattern checklist.
 Do NOT re-generate functions already produced in Pass 1 or already stated in Step 1. Before writing each item, confirm it is genuinely new.
+
+Gate: only generate functions a user can independently navigate to or invoke — a page, form, view, or feature with its own dedicated home in the UI. Do NOT generate system reactions or behavioral properties ("User sees validation error", "User receives confirmation message", "User is redirected when X") — those are acceptance criteria, not functions.
 
 category: "inf"
 
