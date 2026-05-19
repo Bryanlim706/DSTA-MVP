@@ -24,6 +24,11 @@ PASS 1 — SOP-TRIGGERED FUNCTIONS
 
 For each node that appears in Step 1 stated functions, check whether any pattern below applies. Generate the corresponding function if it is not already covered by a stated or obvious function.
 
+DEDUPLICATION — skip a pattern if:
+- A stated function already has the same primary element on the same page performing the same interaction (e.g. if "filter by size" is stated with a size filter control as primary on Page X, do NOT generate a separate "view size filter options" — it is the same interaction under a different label).
+- The pattern would produce a function whose path entities are all already primary in existing stated functions.
+When in doubt, skip rather than near-duplicate.
+
 Fires ONLY on nodes from Step 1 stated functions — NOT on nodes you generate in this pass.
 
 PATTERN TABLE:
@@ -57,7 +62,12 @@ category: "sop"
 
 PASS 2 — DOMAIN INFERENCE
 
-Read the project_summary and all stated functions. Ask: what functions would a regular user of this specific app return to repeatedly that Pass 1 didn't cover? Pure open-ended domain reasoning — no pattern checklist.
+Read the project_summary and all stated functions. Ask two questions:
+1. What functions would a regular user of this specific app return to repeatedly that Pass 1 didn't cover?
+2. What functions complete the primary user workflow end-to-end that aren't yet covered? (e.g. a shopping cart naturally ends in checkout and order confirmation; a booking app ends in a confirmation screen; a task manager ends in a completion/archive flow.)
+
+Pure open-ended domain reasoning — no pattern checklist.
+Do NOT re-generate functions already produced in Pass 1 or already stated in Step 1. Before writing each item, confirm it is genuinely new.
 
 category: "inf"
 

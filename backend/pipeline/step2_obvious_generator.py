@@ -156,13 +156,25 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
     pages_str = ", ".join(discovered) if discovered else "(none found)"
 
     root_node = _identify_root_node(step1_requirements, discovered)
+
+    is_spa = (
+        len(discovered) == 1
+        and any(p.lower() in ("index.html", "index.htm") for p in discovered)
+        and len(_extract_nodes_from_paths(step1_requirements)) == 1
+    )
+
     root_section = ""
     if root_node:
+        spa_note = (
+            f"This is a single-page application — CHECK 3 also does NOT apply to '{root_node}'.\n"
+            f"'{root_node}' is the entire application surface; there is no page to navigate away to.\n"
+        ) if is_spa else ""
         root_section = (
             f"=== ROOT / HOME PAGE ===\n"
             f"'{root_node}' is the application entry point.\n"
             f"Do NOT apply CHECK 2 to it — it has no page before it.\n"
-            f"Do NOT invent a phantom landing page to navigate from.\n\n"
+            f"Do NOT invent a phantom landing page to navigate from.\n"
+            f"{spa_note}\n"
         )
 
     # Format stated functions with their edge inventory for connectivity checking
