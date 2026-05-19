@@ -64,7 +64,7 @@ PASS 2 — DOMAIN INFERENCE
 
 Read the project_summary and all stated functions. Ask two questions:
 1. What functions would a regular user of this specific app return to repeatedly that Pass 1 didn't cover?
-2. What functions complete the primary user workflow end-to-end that aren't yet covered? (e.g. a shopping cart naturally ends in checkout and order confirmation; a booking app ends in a confirmation screen; a task manager ends in a completion/archive flow.)
+2. What functions complete the primary user workflow end-to-end that aren't yet covered?
 
 Pure open-ended domain reasoning — no pattern checklist.
 Do NOT re-generate functions already produced in Pass 1 or already stated in Step 1. Before writing each item, confirm it is genuinely new.
