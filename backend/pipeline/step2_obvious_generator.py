@@ -232,8 +232,10 @@ def _parse_llm_response(raw: str) -> list:
             text = text[bracket_pos:]
     try:
         parsed = json.loads(text)
-    except json.JSONDecodeError:
-        last_close = text.rfind("},")
+    except json.JSONDecodeError as e:
+        last_close = text.rfind("},", 0, e.pos)
+        if last_close == -1:
+            last_close = text.rfind("},")
         if last_close != -1:
             parsed = json.loads(text[:last_close + 1] + "]")
         else:
