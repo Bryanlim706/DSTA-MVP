@@ -42,9 +42,9 @@ PATTERN TABLE:
 
 Stated node type → Generate these functions (confidence):
 - List node (shows multiple items of same type):
-    filter by attribute (~0.82), search (~0.80), sort (~0.68), edit item (~0.72), delete item (~0.65)
+    filter by attribute (~0.82), search (~0.80), sort (~0.68), edit item (~0.85), delete item (~0.82)
 - Detail node (shows single item):
-    edit (~0.75), delete (~0.70)
+    edit (~0.85), delete (~0.82)
 - Auth present (login or register stated):
     account management / profile page (~0.87)
 - Named changeable status field:
@@ -59,6 +59,8 @@ Stated node type → Generate these functions (confidence):
     notification surface (~0.65)
 - Multi-user / per-user data stated:
     user profile / identity page (~0.82)
+
+CRUD COMPLETION RULE: When CREATE (add) is stated for an entity type, edit and delete for the same entity type complete the CRUD cycle and are completeness requirements — they belong in L1a. Assign edit ≥ 0.85 and delete ≥ 0.82 for these cases, regardless of how the entity is described.
 
 VAGUE FUNCTION UNPACKING:
 Functions marked vague: true in Step 1 are priority unpack targets. Apply ALL applicable patterns against their node and generate specific child functions. Set unpacks: "<parent_req_id>" on each child.

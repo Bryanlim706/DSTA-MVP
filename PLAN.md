@@ -411,8 +411,9 @@ Note: Key accuracy step. Consider requirement dependencies and branching which w
 
 **Pass 1 — SOP pattern-triggered functions**
 Fires only on nodes from Step 1 stated functions. Checks each node against the SOP pattern table:
-- List node → filter (~0.82), search (~0.80), sort (~0.68), edit item (~0.72), delete item (~0.65)
-- Detail node → edit (~0.75), delete (~0.70)
+- List node → filter (~0.82), search (~0.80), sort (~0.68), edit item (~0.85), delete item (~0.82)
+- Detail node → edit (~0.85), delete (~0.82)
+- CRUD COMPLETION RULE: when CREATE is stated for an entity, edit and delete complete the CRUD cycle → always L1a (≥0.85 / ≥0.82)
 - Auth present → account management / profile page (~0.87)
 - Named changeable status field → cross-status overview page (~0.75), filter-by-status element (~0.82)
 - Temporal field (dates, deadlines) → time-scoped view / calendar view (~0.75)
