@@ -209,14 +209,21 @@ def _parse_llm_response(raw: str) -> list:
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as e:
-        # Search for the last complete entry before the error position first,
-        # then fall back to searching the full string (handles tail truncation).
-        last_close = text.rfind("},", 0, e.pos)
-        if last_close == -1:
-            last_close = text.rfind("},")
-        if last_close != -1:
-            parsed = json.loads(text[:last_close + 1] + "]")
-        else:
+        # Walk backwards from the error position to find the last complete object.
+        # The inner parse may also fail if },  appears inside a string value, so
+        # we loop until we find a position that produces valid JSON.
+        search_end = e.pos
+        parsed = None
+        while search_end > 0:
+            last_close = text.rfind("},", 0, search_end)
+            if last_close == -1:
+                break
+            try:
+                parsed = json.loads(text[:last_close + 1] + "]")
+                break
+            except json.JSONDecodeError:
+                search_end = last_close
+        if parsed is None:
             raise
     if not isinstance(parsed, list):
         raise ValueError("LLM returned non-array JSON")
@@ -335,7 +342,7 @@ async def run(
         try:
             response = await client.messages.create(
                 model=model,
-                max_tokens=8000,
+                max_tokens=16000,
                 system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": _build_user_message(
                     step0_result, step1_requirements, step2_requirements, project_summary
