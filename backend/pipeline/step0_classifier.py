@@ -99,10 +99,14 @@ BACKEND_FRAMEWORKS_PY: dict[str, str] = {
 CLI_INDICATORS_PY: set[str] = {"click", "typer", "fire"}
 
 _VIEW_DIRS = {"templates", "views"}
-# These extensions can only be processed server-side — unambiguous SSR regardless of directory
 _SSR_SPECIFIC_EXTS = {
     ".jinja", ".jinja2", ".twig", ".blade.php",
     ".ejs", ".hbs", ".handlebars", ".njk", ".pug", ".jade",
+}
+
+_PYTHON_JINJA2_BACKENDS = {
+    "Flask", "Django", "FastAPI", "Starlette", "Litestar",
+    "aiohttp", "Tornado", "Bottle", "Sanic", "Quart",
 }
 
 
@@ -420,20 +424,8 @@ def _detect_backend_py(packages: set[str]) -> str | None:
     return None
 
 
-def _detect_language(ext_counts: dict[str, int], frontend_fw: str | None, backend_fw: str | None) -> str:
-    if any(ext in ext_counts for ext in {".ts", ".tsx"}):
-        return "TypeScript"
-    if backend_fw in {"FastAPI", "Flask", "Django", "Litestar", "Starlette", "aiohttp", "Tornado", "Bottle", "Sanic", "Quart"}:
-        return "Python"
-    # Rank by file count so the dominant language wins (e.g. 147 PHP files beat 19 Java files)
-    candidates = [
-        (".py", "Python"), (".go", "Go"), (".rs", "Rust"), (".java", "Java"),
-        (".cs", "C#"), (".rb", "Ruby"), (".php", "PHP"), (".dart", "Dart"),
-    ]
-    best = max(candidates, key=lambda x: ext_counts.get(x[0], 0))
-    if ext_counts.get(best[0], 0) > 0:
-        return best[1]
-    return "JavaScript"
+def _java_build_content(config_files: dict[str, str]) -> str:
+    return " ".join(v for k, v in config_files.items() if "pom.xml" in k or "build.gradle" in k)
 
 
 # --- File scanner ---
@@ -739,22 +731,18 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
 
     # Contradiction guard: if rules said frontend_only but the dominant file type is a backend
     # language, rules likely missed something — medium confidence triggers LLM review in run()
-    if project_type == "frontend_only":
-        language = _detect_language(ext_counts, frontend_fw, backend_framework)
-        if language in {"Python", "Java", "Go", "Rust", "C#", "Ruby", "PHP"}:
+    if project_type == "frontend_only" and not any(ext_counts.get(e, 0) > 0 for e in (".ts", ".tsx")):
+        _backend_candidates = [(".py", "Python"), (".go", "Go"), (".rs", "Rust"), (".java", "Java"),
+                               (".cs", "C#"), (".rb", "Ruby"), (".php", "PHP")]
+        _dominant = max(_backend_candidates, key=lambda x: ext_counts.get(x[0], 0))
+        if ext_counts.get(_dominant[0], 0) > 0:
             confidence = "medium"
 
     file_tree = scan.get("file_tree", [])
-    java_build_content = " ".join(
-        v for k, v in scan.get("config_files", {}).items()
-        if "pom.xml" in k or "build.gradle" in k
-    )
+    jbc = _java_build_content(scan.get("config_files", {}))
     frontend_tooling = _detect_frontend_tooling(js_deps, file_tree)
-    template_engine = _detect_template_engine(file_tree, java_build_content)
-    # Infer Jinja2 for Python backends that use HTML views but don't have explicit engine extensions
-    if template_engine is None and project_type == "full_stack_web_app" and backend_framework in {
-        "Flask", "Django", "FastAPI", "Starlette", "Litestar", "aiohttp", "Tornado", "Bottle", "Sanic", "Quart",
-    } and _has_html_views(file_tree):
+    template_engine = _detect_template_engine(file_tree, jbc)
+    if template_engine is None and project_type == "full_stack_web_app" and backend_framework in _PYTHON_JINJA2_BACKENDS and _has_html_views(file_tree):
         template_engine = "Jinja2"
     service_layout = _detect_service_layout(file_tree, project_type, template_engine)
     server_routes = _detect_server_routes(frontend_fw, file_tree)
@@ -831,16 +819,9 @@ async def _classify_by_llm(scan: dict, client: anthropic.AsyncAnthropic) -> dict
         parsed.setdefault("confidence", "low")
         parsed.setdefault("reasoning", "No reasoning provided.")
         parsed["test_strategy"] = _get_test_strategy(parsed["project_type"], parsed.get("backend_framework"))
-        java_build_content = " ".join(
-            v for k, v in scan.get("config_files", {}).items()
-            if "pom.xml" in k or "build.gradle" in k
-        )
+        jbc = _java_build_content(scan.get("config_files", {}))
         parsed["frontend_tooling"] = _detect_frontend_tooling(scan["js_deps"], scan.get("file_tree", []))
-        parsed["template_engine"] = _detect_template_engine(scan.get("file_tree", []), java_build_content)
-        _PYTHON_JINJA2_BACKENDS = {
-            "Flask", "Django", "FastAPI", "Starlette", "Litestar",
-            "aiohttp", "Tornado", "Bottle", "Sanic", "Quart",
-        }
+        parsed["template_engine"] = _detect_template_engine(scan.get("file_tree", []), jbc)
         if (
             parsed["template_engine"] is None
             and parsed.get("project_type") == "full_stack_web_app"

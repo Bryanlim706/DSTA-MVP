@@ -3,6 +3,8 @@ import json
 
 import anthropic
 
+from pipeline.utils import _extract_nodes_from_paths, _identify_root_node, _is_state_variant, _validate_path
+
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 VALID_CATEGORIES = {"sop", "inf"}
 
@@ -90,10 +92,6 @@ PATH CONSTRUCTION RULES (both passes):
    - Multi-hop flows: all entities primary
    - State-variant destination nodes ("Task List Page (filtered)"): ALWAYS primary: false
 
-3. Step 3 NEVER re-applies Step 2 connectivity checks — entry/exit are already in the path.
-
-4. structural_edge category is REMOVED — entry/exit are part of the function path.
-
 ---
 
 OUTPUT SCHEMA:
@@ -131,46 +129,6 @@ FIELD NOTES:
 - priority and weight: set for l1a items; for l1b items set weight from strength (strongly_implied=3.0, medium=2.0, weak=1.0)
 
 Output ONLY a JSON array (no markdown fences, no preamble)."""
-
-
-def _is_state_variant(label: str) -> bool:
-    return "(" in label and label.rstrip().endswith(")")
-
-
-def _extract_nodes_from_paths(requirements: list) -> list[str]:
-    seen: dict[str, bool] = {}
-    for func in requirements:
-        for entity in func.get("path", []):
-            if entity.get("type") == "node":
-                label = str(entity.get("label", "")).strip()
-                if label and not _is_state_variant(label) and label not in seen:
-                    seen[label] = True
-    return list(seen.keys())
-
-
-def _identify_root_node(step1_requirements: list, discovered_pages: list) -> str | None:
-    unique_nodes = _extract_nodes_from_paths(step1_requirements)
-
-    if len(unique_nodes) == 1:
-        return unique_nodes[0]
-
-    is_single_file_spa = (
-        len(discovered_pages) == 1
-        and any(p.lower() in ("index.html", "index.htm") for p in discovered_pages)
-    )
-    if is_single_file_spa and unique_nodes:
-        return unique_nodes[0]
-
-    home_names = {"home", "landing", "index", "main", "dashboard", "root"}
-    for func in step1_requirements:
-        if func.get("priority") == "critical":
-            for entity in func.get("path", []):
-                if entity.get("type") == "node" and entity.get("primary"):
-                    label = str(entity.get("label", ""))
-                    if any(h in label.lower() for h in home_names):
-                        return label
-
-    return None
 
 
 def _build_user_message(
@@ -252,22 +210,6 @@ def _parse_llm_response(raw: str) -> list:
     if not isinstance(parsed, list):
         raise ValueError("LLM returned non-array JSON")
     return parsed
-
-
-def _validate_path(path) -> list | None:
-    if not isinstance(path, list) or len(path) == 0:
-        return None
-    clean = []
-    for entity in path:
-        if not isinstance(entity, dict):
-            continue
-        if entity.get("type") not in {"node", "element", "edge"}:
-            continue
-        if not str(entity.get("label", "")).strip():
-            continue
-        entity.setdefault("primary", True)
-        clean.append(entity)
-    return clean if clean else None
 
 
 def _validate_and_normalise(

@@ -3,6 +3,8 @@ import json
 
 import anthropic
 
+from pipeline.utils import _extract_nodes_from_paths, _identify_root_node, _is_state_variant
+
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 
 LLM_SYSTEM_PROMPT = """You are a requirements analyst. Find graph connectivity gaps — pages with no way in or no way out — based on the stated functions.
@@ -96,22 +98,6 @@ Output ONLY a JSON array (no markdown fences, no preamble):
 }]"""
 
 
-def _is_state_variant(label: str) -> bool:
-    return "(" in label and label.rstrip().endswith(")")
-
-
-def _extract_nodes_from_paths(step1_requirements: list) -> list[str]:
-    """Return unique non-state-variant node labels from all Step 1 function paths."""
-    seen = {}
-    for func in step1_requirements:
-        for entity in func.get("path", []):
-            if entity.get("type") == "node":
-                label = str(entity.get("label", "")).strip()
-                if label and not _is_state_variant(label) and label not in seen:
-                    seen[label] = True
-    return list(seen.keys())
-
-
 def _extract_edges_from_paths(step1_requirements: list) -> list[dict]:
     """Return all edge entities from Step 1 function paths."""
     edges = []
@@ -120,31 +106,6 @@ def _extract_edges_from_paths(step1_requirements: list) -> list[dict]:
             if entity.get("type") == "edge":
                 edges.append(entity)
     return edges
-
-
-def _identify_root_node(step1_requirements: list, discovered_pages: list) -> str | None:
-    unique_nodes = _extract_nodes_from_paths(step1_requirements)
-
-    if len(unique_nodes) == 1:
-        return unique_nodes[0]
-
-    is_single_file_spa = (
-        len(discovered_pages) == 1
-        and any(p.lower() in ("index.html", "index.htm") for p in discovered_pages)
-    )
-    if is_single_file_spa and unique_nodes:
-        return unique_nodes[0]
-
-    home_names = {"home", "landing", "index", "main", "dashboard", "root"}
-    for func in step1_requirements:
-        if func.get("priority") == "critical":
-            for entity in func.get("path", []):
-                if entity.get("type") == "node" and entity.get("primary"):
-                    label = str(entity.get("label", ""))
-                    if any(h in label.lower() for h in home_names):
-                        return label
-
-    return None
 
 
 def _build_user_message(step0_result: dict, step1_requirements: list) -> str:

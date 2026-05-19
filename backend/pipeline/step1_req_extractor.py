@@ -6,6 +6,8 @@ from pathlib import Path
 
 import anthropic
 
+from pipeline.utils import _validate_path
+
 IGNORE_DIRS = {
     "node_modules", ".git", "dist", "build", ".next", "venv", ".venv",
     "__pycache__", "coverage", ".cache", "out", "target", "vendor",
@@ -226,37 +228,21 @@ def _parse_llm_response(raw: str) -> tuple[list, str]:
             return parsed.get("requirements", []), str(parsed.get("project_summary", ""))
         if isinstance(parsed, list):
             return parsed, ""
-    except json.JSONDecodeError:
-        pass
-
-    bracket_pos = text.find("[")
-    if bracket_pos >= 0:
-        array_text = text[bracket_pos:]
-        try:
-            return json.loads(array_text), ""
-        except json.JSONDecodeError:
-            last_close = array_text.rfind("},")
-            if last_close != -1:
-                return json.loads(array_text[:last_close + 1] + "]"), ""
+    except json.JSONDecodeError as e:
+        bracket_pos = text.find("[")
+        if bracket_pos >= 0:
+            array_text = text[bracket_pos:]
+            adj_pos = max(0, e.pos - bracket_pos)
+            try:
+                return json.loads(array_text), ""
+            except json.JSONDecodeError:
+                last_close = array_text.rfind("},", 0, adj_pos)
+                if last_close == -1:
+                    last_close = array_text.rfind("},")
+                if last_close != -1:
+                    return json.loads(array_text[:last_close + 1] + "]"), ""
 
     raise ValueError("Could not parse LLM response as requirements")
-
-
-def _validate_path(path) -> list | None:
-    """Validate and normalise a path array. Returns cleaned path or None if invalid."""
-    if not isinstance(path, list) or len(path) == 0:
-        return None
-    clean = []
-    for entity in path:
-        if not isinstance(entity, dict):
-            continue
-        if entity.get("type") not in {"node", "element", "edge"}:
-            continue
-        if not str(entity.get("label", "")).strip():
-            continue
-        entity.setdefault("primary", True)
-        clean.append(entity)
-    return clean if clean else None
 
 
 def _validate_and_normalise(
@@ -300,10 +286,6 @@ def _validate_and_normalise(
         item.setdefault("testable", True)
         item.setdefault("source", "user_input")
         item.setdefault("functional_area", "general")
-
-        # Remove old flat entity fields no longer part of the schema
-        item.pop("type", None)
-        item.pop("ui_node", None)
 
         valid.append(item)
 
