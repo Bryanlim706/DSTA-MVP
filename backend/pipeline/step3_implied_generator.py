@@ -24,10 +24,7 @@ PASS 1 — SOP-TRIGGERED FUNCTIONS
 
 For each node that appears in Step 1 stated functions, check whether any pattern below applies. Generate the corresponding function if it is not already covered by a stated or obvious function.
 
-DEDUPLICATION — skip a pattern if:
-- A stated function already has the same primary element on the same page performing the same interaction (e.g. if "filter by size" is stated with a size filter control as primary on Page X, do NOT generate a separate "view size filter options" — it is the same interaction under a different label).
-- The pattern would produce a function whose path entities are all already primary in existing stated functions.
-When in doubt, skip rather than near-duplicate.
+DEDUPLICATION — skip a pattern only if a stated function already covers the exact same interaction type on the same page (same verb + same object, even if worded differently). Example: "filter products by size" already stated → do not generate "view size filter options" — same interaction, different label. Do NOT skip just because functions share elements — edit-item and delete-item both touch the same list item but are distinct interactions. When in doubt, generate.
 
 Fires ONLY on nodes from Step 1 stated functions — NOT on nodes you generate in this pass.
 
