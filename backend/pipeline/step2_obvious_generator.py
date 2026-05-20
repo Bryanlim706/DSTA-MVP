@@ -38,7 +38,10 @@ Navigation function for CHECK 2:
   "reasoning": "CHECK 2 — [Node] has no stated inbound navigation"
 }
 
-(from: null = mechanism-agnostic source)
+STRICT FORMAT RULES for CHECK 2:
+- description MUST be exactly "User can navigate to [Node]" — never add "from [Page]" or any source
+- from: null — do NOT fill in a source page; the source is unknown and unspecified by definition
+- You are recording a GAP (no stated entry), not inventing a route
 
 ---
 
@@ -59,7 +62,10 @@ Navigation function for CHECK 3:
   "reasoning": "CHECK 3 — [Node] has no stated exit path"
 }
 
-(to: null = mechanism-agnostic destination)
+STRICT FORMAT RULES for CHECK 3:
+- description MUST be exactly "User can leave [Node]" — never add "to [Page]" or any destination
+- to: null — do NOT fill in a destination page; the destination is unknown and unspecified by definition
+- You are recording a GAP (no stated exit), not inventing a route
 
 ---
 
@@ -242,6 +248,28 @@ def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list
         if not clean_path:
             dropped += 1
             continue
+
+        # Enforce CHECK 2 / CHECK 3 schema: source/destination must be null.
+        # The LLM sometimes fills in an assumed page — that is an invention, not a gap.
+        is_check2 = reasoning_up.startswith("CHECK 2")
+        is_check3 = reasoning_up.startswith("CHECK 3")
+        if is_check2:
+            # Entry gap: source unknown → from must be null; rebuild description from destination
+            dest_node = next((e.get("to") for e in clean_path if e.get("type") == "edge" and e.get("to")), None)
+            for entity in clean_path:
+                if entity.get("type") == "edge":
+                    entity["from"] = None
+            if dest_node:
+                desc = f"User can navigate to {dest_node}"
+        elif is_check3:
+            # Exit gap: destination unknown → to must be null; rebuild description from source
+            src_node = next((e.get("from") for e in clean_path if e.get("type") == "edge" and e.get("from")), None)
+            for entity in clean_path:
+                if entity.get("type") == "edge":
+                    entity["to"] = None
+            if src_node:
+                desc = f"User can leave {src_node}"
+
         item["path"] = clean_path
 
         priority = item.get("priority", "high")

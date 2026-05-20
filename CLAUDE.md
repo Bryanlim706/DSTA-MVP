@@ -28,6 +28,7 @@ See `PLAN.md` for the full pipeline design, 4-layer model, and scoring formulas.
 - IGNORE_DIRS extended: `examples`, `demo`, `sample`, `demos`, `samples` excluded from walk to prevent example build files in library repos from affecting classification.
 - Static site: rule-based `static_site` detection — HTML files present, no backend language → `medium` confidence without LLM.
 - React confidence: if `react` is in deps but no `.jsx`/`.tsx` source files exist, confidence is `medium` → LLM review.
+- `_discover_pages()` finds page/screen filenames from the file tree: HTML files in `templates/`/`views/`; HTML at root/static dirs; `.tsx/.jsx/.vue/.svelte` in `pages/`/`screens/`; SSR template engine files (`.blade.php`, `.erb`, `.cshtml`, `.ejs`, etc.) in `views/`/`templates/` via `_TEMPLATE_ENGINE_EXTS`; Android `*Activity.java`/`*Activity.kt` files. Result stored in `discovered_pages`.
 - Tests: `backend/tests/test_step0_classifier.py` — 12 fixtures, all passing.
 - Audit doc: `docs/step0-edge-case-audit.md` — full 20-case analysis.
 
@@ -57,6 +58,7 @@ runtime  (only for electron_app)
 - **Vague flag:** Source text too broad to build a specific path (e.g. "users can manage tasks") → `vague: true`, minimal single-node path. Step 3 decomposes via `unpacks` targeting. Vague functions never enter FCom scoring.
 - **State-variant nodes** (labels with parentheticals like "(filtered)", "(sorted)") always `primary: false` — UI state, not navigable routes; Step 6 skips L2 route matching for them.
 - **Extraction gate (positive framing):** "Does this text describe a goal a user can directly perform?" Rejects: backend subjects, quality attributes, automatic behaviors, system reactions ("X happens when/if Y"). Positive gate replaces growing negative lists.
+- **Screenshot pages:** Markdown `### Page Name` headings immediately followed by a screenshot image (`![...](...)`) are extracted as vague functions ("User can access [Page Name]", `vague: true`). This handles README screenshot galleries where pages are documented without action verbs.
 - Source quote verification uses whitespace-normalized comparison (`_norm()`) — collapses all whitespace to single space; newlines → spaces tolerated
 - JSON truncation recovery: if response is cut off mid-array, recovers items up to last complete `},`
 - `excluded_docs_count` in result shows how many spec docs were found but dropped (MAX_DOCS hit)
@@ -71,7 +73,7 @@ runtime  (only for electron_app)
 - **`depends_on` field:** lists the REQ-XXX ids from stated functions that make each obvious function necessary.
 - **Parser:** handles LLM YES/NO reasoning text before JSON array via bracket_pos search.
 - **`_build_user_message`:** stated functions formatted with `[req_id]` prefix for `depends_on` linkage; node inventory and edge inventory provided explicitly.
-- **Code-level enforcement:** `_validate_and_normalise` drops any item whose `reasoning` does not start with "CHECK 2" or "CHECK 3"; validates path arrays; defaults edge entities to `primary: true`.
+- **Code-level enforcement:** `_validate_and_normalise` drops any item whose `reasoning` does not start with "CHECK 2" or "CHECK 3"; validates path arrays; defaults edge entities to `primary: true`. Also enforces null source/destination: CHECK 2 edges always get `from=null`; CHECK 3 edges always get `to=null`; description is rebuilt from the path so the LLM cannot invent a specific source or destination page.
 - **Root node detection (`_identify_root_node()`):** Detects the home/root page by parsing nodes from Step 1 path arrays. Two heuristics: (1) only one stated node in all paths → root; (2) `discovered_pages = ["index.html"]` (single-route SPA) + at least one stated node → first node is root. Detected root injected as `=== ROOT / HOME PAGE ===` — LLM skips CHECK 2 for it.
 
 ### Step 3 — Generated Requirement Generator (COMPLETE)
@@ -115,7 +117,7 @@ runtime  (only for electron_app)
   - **Section 1 (L1a)**: stated (non-vague) + obvious pre-included; Step 3 `placement: "l1a"` candidates pre-included but demotable. Expandable popdown shows PathDisplay + reasoning. Priority dropdown updates weight live.
   - **Section 2 (L1b Advisory)**: Step 3 `placement: "l1b"` items, each promotable to L1a. Expandable popdown shows PathDisplay + reasoning.
   - **Section 3**: inline add-function form → `CUSTOM-001` IDs; placeholder path: `[{type: "node", label: "TBD", primary: true}]`
-- **Vague auto-replace:** Vague Step 1 functions excluded from initial L1a state. Step 3 functions with `unpacks` pointing to a vague parent are auto-included in L1a, replacing the parent. UI notice: "N vague stated function(s) were auto-replaced by their Step 3 children."
+- **Vague auto-replace:** Vague Step 1 functions excluded from initial L1a state. ALL Step 3 functions with `unpacks` pointing to a vague parent are auto-included in L1a — both `placement: "l1a"` and `placement: "l1b"` children — so the user can review and demote. Each such row gets a `vague child` badge (orange). L1b items promoted this way are excluded from the advisory section. UI notice: "N vague stated function(s) were auto-replaced by their Step 3 children — all children shown in L1a for review."
 - Action bar: **Skip** (stated non-vague + obvious only, `skipped=true`) and **Confirm (N in score)**
 - `step_3_5` result fields:
   - `confirmed_requirements` — locked L1a list (REQ/OBV/GEN/CUSTOM items), each with full `path[]`, `depends_on`, `source_quote`
