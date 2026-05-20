@@ -83,6 +83,7 @@ runtime  (only for electron_app)
 - **Root node detection (`_identify_root_node()`):** Parses nodes from Step 1 path arrays; injects `=== ROOT / HOME PAGE ===` section to prevent phantom landing page generation.
 - **Confidence → placement:** ≥ 0.80 → `placement: "l1a"`; 0.60–0.79 → `placement: "l1b"` strength: `strongly_implied`; 0.40–0.59 → `l1b` strength: `medium`; < 0.40 → `l1b` strength: `weak`
 - **`unpacks` field:** Links Step 3 children to their vague Step 1 parent (`"REQ-xxx"` or `null`). Step 3.5 auto-includes unpacking children and excludes the vague parent.
+- **`depends_on` field:** REQ-xxx IDs only (Step 1 stated functions). OBV-xxx (Step 2 navigation gaps) are not valid targets — a domain enhancement depends on a domain feature, not on navigation plumbing. Validated in `_validate_and_normalise` against `valid_step1_ids`.
 - **Result envelope fields:** `requirements`, `total_count`, `sop_count`, `inference_count`, `llm_model`, `dropped_count`, `error`
 - **Frontend:** `GeneratedRequirementsResult.tsx` — L1a panel (green, ≥ 80%) and L1b panel (yellow advisory), category badges (blue=Pattern, purple=Inferred), expandable rows show traversal path (PathDisplay) + reasoning + confidence_reason + unpacks badge + depends_on
 
@@ -105,17 +106,23 @@ runtime  (only for electron_app)
 
 ---
 
-### Step 3.5 — Human Requirement Confirmation (COMPLETE)
+### Step 3.5 — Human Requirement Confirmation + Data Consolidation (COMPLETE)
 - Pipeline pauses at `waiting_for_confirmation` after Step 3; resumes when user POSTs to confirm endpoint
-- `POST /api/jobs/{job_id}/confirm` — validates job state, stores locked L1a as `step_results.step_3_5`, sets status to `confirmed`
-- `ConfirmedRequirement` Pydantic model includes `path: list[PathEntity]`, `vague: bool`, `unpacks: str | None`
+- `POST /api/jobs/{job_id}/confirm` — validates job state, writes consolidated result to `step_results.step_3_5`, sets status to `confirmed`
+- **This is the single consolidation point for all downstream steps.** Steps 4+ read only from `step_3_5` for all milestone-1 data.
+- `ConfirmedRequirement` Pydantic model: `path: list[PathEntity]`, `vague: bool`, `unpacks: str | None`, `depends_on: list[str]`, `source_quote: str | None`. `depends_on` and `source_quote` are looked up server-side from prior step results by `req_id` — frontend does not pass them.
 - Frontend `ConfirmationTable.tsx` — three-section review table:
   - **Section 1 (L1a)**: stated (non-vague) + obvious pre-included; Step 3 `placement: "l1a"` candidates pre-included but demotable. Expandable popdown shows PathDisplay + reasoning. Priority dropdown updates weight live.
   - **Section 2 (L1b Advisory)**: Step 3 `placement: "l1b"` items, each promotable to L1a. Expandable popdown shows PathDisplay + reasoning.
   - **Section 3**: inline add-function form → `CUSTOM-001` IDs; placeholder path: `[{type: "node", label: "TBD", primary: true}]`
 - **Vague auto-replace:** Vague Step 1 functions excluded from initial L1a state. Step 3 functions with `unpacks` pointing to a vague parent are auto-included in L1a, replacing the parent. UI notice: "N vague stated function(s) were auto-replaced by their Step 3 children."
 - Action bar: **Skip** (stated non-vague + obvious only, `skipped=true`) and **Confirm (N in score)**
-- `step_3_5` result stored in job JSON: `confirmed_requirements`, `confirmed_at`, `skipped`, `l1a_count`, `promoted_count`, `deleted_count`, `added_count`
+- `step_3_5` result fields:
+  - `confirmed_requirements` — locked L1a list (REQ/OBV/GEN/CUSTOM items), each with full `path[]`, `depends_on`, `source_quote`
+  - `advisory_requirements` — Step 3 l1b items not promoted, copied as-is with full `path[]`, `strength`, `weight`, `confidence_score`
+  - `project_context` — Step 0 passthrough: `project_type`, `frontend_framework`, `frontend_tooling`, `backend_framework`, `template_engine`, `service_layout`, `server_routes_detected`, `discovered_pages`, `test_strategy`, `runtime`
+  - `project_summary` — Step 1 domain summary string
+  - `confirmed_at`, `skipped`, `l1a_count`, `promoted_count`, `deleted_count`, `added_count`
 - ResultPage shows a green summary banner with counts after confirmation
 
 ## What has NOT been built yet
@@ -201,7 +208,9 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **JSON files per job** in `./jobs/` — no database for MVP; easy to inspect and debug
 - **Async background task** (FastAPI `BackgroundTasks`) — upload returns immediately with `job_id`, frontend polls
 - **Python 3.12 required** — Python 3.14 (pre-release) causes pydantic-core Rust compilation failure on install
-- **Formula-driven scores** — LLM never overrides the formula
+- **Formula-driven scores** — LLM never overrides the formula. FCom and FA both output 0–1 (weighted averages: ∑(E×w)/∑w, normalised regardless of max weight). Step 17 multiplies by 5 → 0–5 display scale.
+- **Weight/confidence chain** — L1a `weight` derives from `priority` label (critical=4, high=3, medium=2, low=1); user can change at Step 3.5. L1b `weight` derives from `confidence_score` → `strength` (≥0.80 → l1a candidate; 0.60–0.79 → strongly_implied=3.0; 0.40–0.59 → medium=2.0; <0.40 → weak=1.0). `confidence_score` is not used in any formula after these decisions — `weight` is.
+- **Step 3.5 as consolidation gate** — confirm endpoint writes a single complete output for all downstream steps: `confirmed_requirements` (L1a), `advisory_requirements` (L1b), `project_context` (Step 0 passthrough), `project_summary` (Step 1). Steps 4+ read only `step_3_5`. Steps 1 and 2 outputs are fully subsumed.
 - **Root-level Python check** — `root_level_py` in Step 0 prevents sub-service requirements.txt (depth 2+) from falsely determining backend_framework
 - **SSR detection (`_has_html_views`)** — Step 0 checks for `templates/`/`views/` HTML files and engine-specific extensions (`.ejs`, `.twig`, `.blade.php`, etc.) to distinguish Flask/Django/Express SSR apps from pure REST APIs. Without this, all Python/JS/PHP backends without a JS frontend framework were misclassified as `backend_api_only`, producing wrong Step 2 obvious requirements.
 - **Java full-stack rule** — `frontend_fw + java_fw` (detected from `pom.xml`/`build.gradle`/`build.gradle.kts`) classifies as `full_stack_web_app` at `high` confidence before the generic `monorepo` check. Ensures Spring Boot + React/Angular/Vue is always classified deterministically.

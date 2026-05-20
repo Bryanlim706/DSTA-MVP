@@ -47,7 +47,12 @@ Per-entity E() values:
 | 0.25 | Partial or unclear evidence in either layer |
 | 0.0 | Not found anywhere |
 
-`L1Cx` = confidence weight (critical = 4, high = 3, medium = 2, low = 1; default 1.0)
+`L1Cx` = `weight` on each requirement. Derives from two separate sources depending on layer:
+
+- **L1a (`confirmed_requirements`):** `priority` label → weight. critical=4.0, high=3.0, medium=2.0, low=1.0. User can override priority at Step 3.5; the locked weight is what FCom reads.
+- **L1b (`advisory_requirements`):** `confidence_score` (Step 3 LLM, 0.0–1.0) → `strength` label → weight. The confidence_score drives two one-time decisions at Step 3 generation time: (1) placement — ≥0.80 → `"l1a"` candidate, <0.80 → `"l1b"`; (2) strength — 0.60–0.79 → `strongly_implied` (weight 3.0), 0.40–0.59 → `medium` (weight 2.0), <0.40 → `weak` (weight 1.0). After these decisions, `confidence_score` is not used in any formula — `weight` is.
+
+**Both FCom and FA output 0–1.** Both are weighted averages (∑(E×w)/∑w) — dividing by ∑weight normalises to 0–1 regardless of the maximum weight value (4 for L1a, 3 for L1b). The max weight only controls how much a single requirement pulls the average relative to others. Step 17 multiplies the final Functional Suitability score by 5 for display → 0–5 scale.
 
 State-variant nodes (labels with parentheticals like "(filtered)", "(sorted)", "(updated)") always have `primary: false` — Step 6 skips L2 route matching for them; they serve as Step 9 AC hints only.
 
@@ -313,8 +318,8 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Output consumed by:**
 | Field(s) | Consumed by |
 |---|---|
-| `project_type`, `frontend_framework`, `backend_framework` | Step 2 (project context in LLM prompt), Step 3 (same) |
-| `discovered_pages` | Step 2 (node inventory), Step 3 (root node detection) |
+| `project_type`, `frontend_framework`, `backend_framework` | Step 3 (project context in LLM prompt) |
+| `discovered_pages` | Step 2 (node inventory + root detection), Step 3 (root node detection) |
 | `test_strategy` | Step 9 (test type selection — not yet built) |
 | `project_type`, `frontend_framework`, `backend_framework` | Step 4 (determines where to look for routes/models) |
 | Full result | Step 5 (strategy selection for static vs. dynamic crawl) |
@@ -404,7 +409,7 @@ Step 1 does NOT receive the Step 0 result. It reads the zip directory itself to 
 | Field | Source |
 |---|---|
 | `step1_requirements` (list) | `job["step_results"]["step_1"]["requirements"]` — full requirement array |
-| `step0_result` (dict) | `job["step_results"]["step_0"]` — uses `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` |
+| `step0_result` (dict) | `job["step_results"]["step_0"]` — uses `discovered_pages` only |
 | `client` (AsyncAnthropic) | FastAPI app state |
 
 Step 2 derives its working data from these inputs via helper functions:
@@ -447,8 +452,7 @@ Step 2 derives its working data from these inputs via helper functions:
 **Output consumed by:**
 | Field(s) | Consumed by |
 |---|---|
-| `requirements` (full array) | Step 3 as `step2_requirements` — descriptions and req_ids for dedup |
-| `requirements[].req_id` | Step 3 `depends_on` validation (valid_req_ids set) |
+| `requirements` (full array) | Step 3 as `step2_requirements` — descriptions for dedup only |
 | `requirements` | Step 3.5 confirmation UI (pre-populates L1a table, non-demotable) |
 | `requirements` (after Step 3.5 confirmation) | Step 6 L1a → L2/L3 mapping (same as Step 1 requirements) |
 | `requirements` (after Step 3.5 confirmation) | Step 7 FCom formula |
@@ -467,17 +471,16 @@ Step 2 derives its working data from these inputs via helper functions:
 | Field | Source |
 |---|---|
 | `step1_requirements` (list) | `job["step_results"]["step_1"]["requirements"]` — full array with descriptions, paths, vague flags, req_ids |
-| `step2_requirements` (list) | `job["step_results"]["step_2"]["requirements"]` — for dedup and valid req_id validation |
+| `step2_requirements` (list) | `job["step_results"]["step_2"]["requirements"]` — descriptions used for dedup only |
 | `step0_result` (dict) | `job["step_results"]["step_0"]` — uses `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` |
 | `project_summary` (str) | `job["step_results"]["step_1"]["project_summary"]` — passed as keyword arg |
 | `client` (AsyncAnthropic) | FastAPI app state |
 
 Step 3 user message is built from:
-- `project_type`, `frontend_framework`, `backend_framework` (project context)
-- `discovered_pages` (for root node detection via `_identify_root_node`)
+- `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` (project context + root node detection via `_identify_root_node`)
 - `project_summary` (INF grounding)
-- Step 1 requirement descriptions + vague flags (SOP node inventory via `_extract_nodes_from_paths`)
-- Step 2 requirement descriptions (dedup reference)
+- Step 1 requirement descriptions + vague flags (SOP node inventory via `_extract_nodes_from_paths`; Step 1 `req_ids` used to validate both `depends_on` and `unpacks` — OBV-XXX IDs from Step 2 are never valid `depends_on` targets; a generated enhancement depends on a domain feature, not a navigation gap)
+- Step 2 requirement descriptions (dedup only)
 
 **Two-pass generation:**
 
@@ -549,30 +552,35 @@ Grounding step first (understand app purpose/structure), then generates across 7
 | `requirements` where `placement == "l1a"` | Step 3.5 UI — pre-included in L1a section, demotable |
 | `requirements` where `placement == "l1b"` | Step 3.5 UI — shown in Advisory section, promotable |
 | `requirements[].unpacks` | Step 3.5 — vague parent auto-replace logic |
-| `requirements` promoted to L1a at Step 3.5 | Step 6 L1a → L2/L3 mapping |
-| `requirements` (all, both placements) | Step 7 FA formula (L1b items scored for Functional Appropriateness) |
-| `requirements` (L1a after promotion) | Step 8 AC generation |
+| `requirements` where `placement == "l1a"` | Step 3.5 confirm endpoint — merged into `confirmed_requirements` |
+| `requirements` where `placement == "l1b"` | Step 3.5 confirm endpoint — copied as `advisory_requirements` |
+| All downstream (Steps 6, 7, 8, 9, 13) read via `step_3_5` only — not from Step 3 directly |
 
 ---
 
-### Step 3.5: Human Requirement Confirmation *(optional)*
+### Step 3.5: Human Requirement Confirmation + Data Consolidation *(optional)*
 **Status: COMPLETE**
-**Phase: FCom setup — locks L1a**
+**Phase: FCom setup — locks L1a and produces single milestone-1 output for all downstream steps**
 **Tools:** React UI (`ConfirmationTable.tsx`), FastAPI `POST /jobs/{job_id}/confirm`
 
 **Inputs — read from job JSON by the confirm endpoint:**
 | Field | Source |
 |---|---|
-| `step_results.step_1.requirements` | used to compute `step1_ids` for `deleted_count` |
-| `step_results.step_2.requirements` | used to compute `step2_ids` for `deleted_count` |
+| `step_results.step_0` | `project_context` passthrough — architectural metadata for Steps 4, 5, 9, 11 |
+| `step_results.step_1.requirements` | `step1_ids` for `deleted_count`; `depends_on` + `source_quote` looked up server-side by `req_id` |
+| `step_results.step_1.project_summary` | copied to output for Steps 8, 16 |
+| `step_results.step_2.requirements` | `step2_ids` for `deleted_count`; `depends_on` looked up server-side |
+| `step_results.step_3.requirements` | L1b items (`placement == "l1b"`) copied as `advisory_requirements` |
 | HTTP body `requirements` (list of `ConfirmedRequirement`) | user's finalised L1a list, submitted from the frontend |
 | HTTP body `skipped` (bool) | true if user clicked Skip instead of Confirm |
 
-**`ConfirmedRequirement` schema (Pydantic, stored as-is):**
+**`ConfirmedRequirement` schema (Pydantic):**
 ```
 req_id, description, path: list[PathEntity], vague: bool, tag, priority, weight,
-functional_area, testable, source, promoted: bool, unpacks: str|null
+functional_area, testable, source, promoted: bool, unpacks: str|null,
+depends_on: list[str], source_quote: str|null
 ```
+`depends_on` and `source_quote` are looked up server-side from prior step results by `req_id` — the frontend does not pass them.
 
 **Output — stored at `job["step_results"]["step_3_5"]`; status → `"confirmed"`, `current_step` → 4:**
 ```json
@@ -590,14 +598,62 @@ functional_area, testable, source, promoted: bool, unpacks: str|null
       "testable": true,
       "source": "stated",
       "promoted": false,
-      "unpacks": null
+      "unpacks": null,
+      "depends_on": [],
+      "source_quote": "users should be able to log in"
+    },
+    {
+      "req_id": "OBV-001",
+      "description": "User can navigate to Dashboard",
+      "path": [...],
+      "vague": false,
+      "tag": "obvious",
+      "priority": "high",
+      "weight": 3.0,
+      "functional_area": "navigation",
+      "testable": true,
+      "source": "obvious",
+      "promoted": false,
+      "unpacks": null,
+      "depends_on": ["REQ-003"],
+      "source_quote": null
     }
   ],
+  "advisory_requirements": [
+    {
+      "req_id": "GEN-008",
+      "description": "User can filter tasks by status",
+      "path": [...],
+      "placement": "l1b",
+      "strength": "strongly_implied",
+      "weight": 3.0,
+      "confidence_score": 0.75,
+      "category": "sop",
+      "reasoning": "Status field stated — filter-by-status is standard paired function",
+      "confidence_reason": "Named status field exists in stated requirements",
+      "depends_on": ["REQ-003"],
+      "functional_area": "task_management",
+      "testable": true
+    }
+  ],
+  "project_context": {
+    "project_type": "full_stack_web_app",
+    "frontend_framework": "React",
+    "frontend_tooling": "Vite",
+    "backend_framework": "Spring Boot",
+    "template_engine": null,
+    "service_layout": "separate_frontend_backend",
+    "server_routes_detected": false,
+    "discovered_pages": ["login.html", "dashboard.html"],
+    "test_strategy": {"primary": "Playwright E2E", "secondary": "JUnit/MockMvc"},
+    "runtime": null
+  },
+  "project_summary": "A team task management application...",
   "confirmed_at": "2025-05-20T10:00:00Z",
   "skipped": false,
   "l1a_count": 12,
-  "promoted_count": 2,
-  "deleted_count": 1,
+  "promoted_count": 1,
+  "deleted_count": 2,
   "added_count": 0
 }
 ```
@@ -605,21 +661,24 @@ functional_area, testable, source, promoted: bool, unpacks: str|null
 **Output consumed by:**
 | Field(s) | Consumed by |
 |---|---|
-| `confirmed_requirements` (full array) | **Step 6** — authoritative L1a input for L1 → L2/L3 mapping |
-| `confirmed_requirements[].path[].primary` entities | **Step 6** — E() scoring per entity |
-| `confirmed_requirements[].weight` | **Step 7** — FCom formula denominator (`∑ L1Cx`) |
-| `confirmed_requirements` | **Step 8** — AC generation (only requirements in S = L1a ∩ L3) |
-| `confirmed_requirements` | **Step 9** — test case generation |
-| `confirmed_requirements[].req_id` | **Step 13** — FCor formula (links AC results back to requirement) |
+| `confirmed_requirements` (full array incl. `path[]`) | **Steps 6, 7, 8, 9, 13** — authoritative L1a; `path[].primary` entities scored by E() in Step 6 |
+| `confirmed_requirements[].weight` | **Step 7** — FCom formula (`∑ L1Cx`) |
+| `advisory_requirements` (full array incl. `path[]`) | **Steps 6, 7** — FA scoring (L1b); `weight` used as `L1Cx` |
+| `project_context` | **Steps 4, 5** — repo parsing strategy + crawl mode; **Steps 9, 11** — test tool selection |
+| `project_summary` | **Steps 8, 16** — AC generation context; LLM ISO evaluator |
 
-**If skipped:** `confirmed_requirements` = all Step 1 stated (non-vague) + all Step 2 obvious, at default weights. Step 3 L1b remains advisory only.
+**Steps 1 and 2 outputs are fully subsumed** by `confirmed_requirements` for all downstream purposes. Steps 4+ read only `step_3_5` for all milestone-1 data. Steps 0–3 individual results remain in job JSON as internal pipeline state (Steps 15–16 may read them for reporting).
+
+**Excluded from Step 3.5:** Processing metadata from Steps 0–3 (confidence/reasoning for Step 0 classification, llm_used, llm_model, total_count, dropped_count, sop_count, inference_count, docs_used, per-item reasoning/category/placement for confirmed items) — their job ends at confirmation and are not needed by scoring steps.
+
+**If skipped:** `confirmed_requirements` = all Step 1 stated (non-vague) + all Step 2 obvious at default weights; `advisory_requirements` = all Step 3 l1b items; `project_context` and `project_summary` still populated.
 
 ---
 
 ### Step 4: Repo Parser
 **Phase: FCom setup**
 **Tools:** Python (zipfile, pathlib), Tree-sitter, json/yaml/toml
-**Input:** Uploaded zip file
+**Input:** Uploaded zip file + `step_3_5.project_context` (for `project_type`, `frontend_framework`, `backend_framework`, `service_layout`, `template_engine`, `server_routes_detected` — determines where to look for routes and models)
 **Extracts:** README, frontend routes/pages, backend routes/endpoints, forms/buttons/components, API specs, package scripts, existing tests, config files, database models
 **Ignores:** node_modules, .git, dist, build, .next, venv, __pycache__, coverage
 **Output:**
@@ -641,7 +700,7 @@ functional_area, testable, source, promoted: bool, unpacks: str|null
 ### Step 5: UI/API Inventory Generator (L2)
 **Phase: FCom — builds L2**
 **Tools:** Tree-sitter (static), Playwright (dynamic), LLM (summarization), Python
-**Input:** Uploaded zip + Step 0 (project type for strategy selection)
+**Input:** Uploaded zip + `step_3_5.project_context` (for `project_type`, `test_strategy`, `discovered_pages` — determines static vs dynamic crawl strategy)
 
 **Three-pass process:**
 1. **Static analysis (Tree-sitter):** Extracts raw UI elements — routes, pages, buttons, forms, links, input fields, event handlers, API calls
@@ -674,7 +733,7 @@ functional_area, testable, source, promoted: bool, unpacks: str|null
 ### Step 6: Requirement-to-UI/API/Code Mapper
 **Phase: FCom — cross-links L1 → L2, L3**
 **Tools:** Tree-sitter, LLM (AsyncAnthropic), JSON traceability matrix
-**Input:** Step 1+2 (L1a) + Step 3 (L1b) + Step 5 (L2) + Step 4 (L3 skeleton)
+**Input:** `step_3_5.confirmed_requirements` (L1a) + `step_3_5.advisory_requirements` (L1b) + Step 5 (L2) + Step 4 (L3 skeleton)
 **Logic:** Maps each L1a and L1b requirement → L2 named functions → API endpoints → backend functions → database models. Produces E() score for each L1a item.
 **Unlinked detection:**
 ```python

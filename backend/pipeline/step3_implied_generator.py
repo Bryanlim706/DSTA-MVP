@@ -238,7 +238,6 @@ def _validate_and_normalise(
     step2_requirements: list,
 ) -> tuple[list, int]:
     all_reqs = step1_requirements + step2_requirements
-    valid_req_ids = {r.get("req_id", "") for r in all_reqs}
     stated_lower = {r["description"].lower() for r in all_reqs}
     valid_step1_ids = {r.get("req_id", "") for r in step1_requirements}
     valid = []
@@ -314,7 +313,7 @@ def _validate_and_normalise(
         item.setdefault("functional_area", "general")
 
         raw_deps = item.get("depends_on", [])
-        item["depends_on"] = [d for d in (raw_deps if isinstance(raw_deps, list) else []) if d in valid_req_ids]
+        item["depends_on"] = [d for d in (raw_deps if isinstance(raw_deps, list) else []) if d in valid_step1_ids]
 
         # Validate unpacks pointer
         unpacks = item.get("unpacks")

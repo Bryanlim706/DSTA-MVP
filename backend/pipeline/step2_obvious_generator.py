@@ -109,10 +109,6 @@ def _extract_edges_from_paths(step1_requirements: list) -> list[dict]:
 
 
 def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
-    project_type = step0_result.get("project_type", "unknown")
-    frontend = step0_result.get("frontend_framework") or "None"
-    backend = step0_result.get("backend_framework") or "None"
-
     discovered = step0_result.get("discovered_pages") or []
     pages_str = ", ".join(discovered) if discovered else "(none found)"
 
@@ -165,9 +161,6 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
         nodes_str = "(none)"
 
     return (
-        f"=== PROJECT CONTEXT ===\n"
-        f"Project type: {project_type}\n"
-        f"Frontend: {frontend} | Backend: {backend}\n\n"
         f"=== DISCOVERED PAGE FILES (from codebase) ===\n"
         f"{pages_str}\n\n"
         f"{root_section}"
