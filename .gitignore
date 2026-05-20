@@ -15,6 +15,7 @@ build/
 # Uploads and jobs (runtime data)
 backend/uploads/
 backend/jobs/
+runs/
 
 # Node
 node_modules/
