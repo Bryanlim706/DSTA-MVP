@@ -278,9 +278,18 @@ No `structural_edge` category — entry/exit paths are baked into each function'
 **Status: COMPLETE**
 **Phase: FCom setup**
 **Tools:** Python, pathlib, json/yaml/toml, LLM (AsyncAnthropic, prompt caching)
-**Input:** File tree + config file contents from uploaded zip
+
+**Inputs:**
+| Field | Source |
+|---|---|
+| `extract_to` (Path) | zip extracted by upload handler to `uploads/{job_id}/extracted/` |
+| `client` (AsyncAnthropic) | FastAPI app state, injected at startup |
+
+Step 0 reads the file tree and config file contents directly from disk — it does not receive any prior step result.
+
 **Logic:** Rule-based first — scans config files (package.json, requirements.txt, pyproject.toml, etc.), counts file extensions. LLM only called when file inspection is inconclusive.
-**Output:**
+
+**Output — stored at `job["step_results"]["step_0"]`:**
 ```json
 {
   "project_type": "full_stack_web_app",
@@ -301,7 +310,16 @@ No `structural_edge` category — entry/exit paths are baked into each function'
 ```
 Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing.
 
-**Test strategy design:** For `backend_api_only`, `primary` is always the HTTP-level integration test tool — never a unit test runner, which does not verify HTTP-level requirements. For `full_stack_web_app`, `primary` is Playwright E2E and `secondary` is the backend API test tool (for L3-only requirements not accessible via the UI). Implementation details in CLAUDE.md.
+**Output consumed by:**
+| Field(s) | Consumed by |
+|---|---|
+| `project_type`, `frontend_framework`, `backend_framework` | Step 2 (project context in LLM prompt), Step 3 (same) |
+| `discovered_pages` | Step 2 (node inventory), Step 3 (root node detection) |
+| `test_strategy` | Step 9 (test type selection — not yet built) |
+| `project_type`, `frontend_framework`, `backend_framework` | Step 4 (determines where to look for routes/models) |
+| Full result | Step 5 (strategy selection for static vs. dynamic crawl) |
+
+**Test strategy design:** For `backend_api_only`, `primary` is always the HTTP-level integration test tool — never a unit test runner. For `full_stack_web_app`, `primary` is Playwright E2E and `secondary` is the backend API test tool.
 
 **Known limitation:** Next.js, SvelteKit, Nuxt standalone (no separate backend service) are classified as `frontend_only`. Full re-classification to `full_stack_web_app` deferred to after Step 4 repo parsing.
 
@@ -311,32 +329,37 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 **Status: COMPLETE**
 **Phase: FCom setup — builds L1a (stated)**
 **Tools:** Python, LLM (AsyncAnthropic, prompt caching)
-**Input:** Requirements text provided by user + README (read directly from zip) + any uploaded specification documents
-**Function model:** Every extracted requirement is a **function** — a user-facing goal described in active voice ("User can log in"). Each function includes a `path: PathEntity[]` — an ordered traversal of UI entities the user visits to complete the goal.
-**PathEntity schema:**
+
+**Inputs:**
+| Field | Source |
+|---|---|
+| `requirements_text` (str) | `job["requirements_text"]` — user's typed requirements from upload form |
+| `extract_to` (Path) | `uploads/{job_id}/extracted/` — Step 1 reads README and spec docs directly from disk |
+| `client` (AsyncAnthropic) | FastAPI app state |
+
+Step 1 does NOT receive the Step 0 result. It reads the zip directory itself to find READMEs (depth ≤ 2) and spec docs (keyword-matched `.md/.rst/.txt`, MAX_DOCS=30, MAX_CHARS_PER_DOC=12000). Ignores tool config dirs (`.claude`, `.cursor`, `.github`, `.vscode`, `.idea`).
+
+**PathEntity schema (used in all path arrays Steps 1–3.5):**
 ```
-{ type: "node"|"element"|"edge", label: string, primary: boolean, ui_node?: string, from?: string, to?: string }
+{ type: "node"|"element"|"edge", label: str, primary: bool, ui_node?: str, from?: str, to?: str }
 ```
-`primary: true` = this entity is fundamentally asserted by this function (E() penalises its absence). `primary: false` = context node already asserted by another function.
-**Gate (positive framing):** Before extracting any item, test: "Does this text describe a goal a user can directly perform?" Rejects: backend subjects, quality attributes, automatic behaviors, system reactions ("X happens when/if Y"). Implemented as a positive test — LLMs ignore growing negative lists when priors are strong.
-**Vague flag:** If source text is too broad to build a specific path (e.g. "users can manage tasks"), set `vague: true` with a minimal single-node path. Step 3 decomposes vague functions via `unpacks` targeting.
-**Rule:** Only extract what is **explicitly stated**. No inference. Every item must include its verbatim source quote. Source quote verification uses whitespace-normalised comparison (anti-hallucination; newlines → spaces tolerated).
-**Tag:** `stated`
-**Output (step_results.step_1):**
+`primary: true` = entity is scored by E() if absent. `primary: false` = context only, already asserted by another function.
+
+**Output — stored at `job["step_results"]["step_1"]`:**
 ```json
 {
-  "project_summary": "A personal task and goal management web app where users create named categories and track goal rows with due dates, importance, and status.",
+  "project_summary": "2–3 sentence domain/purpose description of the app",
   "requirements": [
     {
       "req_id": "REQ-001",
       "description": "User can log in",
       "path": [
-        {"type": "edge",    "label": "navigate to login",  "primary": true, "from": null,         "to": "Login Page"},
-        {"type": "node",    "label": "Login Page",         "primary": true},
-        {"type": "element", "label": "email input",        "primary": true, "ui_node": "Login Page"},
-        {"type": "element", "label": "password input",     "primary": true, "ui_node": "Login Page"},
-        {"type": "element", "label": "login button",       "primary": true, "ui_node": "Login Page"},
-        {"type": "edge",    "label": "navigate to dashboard", "primary": true, "from": "Login Page", "to": "Dashboard"}
+        {"type": "edge",    "label": "navigate to login",     "primary": true,  "from": null,        "to": "Login Page"},
+        {"type": "node",    "label": "Login Page",             "primary": true},
+        {"type": "element", "label": "email input",           "primary": true,  "ui_node": "Login Page"},
+        {"type": "element", "label": "password input",        "primary": true,  "ui_node": "Login Page"},
+        {"type": "element", "label": "login button",          "primary": true,  "ui_node": "Login Page"},
+        {"type": "edge",    "label": "navigate to dashboard", "primary": true,  "from": "Login Page", "to": "Dashboard"}
       ],
       "vague": false,
       "source": "user_input",
@@ -358,47 +381,80 @@ Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritat
 }
 ```
 
+**Output consumed by:**
+| Field(s) | Consumed by |
+|---|---|
+| `requirements` (full array) | Step 2 as `step1_requirements` — descriptions, paths, req_ids, vague flags |
+| `requirements` (full array) | Step 3 as `step1_requirements` — same |
+| `project_summary` (str) | Step 3 as `project_summary` keyword arg |
+| `requirements[].req_id`, `requirements[].path`, `requirements[].vague` | Step 3.5 confirmation UI (pre-populates L1a table) |
+| `requirements` (after Step 3.5 confirmation) | Step 6 L1a → L2/L3 mapping |
+| `requirements[].path[].primary` entities | Step 6 E() scoring per entity |
+| `requirements` (after Step 3.5 confirmation) | Step 7 FCom formula (weights + E() scores) |
+| `requirements` (after Step 3.5 confirmation) | Step 8 AC generation |
+
 ---
 
 ### Step 2: Obvious Requirement Generator
 **Status: COMPLETE**
 **Phase: FCom setup — builds L1a (obvious)**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 0 (project_type, framework) + Step 1 (stated requirements with path arrays)
-**3-check deterministic prompt (graph connectivity gaps only):**
-- Check 1 — Build node list: extract nodes from Step 1 function path arrays + discovered page files (deduplicated, state-variant labels excluded)
-- Check 2 — Entry paths: for each node except home, is there a stated inbound navigation element? If NO → generate a navigation function with an edge (`primary: true, from: null`) + destination node (`primary: false`)
-- Check 3 — Exit paths: for each node, is there a stated way to leave it? If NO → generate a navigation function with a source node (`primary: false`) + exit edge (`primary: true, to: null`)
-**Never generate:** auth guards, session management, invocation controls for stated capabilities, observable outcomes, error messages, empty states, or anything phrased "System must X when Y."
-**Root node detection:** `_identify_root_node()` detects the home/root page by parsing nodes from Step 1 path arrays. Detected root injected as `=== ROOT / HOME PAGE ===` — LLM skips CHECK 2 for it.
-**Logic:** LLM reasons YES/NO per node per check, then outputs JSON functions with path arrays. Deterministic — only graph connectivity gaps.
-**Deduplication:** Step 1 stated functions passed with req_id prefix for reference.
-**Tag:** `obvious` | **Weight:** derives from priority (critical=4.0, high=3.0, medium=2.0, low=1.0) — same as Step 1
-**Output:**
+
+**Inputs:**
+| Field | Source |
+|---|---|
+| `step1_requirements` (list) | `job["step_results"]["step_1"]["requirements"]` — full requirement array |
+| `step0_result` (dict) | `job["step_results"]["step_0"]` — uses `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` |
+| `client` (AsyncAnthropic) | FastAPI app state |
+
+Step 2 derives its working data from these inputs via helper functions:
+- `_extract_nodes_from_paths(step1_requirements)` → node inventory (state-variant labels excluded)
+- `_extract_edges_from_paths(step1_requirements)` → edge inventory for CHECK 2/3
+- `_identify_root_node(step1_requirements, discovered_pages)` → root node (excluded from CHECK 2)
+
+**3-check logic (graph connectivity gaps only):**
+- Check 1 — Build node list from path arrays + discovered pages
+- Check 2 — For each non-root node: is there a stated inbound edge? If NO → generate entry navigation function
+- Check 3 — For each node: is there a stated outbound edge? If NO → generate exit navigation function
+
+**Output — stored at `job["step_results"]["step_2"]`:**
 ```json
-[
-  {
-    "req_id": "OBV-001",
-    "description": "User can navigate to Task List Page",
-    "path": [
-      {"type": "edge", "label": "navigate to task list", "primary": true, "from": null, "to": "Task List Page"},
-      {"type": "node", "label": "Task List Page", "primary": false}
-    ],
-    "source": "obvious",
-    "reasoning": "CHECK 2 — Task List Page has no stated inbound navigation element",
-    "tag": "obvious",
-    "depends_on": ["REQ-003"],
-    "priority": "high",
-    "weight": 3.0,
-    "testable": true,
-    "functional_area": "navigation"
-  }
-]
+{
+  "requirements": [
+    {
+      "req_id": "OBV-001",
+      "description": "User can navigate to Task List Page",
+      "path": [
+        {"type": "edge", "label": "navigation link", "primary": true, "from": null, "to": "Task List Page"},
+        {"type": "node", "label": "Task List Page", "primary": false}
+      ],
+      "source": "obvious",
+      "reasoning": "CHECK 2 — Task List Page has no stated inbound navigation",
+      "tag": "obvious",
+      "depends_on": ["REQ-003"],
+      "priority": "high",
+      "weight": 3.0,
+      "testable": true,
+      "functional_area": "navigation"
+    }
+  ],
+  "total_count": 3,
+  "llm_model": "claude-haiku-4-5-20251001",
+  "dropped_count": 0
+}
 ```
 
-**Combined L1a pool:** Step 1 (stated) + Step 2 (obvious) → forms the initial L1a before Step 3.5 confirmation.
+**Output consumed by:**
+| Field(s) | Consumed by |
+|---|---|
+| `requirements` (full array) | Step 3 as `step2_requirements` — descriptions and req_ids for dedup |
+| `requirements[].req_id` | Step 3 `depends_on` validation (valid_req_ids set) |
+| `requirements` | Step 3.5 confirmation UI (pre-populates L1a table, non-demotable) |
+| `requirements` (after Step 3.5 confirmation) | Step 6 L1a → L2/L3 mapping (same as Step 1 requirements) |
+| `requirements` (after Step 3.5 confirmation) | Step 7 FCom formula |
+| `requirements` (after Step 3.5 confirmation) | Step 8 AC generation |
 
-Note: Key accuracy step. Consider requirement dependencies and branching which will bias the score
+**Combined L1a pool:** Step 1 (stated) + Step 2 (obvious) → initial L1a before Step 3.5 confirmation. Step 2 items are pre-included and non-demotable in the confirmation UI.
 
 ---
 
@@ -406,80 +462,78 @@ Note: Key accuracy step. Consider requirement dependencies and branching which w
 **Status: COMPLETE**
 **Phase: FCom setup — builds L1b (and L1a candidates)**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 0 (project type) + Step 1 (functions + `project_summary`) + Step 2 (combined L1a pool)
-**Two-pass generation — each output is a complete function with traversal path:**
 
-**Pass 1 — SOP pattern-triggered functions**
-Fires only on nodes from Step 1 stated functions. Checks each node against the SOP pattern table:
+**Inputs:**
+| Field | Source |
+|---|---|
+| `step1_requirements` (list) | `job["step_results"]["step_1"]["requirements"]` — full array with descriptions, paths, vague flags, req_ids |
+| `step2_requirements` (list) | `job["step_results"]["step_2"]["requirements"]` — for dedup and valid req_id validation |
+| `step0_result` (dict) | `job["step_results"]["step_0"]` — uses `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` |
+| `project_summary` (str) | `job["step_results"]["step_1"]["project_summary"]` — passed as keyword arg |
+| `client` (AsyncAnthropic) | FastAPI app state |
+
+Step 3 user message is built from:
+- `project_type`, `frontend_framework`, `backend_framework` (project context)
+- `discovered_pages` (for root node detection via `_identify_root_node`)
+- `project_summary` (INF grounding)
+- Step 1 requirement descriptions + vague flags (SOP node inventory via `_extract_nodes_from_paths`)
+- Step 2 requirement descriptions (dedup reference)
+
+**Two-pass generation:**
+
+**Pass 1 — SOP pattern-triggered (category: "sop")**
+Fires on nodes from Step 1 path arrays. Pattern table:
 - List node → filter (~0.82), search (~0.80), sort (~0.68), edit item (~0.85), delete item (~0.82)
 - Detail node → edit (~0.85), delete (~0.82)
-- CRUD COMPLETION RULE: when CREATE is stated for an entity, edit and delete complete the CRUD cycle → always L1a (≥0.85 / ≥0.82)
+- CRUD COMPLETION RULE: when CREATE is stated for an entity, edit and delete always L1a (≥0.85 / ≥0.82)
 - Auth present → account management / profile page (~0.87)
-- Named changeable status field → cross-status overview page (~0.75), filter-by-status element (~0.82)
-- Temporal field (dates, deadlines) → time-scoped view / calendar view (~0.75)
-- Mutable records (edit/update stated) → audit / history page (~0.60)
-- User-configurable preferences stated → settings page (~0.82)
-- Time-sensitive deadlines or thresholds → notification surface (~0.65)
-- Multi-user / per-user data → user profile / identity page (~0.82)
+- Named changeable status → cross-status overview (~0.75), filter-by-status (~0.82)
+- Temporal field → time-scoped view (~0.75), overdue alert (~0.72)
+- Mutable records (edit/update stated) → audit / history (~0.60)
+- User-configurable preferences → settings page (~0.82)
+- Time-sensitive deadlines → notification surface (~0.65)
+- Multi-user data → user profile (~0.82)
 
-Vague unpack targeting: functions with `vague: true` in Step 1 are priority targets — apply ALL applicable patterns and set `unpacks: "<parent_req_id>"` on each child.
-
-**Pass 2 — INF domain inference**
-Read `project_summary` and all stated functions. Generate functions across 7 domain-completeness angles that Pass 1 did not cover:
-1. RECURRING USE — frequent/daily functions (status checks, monitoring)
-2. WORKFLOW COMPLETENESS — onboarding, getting-started, completion states
-3. DATA MANAGEMENT — bulk ops, export, import, archive, restore, history
-4. DOMAIN STANDARDS — what a comparable app always offers as standard
-5. DISCOVERABILITY + HELP — help page, onboarding tour, empty-state guidance
-6. USER CONTROL — settings, preferences, notification controls, customisation
-7. OVERVIEW + INSIGHT — dashboards, analytics, summary views
-
-Bold generation — generates at confidence 0.50–0.70 for genuine domain gaps; breadth over silence because this pass drives FA scoring.
+**Pass 2 — INF domain inference (category: "inf")**
+Grounding step first (understand app purpose/structure), then generates across 7 angles:
+1. RECURRING USE, 2. WORKFLOW COMPLETENESS, 3. DATA MANAGEMENT, 4. DOMAIN STANDARDS (exhaustive), 5. DISCOVERABILITY + HELP, 6. USER CONTROL, 7. OVERVIEW + INSIGHT
 
 **Confidence → placement:**
-- ≥ 0.80 → `placement: "l1a"` (promoted to FCom scoring pool at Step 3.5)
+- ≥ 0.80 → `placement: "l1a"`, strength: null
 - 0.60–0.79 → `placement: "l1b"`, strength: `strongly_implied`, weight: 3.0
 - 0.40–0.59 → `placement: "l1b"`, strength: `medium`, weight: 2.0
 - < 0.40 → `placement: "l1b"`, strength: `weak`, weight: 1.0
 
-**Path construction:** Every generated function includes a complete `path[]` with entry edge, body entities, and exit edge. New-page introductions: entry edge + destination node both `primary: true`; exit edge `primary: false`. Element functions: element(s) + submit edge `primary: true`, containing page `primary: false`. State-variant nodes always `primary: false`. No `structural_edge` category — entry/exit are baked into the function's path.
-
-**Tag:** `generated` | **Categories:** `"sop"` | `"inf"`
-**Output:**
-```json
-[
-  {
-    "req_id": "GEN-001",
-    "description": "User can view account information",
-    "path": [
-      {"type": "edge",    "label": "navigate to account",   "primary": true,  "from": "Dashboard",    "to": "Account Page"},
-      {"type": "node",    "label": "Account Page",           "primary": true},
-      {"type": "element", "label": "profile information",   "primary": true,  "ui_node": "Account Page"},
-      {"type": "element", "label": "change password form",  "primary": true,  "ui_node": "Account Page"},
-      {"type": "edge",    "label": "return to dashboard",   "primary": false, "from": "Account Page", "to": "Dashboard"}
-    ],
-    "source": "generated",
-    "tag": "generated",
-    "category": "sop",
-    "reasoning": "Auth pattern — login stated (REQ-001); no account management page in stated or obvious reqs",
-    "unpacks": null,
-    "depends_on": ["REQ-001"],
-    "confidence_score": 0.88,
-    "confidence_reason": "Login stated; account management is a standard paired function in authenticated apps",
-    "placement": "l1a",
-    "priority": "high",
-    "strength": null,
-    "weight": 3.0,
-    "testable": true,
-    "functional_area": "auth"
-  }
-]
-```
-
-**Step 3 result envelope:**
+**Output — stored at `job["step_results"]["step_3"]`:**
 ```json
 {
-  "requirements": [...],
+  "requirements": [
+    {
+      "req_id": "GEN-001",
+      "description": "User can view account information",
+      "path": [
+        {"type": "edge",    "label": "navigate to account",  "primary": true,  "from": "Dashboard",    "to": "Account Page"},
+        {"type": "node",    "label": "Account Page",          "primary": true},
+        {"type": "element", "label": "profile information",  "primary": true,  "ui_node": "Account Page"},
+        {"type": "element", "label": "change password form", "primary": true,  "ui_node": "Account Page"},
+        {"type": "edge",    "label": "return to dashboard",  "primary": false, "from": "Account Page", "to": "Dashboard"}
+      ],
+      "source": "generated",
+      "tag": "generated",
+      "category": "sop",
+      "reasoning": "Auth pattern — login stated (REQ-001); no account management page in stated or obvious reqs",
+      "unpacks": null,
+      "depends_on": ["REQ-001"],
+      "confidence_score": 0.88,
+      "confidence_reason": "Login stated; account management is a standard paired function in authenticated apps",
+      "placement": "l1a",
+      "priority": "high",
+      "strength": null,
+      "weight": 3.0,
+      "testable": true,
+      "functional_area": "auth"
+    }
+  ],
   "total_count": 12,
   "sop_count": 5,
   "inference_count": 7,
@@ -489,30 +543,76 @@ Bold generation — generates at confidence 0.50–0.70 for genuine domain gaps;
 }
 ```
 
+**Output consumed by:**
+| Field(s) | Consumed by |
+|---|---|
+| `requirements` where `placement == "l1a"` | Step 3.5 UI — pre-included in L1a section, demotable |
+| `requirements` where `placement == "l1b"` | Step 3.5 UI — shown in Advisory section, promotable |
+| `requirements[].unpacks` | Step 3.5 — vague parent auto-replace logic |
+| `requirements` promoted to L1a at Step 3.5 | Step 6 L1a → L2/L3 mapping |
+| `requirements` (all, both placements) | Step 7 FA formula (L1b items scored for Functional Appropriateness) |
+| `requirements` (L1a after promotion) | Step 8 AC generation |
+
 ---
 
 ### Step 3.5: Human Requirement Confirmation *(optional)*
 **Status: COMPLETE**
 **Phase: FCom setup — locks L1a**
-**Tools:** React UI, FastAPI endpoint, async job queue
-**Input:** Step 1 (stated functions) + Step 2 (obvious functions) + Step 3 (L1b with placement and weights)
-**Architecture:** Pipeline pauses with status `waiting_for_confirmation`. Resumes when user submits confirmed list.
+**Tools:** React UI (`ConfirmationTable.tsx`), FastAPI `POST /jobs/{job_id}/confirm`
 
-**User can:**
-- Confirm, edit, delete, reprioritise any L1a function
-- Adjust priority weights (critical=4, high=3, medium=2, low=1)
-- Promote L1b functions to L1a (adds them to FCom and FCor scoring)
-- Add entirely new functions
+**Inputs — read from job JSON by the confirm endpoint:**
+| Field | Source |
+|---|---|
+| `step_results.step_1.requirements` | used to compute `step1_ids` for `deleted_count` |
+| `step_results.step_2.requirements` | used to compute `step2_ids` for `deleted_count` |
+| HTTP body `requirements` (list of `ConfirmedRequirement`) | user's finalised L1a list, submitted from the frontend |
+| HTTP body `skipped` (bool) | true if user clicked Skip instead of Confirm |
 
-**Display — three sections:**
-1. **L1a Section** — stated + obvious pre-included; Step 3 `placement: "l1a"` candidates also pre-included but demotable. Each row shows req_id, description, tag badge, priority dropdown. Expandable popdown reveals traversal path (PathDisplay), reasoning, and confidence detail.
-2. **L1b Advisory Section** — Step 3 `placement: "l1b"` items, each promotable to L1a. Expandable popdown shows path, reasoning, confidence.
-3. **Add Function** — inline form producing `CUSTOM-001` IDs.
+**`ConfirmedRequirement` schema (Pydantic, stored as-is):**
+```
+req_id, description, path: list[PathEntity], vague: bool, tag, priority, weight,
+functional_area, testable, source, promoted: bool, unpacks: str|null
+```
 
-**Vague auto-replace:** Vague Step 1 functions (`vague: true`) are excluded from the initial L1a state. Any Step 3 functions with `unpacks: "REQ-xxx"` pointing to a vague parent are auto-included in L1a Section, replacing the parent. A notice shows "N vague stated function(s) were auto-replaced by their Step 3 children."
+**Output — stored at `job["step_results"]["step_3_5"]`; status → `"confirmed"`, `current_step` → 4:**
+```json
+{
+  "confirmed_requirements": [
+    {
+      "req_id": "REQ-001",
+      "description": "User can log in",
+      "path": [...],
+      "vague": false,
+      "tag": "stated",
+      "priority": "high",
+      "weight": 3.0,
+      "functional_area": "auth",
+      "testable": true,
+      "source": "stated",
+      "promoted": false,
+      "unpacks": null
+    }
+  ],
+  "confirmed_at": "2025-05-20T10:00:00Z",
+  "skipped": false,
+  "l1a_count": 12,
+  "promoted_count": 2,
+  "deleted_count": 1,
+  "added_count": 0
+}
+```
 
-**After confirmation:** L1a is locked. Pipeline resumes.
-**If skipped:** All stated (non-vague) + obvious functions treated as L1a at default weights. L1b remains advisory.
+**Output consumed by:**
+| Field(s) | Consumed by |
+|---|---|
+| `confirmed_requirements` (full array) | **Step 6** — authoritative L1a input for L1 → L2/L3 mapping |
+| `confirmed_requirements[].path[].primary` entities | **Step 6** — E() scoring per entity |
+| `confirmed_requirements[].weight` | **Step 7** — FCom formula denominator (`∑ L1Cx`) |
+| `confirmed_requirements` | **Step 8** — AC generation (only requirements in S = L1a ∩ L3) |
+| `confirmed_requirements` | **Step 9** — test case generation |
+| `confirmed_requirements[].req_id` | **Step 13** — FCor formula (links AC results back to requirement) |
+
+**If skipped:** `confirmed_requirements` = all Step 1 stated (non-vague) + all Step 2 obvious, at default weights. Step 3 L1b remains advisory only.
 
 ---
 
