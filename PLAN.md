@@ -558,7 +558,7 @@ Grounding step first (understand app purpose/structure), then generates across 7
 
 ---
 
-### Step 3.5: Human Requirement Confirmation + Data Consolidation *(optional)*
+### Step 3.5: Human Requirement Confirmation + Data Consolidation
 **Status: COMPLETE**
 **Phase: FCom setup — locks L1a and produces single milestone-1 output for all downstream steps**
 **Tools:** React UI (`ConfirmationTable.tsx`), FastAPI `POST /jobs/{job_id}/confirm`
@@ -669,7 +669,63 @@ depends_on: list[str], source_quote: str|null
 
 **Steps 1 and 2 outputs are fully subsumed** by `confirmed_requirements` for all downstream purposes. Steps 4+ read only `step_3_5` for all milestone-1 data. Steps 0–3 individual results remain in job JSON as internal pipeline state (Steps 15–16 may read them for reporting).
 
-**Excluded from Step 3.5:** Processing metadata from Steps 0–3 (confidence/reasoning for Step 0 classification, llm_used, llm_model, total_count, dropped_count, sop_count, inference_count, docs_used, per-item reasoning/category/placement for confirmed items) — their job ends at confirmation and are not needed by scoring steps.
+**Fields dropped at Step 3.5 — not needed by any downstream step:**
+
+*Step 0 — dropped from `project_context`:*
+| Field | Why dropped |
+|---|---|
+| `confidence` | Classification confidence ("high"/"medium"/"low") — internal to Step 0's decision; architectural identity is locked |
+| `reasoning` | Explains why Step 0 chose this project type — internal to classification |
+| `config_files_found` | Which config files Step 0 read — internal to classification |
+| `llm_used` | Whether LLM was called for classification — processing metadata |
+| `llm_model` | Which model Step 0 used — processing metadata |
+
+*Step 1 — dropped envelope fields:*
+| Field | Why dropped |
+|---|---|
+| `total_count` | Count of extracted requirements — UI display only |
+| `docs_used` | Which docs were read — UI display only |
+| `truncated_docs` | Which docs were truncated — UI display only |
+| `excluded_docs_count` | How many docs hit the MAX_DOCS cap — UI display only |
+| `llm_model` | Processing metadata |
+| `dropped_count` | How many requirements failed validation — processing metadata |
+| `error` | Step 1 error string if extraction failed — processing metadata |
+
+*Step 1 — per-requirement fields: none dropped.* All fields (`req_id`, `description`, `path`, `vague`, `source`, `source_quote`, `tag`, `priority`, `weight`, `testable`, `functional_area`) are preserved in `confirmed_requirements`.
+
+*Step 2 — dropped envelope fields:*
+| Field | Why dropped |
+|---|---|
+| `total_count` | Processing metadata |
+| `llm_model` | Processing metadata |
+| `dropped_count` | Processing metadata |
+
+*Step 2 — dropped per-requirement fields:*
+| Field | Why dropped |
+|---|---|
+| `reasoning` | "CHECK 2 — ..." / "CHECK 3 — ..." text — explains why the gap was generated; only needed in Step 3.5 UI |
+
+*Step 3 — dropped envelope fields:*
+| Field | Why dropped |
+|---|---|
+| `total_count` | Processing metadata |
+| `sop_count` | Processing metadata |
+| `inference_count` | Processing metadata |
+| `llm_model` | Processing metadata |
+| `dropped_count` | Processing metadata |
+| `error` | Processing metadata |
+
+*Step 3 — dropped per-requirement fields for promoted l1a items (GEN-XXX in `confirmed_requirements`):*
+| Field | Why dropped |
+|---|---|
+| `category` | "sop" or "inf" — only needed in Step 3.5 UI for display |
+| `reasoning` | Why the function was generated — only needed in Step 3.5 UI |
+| `confidence_score` | Raw 0.0–1.0 float — job done; produced `placement` + `weight` |
+| `confidence_reason` | Explanation of confidence — only needed in Step 3.5 UI |
+| `placement` | "l1a" — redundant once confirmed |
+| `strength` | null for l1a items; weight already derived |
+
+*Step 3 — l1b items (`advisory_requirements`): no fields dropped.* Copied as-is with full schema including `path[]`, `strength`, `weight`, `confidence_score`, `category`, `reasoning`, `confidence_reason`, `depends_on`.
 
 **If skipped:** `confirmed_requirements` = all Step 1 stated (non-vague) + all Step 2 obvious at default weights; `advisory_requirements` = all Step 3 l1b items; `project_context` and `project_summary` still populated.
 
