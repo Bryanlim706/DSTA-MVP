@@ -63,6 +63,7 @@ function IncludedRow({
   req,
   isGen,
   isL1aGen,
+  isVagueChild,
   category,
   onPriority,
   onDemote,
@@ -71,6 +72,7 @@ function IncludedRow({
   req: ConfirmedRequirement
   isGen: boolean
   isL1aGen: boolean
+  isVagueChild: boolean
   category?: 'sop' | 'inf'
   onPriority: (id: string, p: ConfirmedRequirement['priority']) => void
   onDemote?: (id: string) => void
@@ -89,6 +91,9 @@ function IncludedRow({
           {req.description}
           {req.vague && (
             <span className="ml-1 inline-block text-[10px] bg-orange-50 text-orange-600 px-1 py-0.5 rounded">vague</span>
+          )}
+          {isVagueChild && (
+            <span className="ml-1 inline-block text-[10px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded">vague child</span>
           )}
           {isGen && category && (
             <span className={`ml-1 inline-block text-[10px] font-semibold px-1 py-0.5 rounded ${category === 'sop' ? 'bg-blue-50 text-blue-500' : 'bg-purple-50 text-purple-500'}`}>
@@ -206,12 +211,19 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
     step2Reqs.forEach(r => m.set(r.req_id, toConfirmed(r)))
     // Step 3 l1a — includes children of vague parents (auto-replacement)
     step3L1a.forEach(r => m.set(r.req_id, toConfirmed(r, false)))
+    // Step 3 l1b children that unpack a vague parent — surface all for review
+    step3L1b
+      .filter(r => r.unpacks != null && vagueIds.has(r.unpacks))
+      .forEach(r => m.set(r.req_id, toConfirmed(r, false)))
     return m
   })
 
   const [advisory, setAdvisory] = useState<Map<string, Step3Requirement>>(() => {
     const m = new Map<string, Step3Requirement>()
-    step3L1b.forEach(r => m.set(r.req_id, r))
+    // Exclude l1b items already promoted to included via vague-child rule
+    step3L1b
+      .filter(r => !(r.unpacks != null && vagueIds.has(r.unpacks)))
+      .forEach(r => m.set(r.req_id, r))
     return m
   })
 
@@ -235,7 +247,7 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
   }
 
   function demoteToAdvisory(reqId: string) {
-    const req = step3L1a.find(r => r.req_id === reqId)
+    const req = step3Reqs.find(r => r.req_id === reqId)
     if (!req) return
     setIncluded(prev => { const next = new Map(prev); next.delete(reqId); return next })
     setAdvisory(prev => new Map(prev).set(reqId, req))
@@ -305,7 +317,7 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
           </p>
           {vagueIds.size > 0 && (
             <p className="text-xs text-orange-600 mt-1">
-              {vagueIds.size} vague stated function{vagueIds.size > 1 ? 's were' : ' was'} auto-replaced by their Step 3 children.
+              {vagueIds.size} vague stated function{vagueIds.size > 1 ? 's were' : ' was'} auto-replaced by their Step 3 children — all children shown in L1a for review.
             </p>
           )}
           <p className="text-[10px] text-gray-300 mt-1 font-mono">{job.job_id}</p>
@@ -336,13 +348,15 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
               <tbody>
                 {orderedIncluded.map(req => {
                   const step3Source = step3Reqs.find(r => r.req_id === req.req_id)
-                  const isL1aGen = req.tag === 'generated' && step3L1a.some(r => r.req_id === req.req_id)
+                  const isL1aGen = req.tag === 'generated' && step3Reqs.some(r => r.req_id === req.req_id)
+                  const isVagueChild = req.tag === 'generated' && req.unpacks != null && vagueIds.has(req.unpacks)
                   return (
                     <IncludedRow
                       key={req.req_id}
                       req={req}
                       isGen={req.tag === 'generated'}
                       isL1aGen={isL1aGen}
+                      isVagueChild={isVagueChild}
                       category={step3Source?.category}
                       onPriority={updatePriority}
                       onDemote={isL1aGen ? demoteToAdvisory : undefined}

@@ -80,6 +80,9 @@ PRIMARY ENTITY RULES:
 VAGUE REQUIREMENTS:
 If the text is too broad to construct a specific path (e.g. "users can manage their tasks"), set vague: true and use a minimal path with one node only. Step 3 will decompose it.
 
+SCREENSHOT PAGES:
+A markdown section heading (`###`) immediately followed by a screenshot image (`![...](...)`), with no other requirement text, documents that a page exists. Extract it as a vague function: "User can access [Page Name]" with `vague: true` and `source_quote` set to the heading text (e.g. "Welcome Page"). Extract one function per page heading. Do NOT extract the image line itself as the quote.
+
 ---
 
 PATH EXAMPLES

@@ -315,6 +315,8 @@ Step 0 reads the file tree and config file contents directly from disk — it do
 ```
 Note: `primary_language` is not in Step 0 output. Step 4 produces the authoritative `languages` array from source parsing.
 
+`discovered_pages` is populated by `_discover_pages()`: HTML files in `templates/`/`views/`; HTML at root/static dirs; `.tsx/.jsx/.vue/.svelte` in `pages/`/`screens/`; SSR template engine files (`.blade.php`, `.erb`, `.cshtml`, `.ejs`, etc. from `_TEMPLATE_ENGINE_EXTS`) in `views/`/`templates/`; Android `*Activity.java`/`*Activity.kt` files anywhere.
+
 **Output consumed by:**
 | Field(s) | Consumed by |
 |---|---|
@@ -550,7 +552,8 @@ Grounding step first (understand app purpose/structure), then generates across 7
 | Field(s) | Consumed by |
 |---|---|
 | `requirements` where `placement == "l1a"` | Step 3.5 UI — pre-included in L1a section, demotable |
-| `requirements` where `placement == "l1b"` | Step 3.5 UI — shown in Advisory section, promotable |
+| `requirements` where `placement == "l1b"` AND `unpacks` targets a vague Step 1 parent | Step 3.5 UI — promoted to L1a section alongside l1a items, tagged "vague child", demotable |
+| `requirements` where `placement == "l1b"` AND no vague `unpacks` | Step 3.5 UI — shown in Advisory section, promotable |
 | `requirements[].unpacks` | Step 3.5 — vague parent auto-replace logic |
 | `requirements` where `placement == "l1a"` | Step 3.5 confirm endpoint — merged into `confirmed_requirements` |
 | `requirements` where `placement == "l1b"` | Step 3.5 confirm endpoint — copied as `advisory_requirements` |

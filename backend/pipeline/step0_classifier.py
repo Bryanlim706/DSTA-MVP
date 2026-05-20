@@ -217,6 +217,18 @@ def _discover_pages(file_tree: list[str], project_type: str, frontend_fw: str | 
                 seen.add(filename)
                 pages.append(filename)
 
+        # SSR: template engine files (blade.php, erb, cshtml, etc.) in views/ or templates/
+        elif any(filename.endswith(ext) for ext in _TEMPLATE_ENGINE_EXTS) and any(p in _VIEW_DIRS for p in parts[:-1]):
+            if filename not in seen:
+                seen.add(filename)
+                pages.append(filename)
+
+        # Android: Activity files are screens
+        elif filename.endswith("Activity.java") or filename.endswith("Activity.kt"):
+            if filename not in seen:
+                seen.add(filename)
+                pages.append(filename)
+
     return pages
 
 
