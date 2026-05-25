@@ -109,7 +109,7 @@ async def confirm_requirements(job_id: str, body: ConfirmRequest):
     # Advisory requirements: Step 3 l1b items not promoted to l1a
     advisory_requirements = [
         r for r in step3.get("requirements", [])
-        if r.get("placement") == "l1b"
+        if r.get("placement") == "l1b" and r["req_id"] not in confirmed_ids
     ]
 
     # Project context passthrough from Step 0

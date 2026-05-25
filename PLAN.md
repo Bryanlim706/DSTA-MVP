@@ -470,7 +470,6 @@ Step 2 derives its working data from these inputs via helper functions:
 | `requirements` (after Step 3.5 confirmation) | Step 7 FCom formula |
 | `requirements` (after Step 3.5 confirmation) | Step 8 AC generation |
 
-**Combined L1a pool:** Step 1 (stated) + Step 2 (obvious) → initial L1a before Step 3.5 confirmation. Step 2 items are pre-included and non-demotable in the confirmation UI.
 
 ---
 
@@ -740,7 +739,7 @@ depends_on: list[str], source_quote: str|null
 
 *Step 3 — l1b items (`advisory_requirements`): no fields dropped.* Copied as-is with full schema including `path[]`, `strength`, `weight`, `confidence_score`, `category`, `reasoning`, `confidence_reason`, `depends_on`.
 
-**If skipped:** `confirmed_requirements` = all Step 1 stated (non-vague) + all Step 2 obvious at default weights; `advisory_requirements` = all Step 3 l1b items; `project_context` and `project_summary` still populated.
+**If skipped:** `confirmed_requirements` = all Step 1 stated (non-vague) + all Step 2 obvious at default weights; `advisory_requirements` = all Step 3 l1b items; `project_context` and `project_summary` still populated. The skip logic is frontend-driven — ConfirmationTable pre-populates the HTTP body with only stated+obvious items; the backend stores `skipped: true` but applies no special branching.
 
 ---
 
