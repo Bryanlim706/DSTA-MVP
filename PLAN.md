@@ -1033,14 +1033,81 @@ l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys_by_
     ],
     "advisory": {
       "missing_l1b": [
-        { "req_id": "L1B-002", "description": "User can bulk-delete tasks", "e_score": 0.0, "strength": "weak" }
+        {
+          "req_id": "L1B-002",
+          "description": "User can bulk-delete tasks",
+          "e_score": 0.0,
+          "strength": "weak",
+          "advisory_type": "normative_gap",
+          "note": "Type A — implied by domain pattern (Step 3), not found in positive inventory"
+        }
       ]
     }
   }
 }
 ```
 
+`advisory_type: "normative_gap"` marks Type A advisories (L1b gaps from Step 7). Step 7.5 produces `advisory_type: "positive_grounded"` (Type B). Both are displayed together in the dashboard under FA advisory, clearly labelled by type.
+```
+
 **Dashboard checkpoint:** FCom numeric + FA numeric + all advisories displayed together in the coverage view. First deliverable milestone — no test execution required.
+
+---
+
+### Step 7.5: Positive-Grounded FA Advisor
+**Phase: FA advisory — post-codebase improvement suggestions**
+**Status: NOT YET DESIGNED**
+**Tools:** Python, LLM (AsyncAnthropic)
+**Input:**
+- Step 4 result: `api_endpoints`, `database_models`, `frontend_routes`, `languages` — what the codebase actually contains
+- Step 5 result: per-page element inventory — what the running app exposes
+- `step_3_5.confirmed_requirements` (L1a) — stated purpose and domain context
+- `step_3_5.advisory_requirements` (L1b) — Step 3's pre-codebase implied suggestions, used as dedup reference
+- `step_3_5.project_summary` — domain context for LLM
+
+**Why this step exists — epistemics of two advisory types:**
+
+Step 7's FA advisory (Type A) surfaces L1b items that scored low E() against the positive inventory. These are normative-grounded: "your app is missing something the domain implied it should have." But Step 3 generated L1b items *before seeing the codebase* — its SOP patterns and INF domain inference operated on requirement text and project type only.
+
+This step generates Type B advisory: *positive-grounded* improvement suggestions derived from what the codebase actually contains. After Step 4 reveals real database models, endpoint patterns, and data relationships, an LLM can make suggestions that are specific to this codebase's actual structure — things Step 3 could not predict.
+
+**Example of what Type A vs Type B looks like in practice:**
+
+Type A (Step 7, normative-grounded): "User can filter tasks by status — this is a standard pattern for apps with a named status field (Step 3 confidence 0.82). Not found in codebase."
+
+Type B (Step 7.5, positive-grounded): "Your schema has `team_id` on the Task model and a User model with a team relationship. Consider adding a team-scoped task view or assignee filter — this would extend your stated task management requirements into multi-user workflows that the data model already supports."
+
+**Logic:**
+
+1. LLM is given the positive inventory (Step 4 models/endpoints, Step 5 pages) alongside the L1a confirmed requirements and project summary.
+2. Grounding step first: understand what this app actually does, what data it manages, what patterns are already established in the code.
+3. Generate improvement suggestions specifically grounded in the positive inventory — only suggest features that are natural extensions of what already exists in the schema or endpoint structure.
+4. Deduplicate against Step 3 L1b items — do not re-surface suggestions that Step 3 already generated (those are Type A; this step adds Type B only).
+5. Each suggestion includes: what feature to add, which part of the positive inventory it builds on (specific model/endpoint/page), and why it would improve functional appropriateness.
+
+**Output — stored at `job["step_results"]["step_7_5"]`:**
+```json
+{
+  "suggestions": [
+    {
+      "suggestion_id": "FA-POS-001",
+      "description": "User can view tasks assigned to team members",
+      "grounded_in": {
+        "models": ["Task", "User"],
+        "endpoints": ["GET /api/tasks"],
+        "rationale": "Task model has team_id and assigned_to fields; current task list endpoint has no team-scoped view"
+      },
+      "l1a_connection": "REQ-003 (User can manage tasks) — extends the existing task domain into multi-user scope",
+      "priority": "medium"
+    }
+  ],
+  "total_count": 4
+}
+```
+
+**Display:** Shown in the dashboard alongside Step 7's Type A FA advisory (L1b gap items). Clearly labelled as "Codebase-grounded suggestions" to distinguish from "Implied feature gaps." Sorted by specificity of grounding — suggestions tied to multiple concrete models/endpoints first.
+
+**Relationship to Step 3:** Step 3 is pre-codebase inference (domain patterns → implied requirements). Step 7.5 is post-codebase inference (actual structure → improvement suggestions). Together they form the complete FA advisory surface: what the domain implied the app should have (Type A) plus what the app's own structure suggests it could do (Type B).
 
 ---
 
