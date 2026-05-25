@@ -204,7 +204,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar stage={stage} currentStep={job?.current_step} />
+      <Sidebar stage={stage} currentStep={job?.current_step} jobStatus={job?.status} />
       <main className="flex-1 overflow-y-auto">
         {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
         {stage === 'loading' && <LoadingView job={job} />}

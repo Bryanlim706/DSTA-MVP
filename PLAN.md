@@ -820,66 +820,127 @@ Exact fields per edge:
 
 ---
 
-### Step 5: UI/API Inventory Generator (L2)
-**Phase: FCom — builds L2**
-**Tools:** Tree-sitter (static), Playwright (dynamic), LLM (summarization), Python
-**Input:** Uploaded zip + `step_3_5.project_context` (for `project_type`, `test_strategy`, `discovered_pages` — determines static vs dynamic crawl strategy)
+### Step 5: App Crawler — L2 Element Inventory
+**Phase: FCom — builds L2 raw element inventory**
+**Tools:** Playwright (dynamic), Tree-sitter (static fallback), Python
+**Input:**
+- `step_3_5.project_context` (`project_type`, `test_strategy`, `discovered_pages`) — crawl strategy selection
+- Step 4 result: `frontend_routes` (crawl seed list), `important_files` (static fallback scope)
 
-**Three-pass process:**
-1. **Static analysis (Tree-sitter):** Extracts raw UI elements — routes, pages, buttons, forms, links, input fields, event handlers, API calls
-2. **Dynamic analysis (Playwright):** Crawls running app — discovers visible pages, clickable buttons, accessible forms, nav paths, modals, error messages. Extracts real CSS selectors and data-testid attributes.
-3. **LLM summarization:** Takes raw elements from passes 1 and 2 and groups them into named user-facing functions. Without this pass, Step 5 outputs "Email input, Password input, Login button" but cannot identify these as "User can log in." The LLM converts low-level elements → interpretable named functions, making Step 6 mapping significantly more accurate.
+**Why no LLM summarisation here:**
+L1a requirements already contain `path: PathEntity[]` — the ordered traversal specifying exactly which pages, elements, and edges each requirement asserts. Those path entities ARE the L2 specification. Step 5 does not re-invent named functions from raw elements (that is what Step 1 already did). Step 5 only collects what the running app actually has; Step 6 then matches L1a path entities against it.
 
-**Output:**
+**Two-pass process:**
+
+1. **Dynamic pass (Playwright):** Boot the app. Visit each route from Step 4 `frontend_routes`. For each page, record:
+   - Page title / primary heading
+   - All visible interactive elements: inputs (type + label), buttons (text/label), links (text + href), selects, checkboxes, textareas
+   - CSS selectors and `data-testid` attributes for each element
+   - Outbound navigation links visible on the page
+   - Network requests observed during page load (XHR/fetch) — API endpoints triggered passively
+   - Whether the page was accessible or blocked (auth-gated, 404, redirect)
+
+2. **Static fallback (Tree-sitter):** For routes Playwright could not visit (auth-gated, requires form preconditions), run Tree-sitter on the corresponding source files from Step 4 `important_files`. Extract: JSX component declarations, `<input>`, `<button>`, `<form>` elements, route-level API call sites (fetch/axios calls). Marked `discovered_by: "static_fallback"`.
+
+**Output — stored at `job["step_results"]["step_5"]`:**
 ```json
-[
-  {
-    "function_id": "L2-001",
-    "function": "User can log in",
-    "route": "/login",
-    "ui_evidence": ["Email input", "Password input", "Login button"],
-    "api_calls": ["POST /api/login"],
-    "selectors": {
-      "email_input": "[data-testid='email-input']",
-      "password_input": "[data-testid='password-input']",
-      "submit_button": "[data-testid='login-button']"
-    },
-    "discovered_by": "static"
-  }
-]
+{
+  "pages": [
+    {
+      "route": "/login",
+      "title": "Login",
+      "discovered_by": "playwright",
+      "accessible": true,
+      "elements": [
+        { "type": "input",  "subtype": "email",    "label": "Email address", "selector": "input[type='email']",    "visible": true },
+        { "type": "input",  "subtype": "password", "label": "Password",      "selector": "input[type='password']", "visible": true },
+        { "type": "button", "subtype": "submit",   "label": "Log in",        "selector": "button[type='submit']",  "visible": true }
+      ],
+      "outbound_links": ["/register", "/forgot-password"],
+      "api_calls_observed": ["POST /api/auth/login"]
+    }
+  ],
+  "unvisitable_routes": [
+    { "route": "/dashboard", "reason": "auth_required", "discovered_by": "static_fallback" }
+  ]
+}
 ```
 
-**Key value:** Dynamic crawl catches features in code not accessible in the UI. LLM summarization makes L2 functions mappable. Selectors feed directly into Step 9 test generation.
+**Key value:**
+- Playwright gives ground-truth of what is rendered and interactive at runtime — not just what is declared in source
+- Static fallback prevents auth-gated pages from being entirely invisible
+- Selectors feed Step 9 test generation, now organised per page/route (Step 9 looks up `/login` selectors for requirements whose path visits "Login Page")
+- `api_calls_observed` cross-checks and supplements Step 4's static endpoint extraction
 
 ---
 
-### Step 6: Requirement-to-UI/API/Code Mapper
-**Phase: FCom — cross-links L1 → L2, L3**
-**Tools:** Tree-sitter, LLM (AsyncAnthropic), JSON traceability matrix
-**Input:** `step_3_5.confirmed_requirements` (L1a) + `step_3_5.advisory_requirements` (L1b) + Step 5 (L2) + Step 4 (L3 skeleton)
-**Logic:** Maps each L1a and L1b requirement → L2 named functions → API endpoints → backend functions → database models. Produces E() score for each L1a item.
+### Step 6: Requirement → L2/L3 Entity Mapper
+**Phase: FCom — computes E() per requirement**
+**Tools:** Python, LLM (AsyncAnthropic — fuzzy entity label matching only)
+**Input:**
+- `step_3_5.confirmed_requirements` (L1a, each with `path: PathEntity[]`)
+- `step_3_5.advisory_requirements` (L1b, each with `path: PathEntity[]`)
+- Step 5 result: per-page element inventory (`pages[]`, `unvisitable_routes[]`)
+- Step 4 result: `api_endpoints`, `frontend_routes`
+
+**Matching target — path entities, not requirement descriptions:**
+L1a requirements carry `path: PathEntity[]` specifying every page, UI element, and navigation edge the requirement asserts. These path entities are the unit of L2/L3 matching — not the requirement's top-level description. Step 5 does not provide named functions to match against; it provides per-page element lists. Step 6 matches path entity labels against those lists.
+
+**Per-requirement algorithm:**
+
+For each L1a (and L1b) requirement, process each entity in `path[]`:
+
+| Entity type | L2 check | L3 check |
+|---|---|---|
+| `node` (page/screen) | Find matching route in Step 5 `pages[]` by label similarity | Route exists in Step 4 `frontend_routes` (already confirmed by Step 5 visit) |
+| `element` (button/input/etc.) | On the matched node's page, find matching element in Step 5 `elements[]` by label/type/subtype | n/a (elements are L2-only) |
+| `edge` with implied API call | Outbound link or navigation confirmed in Step 5 | Match method+path against Step 4 `api_endpoints` |
+| `edge` (navigation only) | from→to link exists in Step 5 `outbound_links` of the source page | n/a |
+
+**E() per entity:**
+| Condition | E() |
+|---|---|
+| L2 present AND L3 present | 1.0 |
+| L3 only (in Step 4, not found by Step 5) | 0.5 |
+| L2 only (in Step 5, no matching L3 endpoint) | 0.4 |
+| Neither | 0.0 |
+
+**E() per requirement:** `0.7 × avg(primary entity E()) + 0.3 × avg(secondary entity E())`. If no secondary entities, α = 1.0 (all weight on primary).
+
+**LLM role:** Fuzzy entity label matching only — called once per requirement with the requirement's path entities and the relevant Step 5 page's element list. Returns a mapping `{entity_label → matched_selector}`. Not used for grouping, description generation, or scoring decisions.
+
 **Unlinked detection:**
 ```python
-l2_unlinked = set(step5_all_ids) - set(step6_matched_l2_ids)
-l3_unlinked = set(step4_endpoint_ids) - set(step6_matched_l3_ids)
+# Routes Playwright visited where no L1a path[] node entity was matched to them
+l2_unlinked_routes = set(step5_accessible_routes) - set(matched_routes_by_l1a)
+
+# Step 4 endpoints not implied by any L1a path[] edge entity
+l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys)
 ```
-**Output:**
+
+**Output — stored at `job["step_results"]["step_6"]`:**
 ```json
 {
   "mapped": [
     {
       "req_id": "REQ-001",
       "description": "User can log in",
-      "l2_match": { "function_id": "L2-001", "confidence": "high" },
-      "l3_match": { "endpoint": "POST /api/login", "handler": "login_user", "file": "backend/routes/auth.py" },
-      "e_score": 1.0
+      "e_score": 1.0,
+      "entity_results": [
+        { "label": "Login Page",            "type": "node",    "primary": true,  "l2_present": true,  "l2_route": "/login",                  "l3_present": null, "e": 1.0 },
+        { "label": "email input",           "type": "element", "primary": true,  "l2_present": true,  "selector": "input[type='email']",     "l3_present": null, "e": 1.0 },
+        { "label": "password input",        "type": "element", "primary": true,  "l2_present": true,  "selector": "input[type='password']",  "l3_present": null, "e": 1.0 },
+        { "label": "login button",          "type": "element", "primary": true,  "l2_present": true,  "selector": "button[type='submit']",   "l3_present": null, "e": 1.0 },
+        { "label": "navigate to dashboard", "type": "edge",    "primary": true,  "l2_present": true,  "l3_present": true,
+          "matched_endpoint": { "method": "POST", "path": "/api/auth/login", "handler": "login", "file": "routes/auth.py" }, "e": 1.0 }
+      ]
     }
   ],
   "unlinked_l2": [
-    { "function_id": "L2-007", "function": "Admin panel", "route": "/admin", "note": "No requirement points to this" }
+    { "route": "/admin", "title": "Admin Panel", "note": "No L1a requirement's path[] visits this route" }
   ],
   "unlinked_l3": [
-    { "endpoint": "DELETE /api/users/:id", "handler": "delete_user", "note": "No requirement points to this" }
+    { "method": "DELETE", "path": "/api/users/:id", "handler": "delete_user", "file": "routes/users.py", "note": "No L1a requirement implies this endpoint" }
   ]
 }
 ```
@@ -889,7 +950,7 @@ l3_unlinked = set(step4_endpoint_ids) - set(step6_matched_l3_ids)
 ### Step 7: Functional Completeness + Appropriateness Scorer
 **Phase: FCom — numeric scoring**
 **Tools:** Python (formula only — no LLM for numeric scoring)
-**Input:** Step 6 (traceability matrix with E() scores) + Step 1+2 (L1a weights) + Step 3 (L1b with strength-derived weights)
+**Input:** Step 6 (traceability matrix with E() scores per requirement) + `step_3_5.confirmed_requirements` (L1a weights) + `step_3_5.advisory_requirements` (L1b weights)
 **Computes in one pass:**
 1. **FCom numeric:** `∑(E × weight) / ∑weight` for all L1a, where weight = user-assigned priority
 2. **FA numeric:** `∑(E × weight) / ∑weight` for all L1b, where weight = strength-derived (3/2/1)
@@ -910,8 +971,11 @@ l3_unlinked = set(step4_endpoint_ids) - set(step6_matched_l3_ids)
       "missing_l1a": [
         { "req_id": "OBV-003", "description": "User can edit a task", "e_score": 0.0, "gap": "Not found in L2 or L3" }
       ],
-      "unlinked_functions": [
-        { "function_id": "L2-007", "function": "Admin panel", "route": "/admin", "note": "No requirement points to this" }
+      "unlinked_routes": [
+        { "route": "/admin", "title": "Admin Panel", "note": "No L1a requirement's path[] visits this route" }
+      ],
+      "unlinked_endpoints": [
+        { "method": "DELETE", "path": "/api/users/:id", "note": "No L1a requirement implies this endpoint" }
       ]
     }
   },

@@ -39,19 +39,24 @@ const GROUPS: { id: string; label: string; steps: Step[] }[] = [
   },
 ]
 
-const BUILT = new Set([-1, 0, 1, 2, 3, 3.5])
+const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4])
 
-function activeStepId(stage: Stage, currentStep?: number): number {
+function activeStepId(stage: Stage, currentStep?: number, jobStatus?: string): number {
   if (stage === 'upload') return -1
   if (stage === 'loading') return currentStep ?? 0
   if (stage === 'confirming') return 3.5
-  return -99 // step_3_complete / error: nothing active
+  if (stage === 'step_3_complete' && jobStatus === 'step_4_running') return 4
+  return -99
 }
 
-function isComplete(id: number, stage: Stage, currentStep?: number): boolean {
-  if (stage === 'step_3_complete') return id === -1 || id === 0 || id === 1 || id === 2 || id === 3 || id === 3.5
-  if (stage === 'confirming')      return id === -1 || id === 0 || id === 1 || id === 2 || id === 3
-  if (stage === 'loading')         return id === -1 || (id >= 0 && id < (currentStep ?? 0))
+function isComplete(id: number, stage: Stage, currentStep?: number, jobStatus?: string): boolean {
+  if (stage === 'step_3_complete') {
+    const base = id === -1 || id === 0 || id === 1 || id === 2 || id === 3 || id === 3.5
+    const step4done = jobStatus === 'step_4_complete' || jobStatus === 'step_4_error'
+    return base || (id === 4 && step4done)
+  }
+  if (stage === 'confirming') return id === -1 || id === 0 || id === 1 || id === 2 || id === 3
+  if (stage === 'loading')    return id === -1 || (id >= 0 && id < (currentStep ?? 0))
   return false
 }
 
@@ -60,8 +65,8 @@ function stepNumLabel(id: number): string {
   return String(id)
 }
 
-export default function Sidebar({ stage, currentStep }: { stage: Stage; currentStep?: number }) {
-  const active = activeStepId(stage, currentStep)
+export default function Sidebar({ stage, currentStep, jobStatus }: { stage: Stage; currentStep?: number; jobStatus?: string }) {
+  const active = activeStepId(stage, currentStep, jobStatus)
   // Correctness group collapsed by default — none of its steps are built yet
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set(['fcom_fa']))
 
@@ -92,12 +97,12 @@ export default function Sidebar({ stage, currentStep }: { stage: Stage; currentS
                 className="w-full flex items-start px-4 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-600 hover:bg-gray-50 transition-colors"
               >
                 <span className="flex-1 text-left leading-tight">{group.label}</span>
-                <span className="flex-shrink-0 text-gray-300 ml-1 mt-px">{open ? '▼' : '▶'}</span>
+                <span className={`flex-shrink-0 text-gray-300 ml-1 mt-px inline-block transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>▼</span>
               </button>
 
               {/* Steps */}
               {open && group.steps.map(step => {
-                const done = isComplete(step.id, stage, currentStep)
+                const done = isComplete(step.id, stage, currentStep, jobStatus)
                 const current = step.id === active && stage !== 'error'
                 const built = BUILT.has(step.id)
 

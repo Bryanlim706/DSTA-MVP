@@ -258,6 +258,8 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **Step 4 framework dispatch** — endpoint extraction dispatches on `backend_framework` from `step_3_5.project_context`. Spring Boot: two-level extraction (class-level `@RequestMapping` base path + method-level `@GetMapping` etc.); Kotlin `.kt` files use regex fallback (no tree-sitter-kotlin). Blueprint/APIRouter prefix resolution deferred: paths captured without prefix, annotated if needed by Step 6.
 - **Step 4 triggers on confirmation** — `confirm.py` launches `_run_step4()` as a `BackgroundTasks` task immediately after writing `step_3_5`. Job status: `confirmed` → `step_4_running` → `step_4_complete`. Frontend `useEffect` in `App.tsx` polls every 2s until terminal status.
 - **Step 4 route normalisation** — all frontend routes start with `/` and have no trailing `/` (except root `/`). Routes are deduplicated within each extraction strategy. Object-based `createBrowserRouter` routes only collected from files that import `react-router-dom`.
+- **Steps 5/6 matching target is path entities, not descriptions** — L1a requirements carry `path: PathEntity[]` specifying exactly which pages, elements, and edges they assert. These entities ARE the L2 specification. Step 5 does NOT re-summarise raw elements into named functions (that would duplicate Step 1's LLM work and create a circular description-to-description match in Step 6). Step 5 builds a per-page element inventory (Playwright dynamic + Tree-sitter static fallback). Step 6 matches L1a path entity labels against that inventory (fuzzy label matching via LLM called once per requirement, not per entity). E() is computed per entity, then aggregated per requirement using the α=0.7/0.3 primary/secondary formula.
+- **Unlinked detection (Steps 5/6)** — unlinked L2 = Step 5 routes visited by Playwright where no L1a path[] node entity was matched; unlinked L3 = Step 4 api_endpoints not implied by any L1a path[] edge entity. These are route-level and endpoint-level, not named-function-level (the old "L2-007 function" concept is removed). Step 7 advisory reports both lists.
 
 ---
 
@@ -281,7 +283,8 @@ Both files must be in the same commit as the code — not a follow-up commit. Th
 
 ## Next steps
 
-1. Build Step 5 — UI/API Inventory Generator (builds L2 via Tree-sitter static pass + Playwright dynamic crawl + LLM summarization)
+1. Build Step 5 — App Crawler (builds L2 raw element inventory via Playwright dynamic crawl + Tree-sitter static fallback; no LLM; per-page element lists with selectors feed Step 6 entity matching and Step 9 test generation)
+2. Build Step 6 — Requirement → L2/L3 Entity Mapper (matches L1a `path[]` entities against Step 5 page inventory and Step 4 endpoints; LLM used for fuzzy label matching only; computes E() per entity → E() per requirement)
 
 ---
 
