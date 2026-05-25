@@ -157,6 +157,16 @@ The FCom/FA boundary — between "obvious" (L1a) and "implied" (L1b) — is a ju
 **Why behavioural properties belong in the AC layer, not L1a/L1b:**
 Items like "data persists across restarts", "error message shown on failure", "confirmation before delete" are not *functions* — they cannot be mapped to a UI element or API endpoint in Step 6. They are behavioural properties of existing functions and belong as acceptance criteria at Step 8. FCom and FA both measure whether *functions* exist; FCor measures whether those functions *behave correctly*. The three axes are orthogonal. Persistence, feedback, and error handling sit on the FCor axis, not the FCom or FA axis.
 
+**Known gap — system-automatic (behavioral) requirements:**
+Some stated requirements describe behaviors the system performs automatically, without user initiation: `"daily auto reset happens"`, `"notifications sent at midnight"`, `"cache expires after 1 hour"`. These are not user-navigable functions and correctly fail Step 1's extraction gate. However, force-converting them to UI functions (e.g. `"User can view daily reset status"`) is lossy — it changes the primary assertion from a scheduled behavior to a display element, producing wrong ACs and wrong E() scoring (FCom checks for a UI element instead of a scheduler in L3).
+
+The correct model (deferred to before Step 8):
+- Step 1 extracts these as `type: "behavioral"` with `path: null` instead of a UI traversal path
+- Step 6 skips L2 matching for behavioral items; E() is L3-only (does the scheduler/cron/event handler exist in code?)
+- Step 8 generates time/state-based ACs: *"Given [initial state], when [trigger fires], then [system state changes]"* — not UI-element checks
+
+**Decision:** Defer until before Step 8. Steps 4–7 (completeness pipeline) are unaffected — they process whatever is in `step_3_5.confirmed_requirements` and do not depend on requirement type. During Steps 4–7 development, behavioral requirements that are incorrectly converted can be deleted at Step 3.5 human review. The schema change (Step 1 type field, Step 3.5 Pydantic model, Step 6 E() branching, Step 8 AC template) will be designed as one unit before Step 8 is built.
+
 **L1a validity model — generate, confirm, lock:**
 Steps 1–3 produce heuristic starting points. The LLM reasons from project type and stated requirements, not the actual codebase — it can fabricate requirements for features that don't exist in this specific app, assign wrong weights, or miss app-specific functions. This is expected and by design. The formula is only valid after **Step 3.5 locks L1a**. Skipping Step 3.5 produces an unreliable FCom score. The `functional_area` tag on each L1a item helps reviewers spot fabricated clusters — if an entire cluster (e.g. all "product_detail" requirements) has no match in the uploaded code, the cluster is likely fabricated and should be deleted at Step 3.5.
 
@@ -731,6 +741,60 @@ depends_on: list[str], source_quote: str|null
 *Step 3 — l1b items (`advisory_requirements`): no fields dropped.* Copied as-is with full schema including `path[]`, `strength`, `weight`, `confidence_score`, `category`, `reasoning`, `confidence_reason`, `depends_on`.
 
 **If skipped:** `confirmed_requirements` = all Step 1 stated (non-vague) + all Step 2 obvious at default weights; `advisory_requirements` = all Step 3 l1b items; `project_context` and `project_summary` still populated.
+
+---
+
+### Data Flow — Steps 0 to 3.5
+
+The pipeline is a DAG, not a linear chain. Step 1 reads from disk independently of Step 0. Step 0 bypasses Step 1 and feeds directly into Steps 2, 3, and 3.5. Step 3.5 is a full fan-in that reads all four prior step results simultaneously plus the HTTP body from the frontend.
+
+```
+DISK (file tree / configs)
+  └──────────────────────────────────────────────► Step 0
+
+DISK (README + spec docs)
+job["requirements_text"]
+  └──────────────────────────────────────────────► Step 1
+
+                            Step 0 [discovered_pages]
+                            Step 1 [requirements[]]
+                                   └──────────────► Step 2
+
+                            Step 0 [project_type,
+                                    frontend_framework,
+                                    backend_framework,
+                                    discovered_pages]
+                            Step 1 [requirements[],
+                                    project_summary]
+                            Step 2 [requirements[]
+                                    (descriptions only)]
+                                   └──────────────► Step 3
+
+                            Step 0 [10 context fields]
+                            Step 1 [requirements[] (lookup),
+                                    project_summary]
+                            Step 2 [requirements[] (lookup),
+                                    req_id set]
+                            Step 3 [requirements[] where
+                                    placement=="l1b"]
+                            HTTP body [confirmed list,
+                                       skipped flag]
+                                   └──────────────► Step 3.5
+```
+
+Exact fields per edge:
+- **Disk → Step 0:** file tree, config file contents (package.json, pom.xml, build.gradle, etc.)
+- **Disk + job → Step 1:** README files (depth ≤ 2), keyword-matched spec docs (.md/.rst/.txt), `job["requirements_text"]`
+- **Step 0 → Step 2:** `discovered_pages` only — used for ground-truth node inventory shown to LLM and `_identify_root_node()` input
+- **Step 1 → Step 2:** `requirements[]` full array — descriptions, paths, req_ids, vague flags
+- **Step 0 → Step 3:** `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` — project context for LLM prompt and `_identify_root_node()`
+- **Step 1 → Step 3:** `requirements[]` full array — SOP node extraction, vague detection, `depends_on`/`unpacks` validation; `project_summary` — INF pass domain grounding
+- **Step 2 → Step 3:** `requirements[]` descriptions only — dedup check (LLM shown as "already covered"; `_validate_and_normalise` semantic dedup)
+- **Step 0 → Step 3.5:** 10 fields → `project_context`: `project_type`, `frontend_framework`, `frontend_tooling`, `backend_framework`, `template_engine`, `service_layout`, `server_routes_detected`, `discovered_pages`, `test_strategy`, `runtime`
+- **Step 1 → Step 3.5:** `requirements[]` as req_id lookup for server-side `depends_on` + `source_quote` enrichment; `step1_ids` set for `deleted_count`; `project_summary` copied to output
+- **Step 2 → Step 3.5:** `requirements[]` as req_id lookup for `depends_on` enrichment; `step2_ids` set for `deleted_count`
+- **Step 3 → Step 3.5:** all items where `placement == "l1b"` → `advisory_requirements`; req_id lookup for `depends_on` enrichment
+- **HTTP body → Step 3.5:** `requirements: list[ConfirmedRequirement]` (user's finalised L1a list); `skipped: bool`
 
 ---
 
