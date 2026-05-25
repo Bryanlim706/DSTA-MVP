@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { confirmRequirements, getJob, pollJob } from './api/client'
 import ClassificationResult from './components/ClassificationResult'
 import ConfirmationTable from './components/ConfirmationTable'
 import GeneratedRequirementsResult from './components/GeneratedRequirementsResult'
 import ObviousRequirementsResult from './components/ObviousRequirementsResult'
+import RepoParserResult from './components/RepoParserResult'
 import RequirementsResult from './components/RequirementsResult'
 import Sidebar from './components/Sidebar'
 import UploadPage from './pages/UploadPage'
@@ -59,6 +60,9 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
   const step2 = job.step_results.step_2!
   const step3 = job.step_results.step_3
   const step35 = job.step_results.step_3_5
+  const step4 = job.step_results.step_4
+
+  const step4Loading = job.status === 'step_4_running' || job.status === 'confirmed'
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-12">
@@ -66,7 +70,9 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Steps 0–3.5 complete</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {job.status === 'step_4_complete' ? 'Steps 0–4 complete' : 'Steps 0–3.5 complete'}
+            </p>
             <p className="text-[10px] text-gray-300 mt-0.5 font-mono">{job.job_id}</p>
           </div>
           <button
@@ -118,6 +124,10 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
             </div>
           </div>
         )}
+
+        <div className="mt-6">
+          <RepoParserResult result={step4 ?? null} loading={step4Loading} />
+        </div>
       </div>
     </div>
   )
@@ -127,6 +137,35 @@ export default function App() {
   const [stage, setStage] = useState<Stage>('upload')
   const [job, setJob] = useState<Job | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const pollingStep4 = useRef(false)
+
+  // Poll for step_4_complete after entering result view
+  useEffect(() => {
+    if (stage !== 'step_3_complete' || !job || pollingStep4.current) return
+    const terminalStatuses = ['step_4_complete', 'step_4_error', 'error', 'complete']
+    if (terminalStatuses.includes(job.status)) return
+
+    pollingStep4.current = true
+    let cancelled = false
+    const jobId = job.job_id
+
+    const poll = async () => {
+      while (!cancelled) {
+        await new Promise((r) => setTimeout(r, 2000))
+        if (cancelled) break
+        try {
+          const updated = await getJob(jobId)
+          if (!cancelled) setJob(updated)
+          if (!cancelled && terminalStatuses.includes(updated.status)) break
+        } catch {
+          break
+        }
+      }
+      pollingStep4.current = false
+    }
+    poll()
+    return () => { cancelled = true; pollingStep4.current = false }
+  }, [stage])
 
   async function handleUploadComplete(jobId: string) {
     setStage('loading')

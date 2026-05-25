@@ -127,9 +127,35 @@ runtime  (only for electron_app)
   - `confirmed_at`, `skipped`, `l1a_count`, `promoted_count`, `deleted_count`, `added_count`
 - ResultPage shows a green summary banner with counts after confirmation
 
+### Step 4 — Repo Parser (COMPLETE)
+- Triggered automatically after Step 3.5 confirmation as a FastAPI `BackgroundTasks` task
+- No LLM — pure Tree-sitter AST parsing (`tree-sitter>=0.22`, `QueryCursor` API from 0.25)
+- Reads `step_3_5.project_context` for framework dispatch (`backend_framework`, `frontend_framework`)
+- **Endpoint extraction:**
+  - Flask/FastAPI: tree-sitter Python query on `decorated_definition` nodes; regex on decorator text for path + method
+  - Django: regex on `urls.py` files for `path(...)` calls
+  - Spring Boot: tree-sitter Java queries for class-level `@RequestMapping` (base path) + method-level `@GetMapping` etc.; concatenated path; Kotlin fallback via regex
+  - Express/NestJS: regex on `.js/.ts` files for `app.get(...)` / `@Get(...)` patterns
+- **Route extraction:**
+  - Next.js: file-based walk of `pages/` or `src/pages/`; App Router walk of `app/`
+  - React Router (Vite/CRA): tree-sitter TSX queries for `<Route path="..." />` (self-closing + opening element); regex fallback for object-based `createBrowserRouter`
+  - SvelteKit: `+page.svelte` file walk; Vue/Angular Router: regex on router config files
+- **Model extraction:** SQLAlchemy/Django (`class X(Base):`), JPA (`@Entity`), TypeORM (`@Entity()`), Mongoose (`new Schema(...)`), Prisma (`.prisma` regex)
+- **Test file detection:** glob patterns (`test_*.py`, `*.test.ts`, `*Test.java`, etc.)
+- **Important files:** heuristic from entry-point names + endpoint-hosting files + router/model configs
+- Job statuses: `confirmed` → `step_4_running` → `step_4_complete` (or `step_4_error`)
+- Frontend polls for `step_4_complete` after confirmation; `RepoParserResult.tsx` shows loading skeleton then populated result
+
+**Step 4 output fields** (stored in `step_results.step_4`):
+```
+languages, frontend_routes, api_endpoints (method/path/file/handler),
+database_models, important_files, existing_tests,
+total_endpoints, total_routes, error
+```
+
 ## What has NOT been built yet
 
-- Steps 4–17 (see PLAN.md for full pipeline)
+- Steps 5–17 (see PLAN.md for full pipeline)
 - Docker sandbox (Step 11)
 
 ---
@@ -152,6 +178,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       step1_req_extractor.py         # Stated requirement extractor
       step2_obvious_generator.py     # Obvious requirement generator
       step3_implied_generator.py     # Two-pass SOP/INF confidence-scored generator
+      step4_repo_parser.py           # L3 repo parser (languages/endpoints/routes/models, tree-sitter)
     storage/
       job_store.py                   # JSON file job persistence + list_jobs()
   frontend/
@@ -161,6 +188,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       pages/UploadPage.tsx           # Upload form
       components/
         ClassificationResult.tsx     # Step 0 result display
+        RepoParserResult.tsx         # Step 4 result display (languages/endpoints/routes/models)
         PathDisplay.tsx              # Shared traversal path badge renderer (node/element/edge)
         RequirementsResult.tsx       # Step 1 result display (function rows + path expand)
         ObviousRequirementsResult.tsx # Step 2 result display (navigation gap functions)
@@ -226,6 +254,10 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **Step 1 truncation recovery** — `_parse_llm_response` recovers requirements from truncated JSON responses rather than failing with 0 results
 - **Function+path model (Steps 1–3.5)** — Requirements are functions ("User can [action]") with a `path: PathEntity[]` traversal array, not atomic graph entities. `primary: boolean` distinguishes entities fundamentally asserted by a function from context nodes already covered by another. E() is function-level, aggregated as `0.7 × [primary avg] + 0.3 × [secondary avg]`. State-variant nodes (labels with parentheticals) always `primary: false`. Vague functions (`vague: true`) never enter FCom scoring — Step 3 decomposes them via `unpacks` field.
 - **Two-pass Step 3** — SOP (pattern table fires on Step 1 stated nodes) + INF (pure domain reasoning from `project_summary`). No 5-category taxonomy. No `structural_edge` — entry/exit baked into function paths. `placement` replaces `l1_recommendation`. Step 3 does not re-apply Step 2 connectivity checks.
+- **Step 4 tree-sitter API (0.25)** — `lang.query()` is deprecated; use `Query(lang, pattern)` to create a query and `QueryCursor(query).matches(node)` to execute — returns `list[tuple[int, dict[str, list[Node]]]]`. Node text is `.text` (bytes). Language objects (`_LANG_PY`, `_LANG_JAVA`, etc.) and `Query` objects are created once at module import time, not per-file.
+- **Step 4 framework dispatch** — endpoint extraction dispatches on `backend_framework` from `step_3_5.project_context`. Spring Boot: two-level extraction (class-level `@RequestMapping` base path + method-level `@GetMapping` etc.); Kotlin `.kt` files use regex fallback (no tree-sitter-kotlin). Blueprint/APIRouter prefix resolution deferred: paths captured without prefix, annotated if needed by Step 6.
+- **Step 4 triggers on confirmation** — `confirm.py` launches `_run_step4()` as a `BackgroundTasks` task immediately after writing `step_3_5`. Job status: `confirmed` → `step_4_running` → `step_4_complete`. Frontend `useEffect` in `App.tsx` polls every 2s until terminal status.
+- **Step 4 route normalisation** — all frontend routes start with `/` and have no trailing `/` (except root `/`). Routes are deduplicated within each extraction strategy. Object-based `createBrowserRouter` routes only collected from files that import `react-router-dom`.
 
 ---
 
@@ -249,7 +281,7 @@ Both files must be in the same commit as the code — not a follow-up commit. Th
 
 ## Next steps
 
-1. Build Step 4 — Repo Parser (outputs `languages`, `api_endpoints`, `database_models`)
+1. Build Step 5 — UI/API Inventory Generator (builds L2 via Tree-sitter static pass + Playwright dynamic crawl + LLM summarization)
 
 ---
 

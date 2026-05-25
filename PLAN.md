@@ -798,8 +798,9 @@ Exact fields per edge:
 ---
 
 ### Step 4: Repo Parser
+**Status: COMPLETE**
 **Phase: FCom setup**
-**Tools:** Python (zipfile, pathlib), Tree-sitter, json/yaml/toml
+**Tools:** Python (zipfile, pathlib), Tree-sitter (0.25 QueryCursor API), json/yaml/toml
 **Input:** Uploaded zip file + `step_3_5.project_context` (for `project_type`, `frontend_framework`, `backend_framework`, `service_layout`, `template_engine`, `server_routes_detected` — determines where to look for routes and models)
 **Extracts:** README, frontend routes/pages, backend routes/endpoints, forms/buttons/components, API specs, package scripts, existing tests, config files, database models
 **Ignores:** node_modules, .git, dist, build, .next, venv, __pycache__, coverage
@@ -1140,7 +1141,7 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCor — thei
 |---|---|---|
 | 1 — Scaffold + Upload + Step 0 | Steps −1, 0, upload endpoint, job store, frontend | ✓ DONE |
 | 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | ✓ DONE |
-| 3 — Repo Parser | Step 4 | Not started |
+| 3 — Repo Parser | Step 4 | ✓ DONE |
 | 4 — Inventory + Mapping + Completeness | Steps 5, 6, 7 | Not started |
 | 5 — AC Generation + Test Execution | Steps 8, 9, 10, 11, 12 | Not started |
 | 6 — Scoring + Dashboard | Steps 13, 14, 15, 16, 17 | Not started |

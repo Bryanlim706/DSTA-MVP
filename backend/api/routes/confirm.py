@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 
+from pipeline import step4_repo_parser
 from storage.job_store import add_step_result, get_job, update_job
 
 router = APIRouter()
@@ -59,8 +61,25 @@ class ConfirmRequest(BaseModel):
     skipped: bool = False
 
 
+async def _run_step4(job_id: str, extract_to: Path) -> None:
+    try:
+        update_job(job_id, {"status": "step_4_running"})
+        job = get_job(job_id)
+        step3_5 = job["step_results"]["step_3_5"]
+        result = await step4_repo_parser.run(step3_5, extract_to)
+        add_step_result(job_id, "step_4", result)
+        update_job(job_id, {"status": "step_4_complete", "current_step": 5})
+    except Exception as exc:
+        update_job(job_id, {"status": "step_4_error", "errors": [str(exc)]})
+
+
 @router.post("/jobs/{job_id}/confirm")
-async def confirm_requirements(job_id: str, body: ConfirmRequest):
+async def confirm_requirements(
+    job_id: str,
+    body: ConfirmRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     job = get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -130,5 +149,8 @@ async def confirm_requirements(job_id: str, body: ConfirmRequest):
 
     add_step_result(job_id, "step_3_5", result)
     update_job(job_id, {"status": "confirmed", "current_step": 4})
+
+    extract_to = Path(job.get("extracted_path", f"./uploads/{job_id}/extracted"))
+    background_tasks.add_task(_run_step4, job_id, extract_to)
 
     return {"status": "confirmed", "l1a_count": l1a_count}

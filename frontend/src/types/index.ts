@@ -131,12 +131,32 @@ export interface Step35Result {
   added_count: number
 }
 
+export interface ApiEndpoint {
+  method: string
+  path: string
+  file: string
+  handler: string
+}
+
+export interface Step4Result {
+  languages: string[]
+  frontend_routes: string[]
+  api_endpoints: ApiEndpoint[]
+  database_models: string[]
+  important_files: string[]
+  existing_tests: string[]
+  total_endpoints: number
+  total_routes: number
+  error: string | null
+}
+
 export interface StepResults {
   step_0?: Step0Result
   step_1?: Step1Result
   step_2?: Step2Result
   step_3?: Step3Result
   step_3_5?: Step35Result
+  step_4?: Step4Result
 }
 
 export type JobStatus =
@@ -146,6 +166,9 @@ export type JobStatus =
   | 'step_3_complete'
   | 'waiting_for_confirmation'
   | 'confirmed'
+  | 'step_4_running'
+  | 'step_4_complete'
+  | 'step_4_error'
   | 'complete'
   | 'error'
 
