@@ -303,6 +303,51 @@ No `structural_edge` category — entry/exit paths are baked into each function'
 
 ## Pipeline Steps
 
+### Data Flow DAG — Steps 3.5 → 7
+
+```
+                    ┌───────────────────────────────────────────────────────────────────────────────────────────┐
+                    │                          STEP 3.5 · Confirmation Gate                                     │
+                    └──────────────────────────────────────────────────────────────────────────────────┬────────┘
+                                               │ project_context                                       │
+                                               ▼                                                       │
+                    ┌───────────────────────────────────────────────────────────────────────────────┐  │
+                    │                            STEP 4 · Repo Parser                               │  │
+                    └──────────────────────────────────────────────────────────────────┬────────────┘  │
+                                               │ route_to_files                        │               │
+                                               │ frontend_routes                       │               │
+                                               │ important_files                       │               │
+                                               ▼                                       │               │
+ project_context (3.5) ──────────────►┌───────────────────────────────────────┐       │               │
+                                       │          STEP 5 · App Crawler         │       │               │
+                                       └───────────────────────────────────────┘       │               │
+                                               │                    │                  │               │
+                                            pages[]              pages[]               │               │
+                                               │                    │                  │               │
+                                               ▼                    ▼                  ▼               │
+     confirmed_reqs (3.5) ──────────►┌─────────────────┐  ┌─────────────────────────────────────┐    │
+  api_endpoints (4) ─────────────────►│  STEP 6         │  │        STEP 7.5 · FA Advisor        │◄───┘ confirmed_reqs
+  impl_units (4) ────────────────────►│  E() Scorer     │  │                                     │      advisory_reqs
+  frontend_routes (4) ───────────────►│                 │  │                                     │◄─── project_summary (3.5)
+                                       └────────┬────────┘  └─────────────────────────────────────┘
+                                                │                                                  ▲
+                                                │ entity_scores[]                                  │
+                                                │ unlinked_routes                      api_endpoints, db_models,
+                                                │ unlinked_endpoints                   frontend_routes, languages (4)
+                                                │
+     confirmed_reqs (3.5) ──────────────────►  │
+     advisory_reqs (3.5) ───────────────────►  │
+                                                ▼
+                                       ┌─────────────────┐
+                                       │  STEP 7          │
+                                       │  FCom/FA Scorer  │
+                                       └─────────────────┘
+```
+
+Steps 6 and 7.5 execute **in parallel** after Step 5 completes. Step 7.5 reads directly from Steps 3.5, 4, and 5 — it does **not** depend on Step 6 output. Step 7 waits only for Step 6.
+
+---
+
 ### Step −1: User Input
 **Input requirements:**
 - Uploaded codebase as a `.zip` file

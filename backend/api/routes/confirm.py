@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 
-from pipeline import step4_repo_parser
+from pipeline import step4_repo_parser, step5_app_crawler
 from storage.job_store import add_step_result, get_job, update_job
 
 router = APIRouter()
@@ -69,8 +69,22 @@ async def _run_step4(job_id: str, extract_to: Path) -> None:
         result = await step4_repo_parser.run(step3_5, extract_to)
         add_step_result(job_id, "step_4", result)
         update_job(job_id, {"status": "step_4_complete", "current_step": 5})
+        await _run_step5(job_id, extract_to)
     except Exception as exc:
         update_job(job_id, {"status": "step_4_error", "errors": [str(exc)]})
+
+
+async def _run_step5(job_id: str, extract_to: Path) -> None:
+    try:
+        update_job(job_id, {"status": "step_5_running"})
+        job = get_job(job_id)
+        step3_5 = job["step_results"]["step_3_5"]
+        step4 = job["step_results"]["step_4"]
+        result = await step5_app_crawler.run(step3_5, step4, extract_to)
+        add_step_result(job_id, "step_5", result)
+        update_job(job_id, {"status": "step_5_complete", "current_step": 6})
+    except Exception as exc:
+        update_job(job_id, {"status": "step_5_error", "errors": [str(exc)]})
 
 
 @router.post("/jobs/{job_id}/confirm")

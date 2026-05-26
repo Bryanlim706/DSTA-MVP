@@ -10,3 +10,4 @@ tree-sitter-python>=0.22
 tree-sitter-javascript>=0.22
 tree-sitter-typescript>=0.22
 tree-sitter-java>=0.22
+playwright>=1.40.0

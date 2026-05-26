@@ -150,6 +150,36 @@ export interface Step4Result {
   error: string | null
 }
 
+export interface Step5Element {
+  type: 'input' | 'button' | 'select' | 'textarea' | 'link'
+  subtype: string | null
+  label: string | null
+  selector: string | null
+  visible: boolean | null
+}
+
+export interface Step5Page {
+  route: string
+  title: string | null
+  discovered_by: 'playwright' | 'static_fallback'
+  accessible: boolean | null
+  elements: Step5Element[]
+  outbound_links: string[]
+  api_calls_observed: string[]
+}
+
+export interface Step5UnvisitableRoute {
+  route: string
+  reason: string
+}
+
+export interface Step5Result {
+  pages: Step5Page[]
+  unvisitable_routes: Step5UnvisitableRoute[]
+  total_pages: number
+  error: string | null
+}
+
 export interface StepResults {
   step_0?: Step0Result
   step_1?: Step1Result
@@ -157,6 +187,7 @@ export interface StepResults {
   step_3?: Step3Result
   step_3_5?: Step35Result
   step_4?: Step4Result
+  step_5?: Step5Result
 }
 
 export type JobStatus =
@@ -169,6 +200,9 @@ export type JobStatus =
   | 'step_4_running'
   | 'step_4_complete'
   | 'step_4_error'
+  | 'step_5_running'
+  | 'step_5_complete'
+  | 'step_5_error'
   | 'complete'
   | 'error'
 

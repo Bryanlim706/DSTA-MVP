@@ -159,9 +159,30 @@ database_models, important_files, existing_tests,
 total_endpoints, total_routes, error
 ```
 
+### Step 5 — App Crawler (COMPLETE)
+- Triggered automatically after Step 4 completes (chained in `_run_step4` background task)
+- No LLM — Playwright for live crawl + regex/Tree-sitter for static fallback
+- Bootstrap heuristic from `step_3_5.project_context`: `project_type` + `frontend_framework` + `frontend_tooling` + `service_layout` determine the start command and port
+- Uses ports that avoid collision with DSTA's own services (8000, 5173): Vite→5174, CRA→3000, backend→8001, Flask→5001, Express→3001, static→8082
+- Port poll: `httpx.AsyncClient` GET every 1.5s, 30s timeout; falls back to full static mode if app doesn't start
+- Playwright crawl: `page.goto(route, wait_until="load")` + 400ms settle; JS injected to extract interactive elements (inputs/buttons/selects/textareas/links) with label priority: aria-label → placeholder → textContent → title → name; outbound same-origin links; XHR/fetch requests observed during page load
+- Accessibility check: final URL path matches requested route → `accessible: true`; redirect to /login etc. → `accessible: false`, reason: `auth_required`
+- Static fallback: regex extraction of JSX/TSX `<input>`, `<button>`, `<textarea>`, `<select>` from `route_to_files` source files; elements marked `discovered_by: "static_fallback"`, `selector: null`, `visible: null`
+- Process cleanup: all started subprocesses terminated in `finally` block regardless of crawl outcome
+- Job statuses: `step_4_complete` → `step_5_running` → `step_5_complete` (or `step_5_error`)
+- Frontend polls until `step_5_complete`/`step_5_error`; `AppCrawlerResult.tsx` shows loading skeleton then populated result
+
+**Step 5 output fields** (stored in `step_results.step_5`):
+```
+pages[] (route, title, discovered_by, accessible, elements[], outbound_links[], api_calls_observed[]),
+unvisitable_routes[] (route, reason),
+total_pages, error
+```
+**Element schema:** `{type, subtype, label, selector, visible}` — `selector` and `visible` are `null` for static fallback entries.
+
 ## What has NOT been built yet
 
-- Steps 5–17 (see PLAN.md for full pipeline)
+- Steps 6–17 (see PLAN.md for full pipeline)
 - Docker sandbox (Step 11)
 
 ---
@@ -185,6 +206,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       step2_obvious_generator.py     # Obvious requirement generator
       step3_implied_generator.py     # Two-pass SOP/INF confidence-scored generator
       step4_repo_parser.py           # L3 repo parser (languages/endpoints/routes/models, tree-sitter)
+      step5_app_crawler.py           # L2 app crawler (Playwright live crawl + Tree-sitter static fallback)
     storage/
       job_store.py                   # JSON file job persistence + list_jobs()
   frontend/
@@ -194,6 +216,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       pages/UploadPage.tsx           # Upload form
       components/
         ClassificationResult.tsx     # Step 0 result display
+        AppCrawlerResult.tsx         # Step 5 result display (pages/elements/accessibility)
         RepoParserResult.tsx         # Step 4 result display (languages/endpoints/routes/models)
         PathDisplay.tsx              # Shared traversal path badge renderer (node/element/edge)
         RequirementsResult.tsx       # Step 1 result display (function rows + path expand)
@@ -265,6 +288,11 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **Step 4 tree-sitter API (0.25)** — `lang.query()` is deprecated; use `Query(lang, pattern)` to create a query and `QueryCursor(query).matches(node)` to execute — returns `list[tuple[int, dict[str, list[Node]]]]`. Node text is `.text` (bytes). Language objects (`_LANG_PY`, `_LANG_JAVA`, etc.) and `Query` objects are created once at module import time, not per-file.
 - **Step 4 framework dispatch** — endpoint extraction dispatches on `backend_framework` from `step_3_5.project_context`. Spring Boot: two-level extraction (class-level `@RequestMapping` base path + method-level `@GetMapping` etc.); Kotlin `.kt` files use regex fallback (no tree-sitter-kotlin). Blueprint/APIRouter prefix resolution deferred: paths captured without prefix, annotated if needed by Step 6.
 - **Step 4 triggers on confirmation** — `confirm.py` launches `_run_step4()` as a `BackgroundTasks` task immediately after writing `step_3_5`. Job status: `confirmed` → `step_4_running` → `step_4_complete`. Frontend `useEffect` in `App.tsx` polls every 2s until terminal status.
+- **Step 5 chains directly from Step 4** — `_run_step4` calls `await _run_step5()` after a successful Step 4 result is written. `step_4_complete` is transient (not a polling terminal status). Frontend terminal statuses: `step_5_complete`, `step_5_error`, `step_4_error`. Job status: `step_4_complete` → `step_5_running` → `step_5_complete`.
+- **Step 5 port isolation** — evaluated app uses ports that avoid collision with DSTA's own services: Vite→5174, CRA→3000, backend FastAPI/Django/Spring→8001, Flask→5001, Express→3001, static HTTP→8082. Port 8000 (DSTA backend) and 5173 (DSTA frontend) are never assigned to the evaluated app.
+- **Step 5 boot failure → full static fallback** — if the app's process fails to start or the port doesn't respond within 30s, all routes are processed as static_fallback with `reason: "boot_failed"`. No partial crawl.
+- **Step 5 Playwright SSL** — `browser.new_context(ignore_https_errors=True)` handles evaluated apps with self-signed certs. DSTA's own httpx port-poll client also uses `verify=False`.
+- **playwright install chromium** — Chromium must be installed in the DSTA backend venv: `NODE_TLS_REJECT_UNAUTHORIZED=0 python -m playwright install chromium` (corporate proxy workaround for SSL cert). Already done; stored in `C:\Users\Owner\AppData\Local\ms-playwright\`.
 - **Step 4 route normalisation** — all frontend routes start with `/` and have no trailing `/` (except root `/`). Routes are deduplicated within each extraction strategy. Object-based `createBrowserRouter` routes only collected from files that import `react-router-dom`.
 - **`route_to_files`** — Step 4 extra field (beyond PLAN.md minimum schema) mapping each frontend route to its source file(s). File-based routers (Next.js pages/, SvelteKit +page.svelte) produce exact 1:1 maps. React Router apps produce route→[App.jsx] since all routes are defined in one file; remaining routes fall back to `important_files[:5]`. Step 5 reads this for static Tree-sitter fallback: when Playwright can't visit a route (auth-gated), parse the corresponding source files instead of scanning the whole repo.
 - **`implementation_units`** — Step 4 extra field (beyond PLAN.md minimum schema) that is the authoritative L3 signal for Step 6 action edge E() scoring. Wraps every `api_endpoint` as `kind: "api_endpoint"` plus adds `kind: "form_handler"` for HTML `<form method="POST/PUT/DELETE">` tags found in SSR template files. Step 6 matches path[] `action_edge` entities against `implementation_units` rather than `api_endpoints` directly, so SSR apps whose user actions go through HTML forms (not REST calls) are also scored correctly.
@@ -295,9 +323,9 @@ Both files must be in the same commit as the code — not a follow-up commit. Th
 
 ## Next steps
 
-1. Build Step 5 — App Crawler (Playwright passive crawl + Tree-sitter static fallback for auth-gated routes; bootstrap heuristic from Step 0 project_context; per-page element inventory with runtime CSS selectors; feeds Step 6 L2 evidence)
-2. Build Step 6 — E() Scorer (per-entity piecewise E() functions by entity type; LLM batch calls for element fuzzy matching and endpoint matching; aggregated via α=0.7/0.3 formula; produces `entity_scores[]` per requirement and unlinked lists)
-3. Build Step 7 — FCom/FA Scorer (pure Python formula; runs once after Step 6; scores locked; no LLM)
+1. Build Step 6 — E() Scorer (per-entity piecewise E() functions by entity type; LLM batch calls for element fuzzy matching and endpoint matching; aggregated via α=0.7/0.3 formula; produces `entity_scores[]` per requirement and unlinked lists)
+2. Build Step 7 — FCom/FA Scorer (pure Python formula; runs once after Step 6; scores locked; no LLM)
+3. Build Step 7.5 — FA Advisor (positive-grounded; runs in parallel with Step 6; reads 3.5+4+5 directly)
 
 ---
 
