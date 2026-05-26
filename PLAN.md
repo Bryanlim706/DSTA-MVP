@@ -822,23 +822,55 @@ Exact fields per edge:
 ### Step 4: Repo Parser — L3 Inventory
 **Status: COMPLETE**
 **Phase: FCom — builds L3 inventory**
-**Tools:** Python (zipfile, pathlib), Tree-sitter (0.25 QueryCursor API), json/yaml/toml
-**Input:** Uploaded zip file + `step_3_5.project_context` (for `project_type`, `frontend_framework`, `backend_framework`, `service_layout`, `template_engine`, `server_routes_detected` — determines where to look for routes and models)
-**Extracts:** README, frontend routes/pages, backend routes/endpoints, forms/buttons/components, API specs, package scripts, existing tests, config files, database models
-**Ignores:** node_modules, .git, dist, build, .next, venv, __pycache__, coverage
-**Output:**
+**Tools:** Python (zipfile, pathlib), Tree-sitter (0.25 QueryCursor API), regex
+**Input:** `step_3_5.project_context` — `backend_framework` + `frontend_framework` determine which extraction strategies to run.
+**Ignores:** node_modules, .git, dist, build, .next, venv, __pycache__, coverage, target, .gradle, examples, demo, sample
+
+**Extraction strategies:**
+- **Languages:** file extension counts → ordered list (most files first)
+- **API endpoints:** dispatched on `backend_framework` — Flask/FastAPI (tree-sitter Python decorated_definition + decorator regex), Django (regex on urls.py), Spring Boot (tree-sitter Java two-level: class `@RequestMapping` base + method `@GetMapping` etc.; Kotlin regex fallback), Express/NestJS (regex on .js/.ts)
+- **Frontend routes:** Next.js (file-based walk of pages/ or app/), SvelteKit (+page.svelte walk), React Router (tree-sitter TSX `<Route path>` + regex for object-based createBrowserRouter), Vue/Angular Router (regex on router config files), static HTML fallback
+- **route_to_files:** maps each frontend route → source file(s) responsible for it. File-based routers (Next.js, SvelteKit) get exact 1:1 mapping. React Router gets the file containing `<Route>` definitions; routes without a specific file fall back to `important_files[:5]`.
+- **implementation_units:** unified list of backend handlers — wraps all `api_endpoints` as `kind: "api_endpoint"` plus any HTML `<form method="POST/PUT/DELETE">` tags found in SSR template files as `kind: "form_handler"`. This is the authoritative L3 signal for Step 6 action edge E() scoring; it covers both REST APIs and SSR form submissions.
+- **Database models:** SQLAlchemy/Django ORM (Python class regex), JPA `@Entity` (Java tree-sitter), TypeORM `@Entity()` (TS regex), Mongoose `new Schema(...)` (JS/TS regex), Prisma `.prisma` model blocks
+- **Test files:** glob patterns — `test_*.py`, `*.test.ts`, `*Test.java`, etc. — capped at 100
+- **Important files:** entry-point names + files hosting endpoints + router/model config names — capped at 20
+
+**Output — stored at `job["step_results"]["step_4"]`:**
 ```json
 {
-  "languages": ["TypeScript", "Python"],
-  "frontend_routes": ["/login", "/dashboard", "/tasks"],
+  "languages": ["Java", "JavaScript"],
+  "frontend_routes": ["/", "/login", "/dashboard"],
   "api_endpoints": [
-    { "method": "POST", "path": "/api/login", "file": "backend/routes/auth.py", "handler": "login_user" }
+    { "method": "POST", "path": "/api/auth/login", "file": "src/.../AuthController.java", "handler": "login" }
+  ],
+  "route_to_files": {
+    "/login": ["src/pages/Login.tsx"],
+    "/dashboard": ["src/App.jsx", "src/.../AppController.java"]
+  },
+  "implementation_units": [
+    { "kind": "api_endpoint", "method": "POST", "path": "/api/auth/login", "file": "src/.../AuthController.java", "handler": "login" },
+    { "kind": "form_handler", "method": "POST", "path": "/login", "file": "templates/login.html", "handler": null }
   ],
   "database_models": ["User", "Task"],
-  "important_files": ["src/pages/Login.tsx", "backend/routes/auth.py"],
-  "existing_tests": ["tests/test_auth.py"]
+  "important_files": ["src/pages/Login.tsx", "src/.../AuthController.java"],
+  "existing_tests": ["src/test/java/.../AppTests.java"],
+  "total_endpoints": 8,
+  "total_routes": 3,
+  "error": null
 }
 ```
+
+**Output consumed by:**
+| Field(s) | Consumed by |
+|---|---|
+| `frontend_routes` | Step 5 — Playwright crawl seed list; Step 6 — L3 evidence for `node` entity E() |
+| `route_to_files` | Step 5 — static Tree-sitter fallback: which source files to parse for auth-gated routes |
+| `implementation_units` | Step 6 — action edge E() scoring: does this requirement's submit/create/delete edge have a backend handler? Covers REST endpoints and SSR form submissions. |
+| `api_endpoints` | Step 6 — also read directly for unlinked L3 detection (endpoints not matched by any L1a requirement) |
+| `important_files` | Step 5 — static fallback scope when route→file mapping is unavailable |
+| `database_models` | Step 7.5 — positive-grounded FA advisor (codebase-grounded improvement suggestions) |
+| `languages`, `existing_tests` | Step 15 — evidence pack; Step 16 — LLM ISO evaluator context |
 
 ---
 
@@ -846,8 +878,8 @@ Exact fields per edge:
 **Phase: FCom — builds L2 element inventory**
 **Tools:** Playwright (dynamic), Tree-sitter (static fallback), Python
 **Input:**
-- `step_3_5.project_context` (`project_type`, `frontend_framework`, `backend_framework`, `test_strategy`) — bootstrap strategy + crawl mode
-- Step 4 result: `frontend_routes` (crawl seed list), `important_files` (static fallback scope)
+- `step_3_5.project_context` (`project_type`, `frontend_framework`, `backend_framework`, `service_layout`, `frontend_tooling`, `test_strategy`) — bootstrap strategy + crawl mode
+- Step 4 result: `frontend_routes` (crawl seed list), `route_to_files` (static fallback: which source files to parse per route), `important_files` (fallback when route_to_files has no entry)
 
 **Why no LLM here:**
 L1a requirements already contain `path: PathEntity[]` specifying which pages, elements, and edges each requirement asserts. Step 5 only collects what the running app actually has; Step 6 matches L1a path entities against it using an LLM fuzzy match. Step 5 itself is pure extraction — no judgment.
@@ -926,7 +958,7 @@ Step 5 captures what the running browser renders — this is runtime L2 evidence
 - `step_3_5.confirmed_requirements` (L1a, each with `path: PathEntity[]`)
 - `step_3_5.advisory_requirements` (L1b, each with `path: PathEntity[]`)
 - Step 5 result: per-page element inventory (`pages[]`, `unvisitable_routes[]`)
-- Step 4 result: `api_endpoints`, `frontend_routes`
+- Step 4 result: `implementation_units` (action edge L3 matching — covers REST endpoints + SSR form handlers), `api_endpoints` (unlinked L3 detection), `frontend_routes`
 
 **Per-entity E() — piecewise functions by entity type:**
 
