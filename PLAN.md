@@ -819,9 +819,9 @@ Exact fields per edge:
 
 ---
 
-### Step 4: Repo Parser
+### Step 4: Repo Parser — L3 Inventory
 **Status: COMPLETE**
-**Phase: FCom setup**
+**Phase: FCom — builds L3 inventory**
 **Tools:** Python (zipfile, pathlib), Tree-sitter (0.25 QueryCursor API), json/yaml/toml
 **Input:** Uploaded zip file + `step_3_5.project_context` (for `project_type`, `frontend_framework`, `backend_framework`, `service_layout`, `template_engine`, `server_routes_detected` — determines where to look for routes and models)
 **Extracts:** README, frontend routes/pages, backend routes/endpoints, forms/buttons/components, API specs, package scripts, existing tests, config files, database models
@@ -843,26 +843,38 @@ Exact fields per edge:
 ---
 
 ### Step 5: App Crawler — L2 Element Inventory
-**Phase: FCom — builds L2 raw element inventory**
+**Phase: FCom — builds L2 element inventory**
 **Tools:** Playwright (dynamic), Tree-sitter (static fallback), Python
 **Input:**
-- `step_3_5.project_context` (`project_type`, `test_strategy`, `discovered_pages`) — crawl strategy selection
+- `step_3_5.project_context` (`project_type`, `frontend_framework`, `backend_framework`, `test_strategy`) — bootstrap strategy + crawl mode
 - Step 4 result: `frontend_routes` (crawl seed list), `important_files` (static fallback scope)
 
-**Why no LLM summarisation here:**
-L1a requirements already contain `path: PathEntity[]` — the ordered traversal specifying exactly which pages, elements, and edges each requirement asserts. Those path entities ARE the L2 specification. Step 5 does not re-invent named functions from raw elements (that is what Step 1 already did). Step 5 only collects what the running app actually has; Step 6 then matches L1a path entities against it.
+**Why no LLM here:**
+L1a requirements already contain `path: PathEntity[]` specifying which pages, elements, and edges each requirement asserts. Step 5 only collects what the running app actually has; Step 6 matches L1a path entities against it using an LLM fuzzy match. Step 5 itself is pure extraction — no judgment.
+
+**Step 5 is L2, not L3. Step 9 does NOT read Step 5 selectors.**
+Step 5 captures what the running browser renders — this is runtime L2 evidence, distinct from Step 4's static L3 code evidence. Step 9 (test generation) generates Playwright locators (`getByRole`, `getByText`, `getByPlaceholder`) directly from path entity labels via LLM — it does not read Step 5 CSS selectors, because static source selectors are unreliable (CSS-in-JS generates hash suffixes; component libraries render different DOM than JSX source).
+
+**App bootstrap (heuristic from `project_context`):**
+- `frontend_only` + Vite/CRA → `npm run dev` or `npm start`
+- `backend_api_only` + FastAPI → `uvicorn main:app --port 8000`
+- `backend_api_only` + Flask → `flask run`
+- `backend_api_only` + Express/NestJS → `npm start`
+- `full_stack_web_app` → start backend first (per above), then frontend; wait for both ports
+- Health check: poll until port responds (timeout 30s), then begin crawl
+- Job status: `step_4_complete` → `step_5_running` → `step_5_complete` (or `step_5_error`)
 
 **Two-pass process:**
 
 1. **Dynamic pass (Playwright):** Boot the app. Visit each route from Step 4 `frontend_routes`. For each page, record:
-   - Page title / primary heading
-   - All visible interactive elements: inputs (type + label), buttons (text/label), links (text + href), selects, checkboxes, textareas
-   - CSS selectors and `data-testid` attributes for each element
+   - Page title / primary heading (`document.title`, `h1` text)
+   - All visible interactive elements: inputs (type + label), buttons (text/label), links (text + href), selects, checkboxes, textareas. Label extraction priority: `aria-label` → `placeholder` → `textContent` → `title` → `name`
+   - CSS selectors from Playwright's own locator (from running DOM — reliable)
    - Outbound navigation links visible on the page
-   - Network requests observed during page load (XHR/fetch) — API endpoints triggered passively
-   - Whether the page was accessible or blocked (auth-gated, 404, redirect)
+   - Network requests observed during page load (XHR/fetch GET only — passive crawl) — `api_calls_observed`
+   - Whether the page was accessible or blocked (auth-gated, 404, redirect) → `accessible: true/false`
 
-2. **Static fallback (Tree-sitter):** For routes Playwright could not visit (auth-gated, requires form preconditions), run Tree-sitter on the corresponding source files from Step 4 `important_files`. Extract: JSX component declarations, `<input>`, `<button>`, `<form>` elements, route-level API call sites (fetch/axios calls). Marked `discovered_by: "static_fallback"`.
+2. **Static fallback (Tree-sitter):** For routes Playwright could not visit (auth-gated, redirect loops), run Tree-sitter on the corresponding source files from Step 4 `important_files`. Extract JSX `<input>`, `<button>`, `<textarea>`, `<select>` elements with label attributes. Marked `discovered_by: "static_fallback"`, `accessible: null`, `selector: null`.
 
 **Output — stored at `job["step_results"]["step_5"]`:**
 ```json
@@ -879,20 +891,31 @@ L1a requirements already contain `path: PathEntity[]` — the ordered traversal 
         { "type": "button", "subtype": "submit",   "label": "Log in",        "selector": "button[type='submit']",  "visible": true }
       ],
       "outbound_links": ["/register", "/forgot-password"],
-      "api_calls_observed": ["POST /api/auth/login"]
+      "api_calls_observed": ["GET /api/auth/session"]
+    },
+    {
+      "route": "/dashboard",
+      "title": null,
+      "discovered_by": "static_fallback",
+      "accessible": null,
+      "elements": [
+        { "type": "button", "subtype": null, "label": "Add Task", "selector": null, "visible": null }
+      ],
+      "outbound_links": [],
+      "api_calls_observed": []
     }
   ],
   "unvisitable_routes": [
-    { "route": "/dashboard", "reason": "auth_required", "discovered_by": "static_fallback" }
+    { "route": "/dashboard", "reason": "auth_required" }
   ]
 }
 ```
 
 **Key value:**
-- Playwright gives ground-truth of what is rendered and interactive at runtime — not just what is declared in source
-- Static fallback prevents auth-gated pages from being entirely invisible
-- Selectors feed Step 9 test generation, now organised per page/route (Step 9 looks up `/login` selectors for requirements whose path visits "Login Page")
-- `api_calls_observed` cross-checks and supplements Step 4's static endpoint extraction
+- Playwright gives ground-truth of what is rendered and interactive at runtime — not just what is declared in source. `document.title` and `h1` text enable reliable page-name → route matching in Step 6.
+- CSS selectors come from running DOM (stable), not source code (unstable due to CSS-in-JS, component libraries).
+- Static fallback prevents auth-gated pages from being entirely invisible to Step 6.
+- `api_calls_observed` cross-checks Step 4's static endpoint list (supplementary — not used for E() scoring).
 
 ---
 
@@ -905,48 +928,50 @@ L1a requirements already contain `path: PathEntity[]` — the ordered traversal 
 - Step 5 result: per-page element inventory (`pages[]`, `unvisitable_routes[]`)
 - Step 4 result: `api_endpoints`, `frontend_routes`
 
-**Path entities as search specification, not scoring unit:**
-L1a requirements carry `path: PathEntity[]` — the LLM's normative model of what the UI should contain. These entities guide Step 6's search (which page to inspect, what element type to look for) but are NOT the atomic scoring unit. Scoring at per-entity granularity is unreliable because entity labels from Step 1 ("email input") may not match Playwright-found labels ("Email address", "Username") — every fuzzy mismatch would inject noise into E(). Instead, E() is computed at requirement level from two clean signals.
+**Per-entity E() — piecewise functions by entity type:**
 
-**Two signals per requirement:**
+The Conceptual Model formula `E(L1x) = α × [∑ E(primary_i) / P] + (1−α) × [∑ E(secondary_j) / S]` uses per-entity E() values. Each entity type in `path[]` has a different evidence source and a different piecewise function.
 
-**Signal 1 — L2 (UI presence):** Are this requirement's primary UI elements accessible on the expected page?
+**`node` entity** (page/screen) — evidence: route lookup (L3) + page accessibility (L2):
 
-Step 6 uses `node` entities from `path[]` to identify which page to inspect in Step 5. It then uses `element` entities (filtered to `primary: true`) as a search spec: what element types are expected on that page? The LLM is called once per requirement, given the primary element entities and the Step 5 page's element list, and outputs a match for each entity (`matched_selector | null`). The L2 score is the fraction of primary element entities matched:
-
-```
-L2_score = matched_primary_elements / total_primary_element_entities
-```
-
-Page accessibility modifies this score:
-- Page visited by Playwright (`accessible: true`) → full weight
-- Page auth-gated (static fallback only) → all element matches discounted × 0.5 (declared but not runtime-verified)
-- Page not found at all → L2_score = 0.0 regardless of element matching
-
-Secondary entities (`primary: false`) contribute to L2 with weight (1 − α) = 0.3, primary with α = 0.7 — matching the formula in the Conceptual Model. The α weighting is applied at the L2 signal level, not at a per-entity E() level.
-
-**Signal 2 — L3 (backend presence):** Does Step 4 have the endpoint this requirement's action implies?
-
-For requirements that involve a backend mutation or retrieval (any requirement whose path includes an action edge or whose description implies create/read/update/delete): Step 6 searches Step 4 `api_endpoints` for an endpoint whose method + path matches the requirement's implied action. LLM is used for this inference (given the requirement description, the source page route, and the Step 4 endpoint list, which endpoint corresponds to this requirement's primary action?).
-
-For requirements that are pure UI (navigation only, display only — no backend mutation implied): L3 signal = 1.0 by default (no backend handler required).
-
-L3 score is binary: 1.0 (endpoint found) or 0.0 (no matching endpoint).
-
-**E(requirement) from the two signals:**
-
-| L2_score | L3_score | E() |
+| Route in Step 4 `frontend_routes` | Page accessible in Step 5 (Playwright) | E(node) |
 |---|---|---|
-| High (≥ 0.7) | 1.0 | 1.0 |
-| Low (< 0.7) | 1.0 | 0.5 (backend exists, UI incomplete or inaccessible) |
-| High (≥ 0.7) | 0.0 | 0.4 (UI present, no backend handler) |
-| Low (< 0.7) | 0.0 | 0.0 |
+| ✓ | `accessible: true` | 1.0 |
+| ✓ | `discovered_by: "static_fallback"` only | 0.5 |
+| ✗ | — | 0.0 |
 
-These map to the established E() scale from the Conceptual Model. The 0.7 threshold for "high" L2 is a model parameter — it means "most of the expected UI elements are present."
+**`element` entity** (UI element) — evidence: element presence in Step 5 (L2 only; no L3 equivalent):
 
-**Note on navigation edges:** Navigation `from → to` edges in path[] are not separately scored in Step 6. Their L2 evidence (outbound links in Step 5) is unreliable for programmatic navigation (React Router `history.push()` won't appear in `outbound_links`). Navigation correctness is verified in Step 11 (Playwright E2E test execution) rather than inferred from passive crawl link lists.
+| Element found in Step 5 | E(element) |
+|---|---|
+| `discovered_by: "playwright"` | 1.0 |
+| `discovered_by: "static_fallback"` | 0.5 |
+| Not found | 0.0 |
 
-**Note on `api_calls_observed`:** Step 5's passive crawl only captures page-load GET requests. It does NOT capture POST/PUT/DELETE triggered by form submissions (Step 5 never fills forms). `api_calls_observed` is therefore not used for E() scoring — it is only used as a supplementary cross-check against Step 4's static endpoint list. The L3 signal comes entirely from Step 4.
+LLM batch call per page: given primary element entity labels from requirements sharing this page + Step 5 `elements[]` on matched page → `matched: true | false` per entity (fuzzy label matching — "add task control" vs "Add a task... (input)").
+
+**action `edge` entity** (edge label implies HTTP mutation — submit/create/add/delete/remove/update/save/mark):
+
+| Endpoint in Step 4 | Triggering element on matched page in Step 5 | E(action_edge) |
+|---|---|---|
+| ✓ | found | 1.0 |
+| ✓ | not found | 0.5 |
+| ✗ | found | 0.4 |
+| ✗ | not found | 0.0 |
+
+HTTP verb heuristic on edge label: submit/add/create → POST; remove/delete → DELETE; update/edit/save/mark → PATCH or PUT; view/navigate/load → GET. LLM batch call: edge label + requirement description + Step 4 endpoint list → matched endpoint or null.
+
+**navigation `edge` entity** (navigate/go to/return/open — no HTTP mutation implied):
+Not scored. Outbound link detection in Step 5 is unreliable for programmatic navigation (React Router `history.push()` does not appear in `outbound_links`). Navigation correctness is verified in Step 11 (E2E test execution), not Step 6. Navigation edges are excluded from P and S counts in the aggregation formula.
+
+**Aggregation:**
+```
+E(req) = α   × [∑ E(primary_i,  excluding nav edges) / P]
+       + (1-α) × [∑ E(secondary_j, excluding nav edges) / S]
+where α = 0.7. If S = 0, α = 1.0.
+```
+
+**Note on `api_calls_observed`:** Step 5's passive crawl only captures page-load GET requests. POST/PUT/DELETE from form submissions are never observed. `api_calls_observed` is supplementary cross-check against Step 4 only — not used for E() scoring. The L3 signal comes entirely from Step 4 `api_endpoints`.
 
 **Unlinked detection:**
 ```python
@@ -965,28 +990,21 @@ l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys_by_
       "req_id": "REQ-001",
       "description": "User can log in",
       "e_score": 1.0,
-      "l2_score": 1.0,
-      "l3_score": 1.0,
-      "l2_detail": {
-        "matched_page": "/login",
-        "page_accessible": true,
-        "element_matches": [
-          { "entity_label": "email input",    "matched_selector": "input[type='email']",    "primary": true  },
-          { "entity_label": "password input", "matched_selector": "input[type='password']", "primary": true  },
-          { "entity_label": "login button",   "matched_selector": "button[type='submit']",  "primary": true  }
-        ],
-        "unmatched_entities": []
-      },
-      "l3_detail": {
-        "matched_endpoint": { "method": "POST", "path": "/api/auth/login", "handler": "login", "file": "routes/auth.py" }
-      }
+      "entity_scores": [
+        { "label": "Login Page",      "type": "node",    "primary": false, "e": 1.0, "evidence": "route /login found + page accessible" },
+        { "label": "email input",     "type": "element", "primary": true,  "e": 1.0, "matched_selector": "input[type='email']" },
+        { "label": "password input",  "type": "element", "primary": true,  "e": 1.0, "matched_selector": "input[type='password']" },
+        { "label": "login button",    "type": "element", "primary": true,  "e": 1.0, "matched_selector": "button[type='submit']" },
+        { "label": "submit login",    "type": "edge",    "primary": true,  "e": 1.0, "matched_endpoint": "POST /api/auth/login", "edge_kind": "action" },
+        { "label": "navigate to dashboard", "type": "edge", "primary": true, "e": null, "edge_kind": "navigation", "note": "not scored" }
+      ]
     }
   ],
   "unlinked_l2": [
-    { "route": "/admin", "title": "Admin Panel", "note": "No L1a requirement's path[] node visits this route" }
+    { "route": "/admin", "title": "Admin Panel", "note": "No L1a requirement's path[] node entity matched this route" }
   ],
   "unlinked_l3": [
-    { "method": "DELETE", "path": "/api/users/:id", "handler": "delete_user", "file": "routes/users.py", "note": "No L1a requirement's L3 signal matched this endpoint" }
+    { "method": "DELETE", "path": "/api/users/:id", "handler": "delete_user", "file": "routes/users.py", "note": "No L1a requirement matched this endpoint as its L3 signal" }
   ]
 }
 ```
