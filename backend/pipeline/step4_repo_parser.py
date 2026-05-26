@@ -547,7 +547,7 @@ def _endpoints_spring(files: list[Path], root: Path) -> list[dict]:
 # ─────────────────────────────────────────────────────────────
 
 _ROUTE_OBJ_PATH = re.compile(r"""(?:path|to)\s*:\s*['"]([^'"]+)['"]""")
-_VUE_ROUTE_PATH = re.compile(r"""path\s*:\s*['"]([^'"]+)['"]""")
+_VUE_ROUTE_PATH = re.compile(r"""path\s*:\s*['"]([^'"]*)['"]""")
 
 
 def _extract_frontend_routes(
