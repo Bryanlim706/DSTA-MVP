@@ -826,6 +826,22 @@ Exact fields per edge:
 **Input:** `step_3_5.project_context` — `backend_framework` + `frontend_framework` determine which extraction strategies to run.
 **Ignores:** node_modules, .git, dist, build, .next, venv, __pycache__, coverage, target, .gradle, examples, demo, sample
 
+**What Step 4 is building and why:**
+Step 4 is the static code analysis pass. It reads the codebase without executing it and builds the L3 inventory — what is *implemented* in the source. This feeds Step 6's E() scoring: for each entity in a requirement's `path[]`, Step 6 asks "does this exist in L3?" and "does this exist in L2 (Step 5)?" The answers determine E() per entity, which rolls up to FCom and FA.
+
+**Extracted domains — purpose and layer:**
+
+| Domain | Layer | Purpose in scoring |
+|---|---|---|
+| `languages` | Context | Reporting and Step 15/16 evidence pack only. Not used in E() formula. |
+| `frontend_routes` | L3 seed → L2 seed | Two jobs: (1) L3 evidence for `node` entity E() — if a route isn't here, node E() ≤ 0.5; (2) crawl seed list for Step 5 — Playwright visits each route in this list. |
+| `api_endpoints` | L3 (raw) | Raw backend handler list. Consumed by Step 6 for unlinked L3 detection (endpoints not matched by any L1a requirement). Also used before wrapping into `implementation_units`. |
+| `implementation_units` | L3 (action signal) | Authoritative L3 signal for **action edge E() scoring** in Step 6. Wraps `api_endpoints` plus SSR HTML form handlers (`kind: "form_handler"`) so both REST apps and traditional form-submission apps are covered by the same scoring path. |
+| `route_to_files` | Infrastructure | Not a scoring entity. Maps frontend route → source file(s) so Step 5's static fallback knows which files to Tree-sitter-parse when Playwright can't visit an auth-gated route. |
+| `database_models` | Context | Not used in E() scoring. Feeds Step 7.5 (positive-grounded FA advisor) — the LLM uses model names to generate codebase-specific improvement suggestions. Also in Step 15/16 evidence pack. |
+| `existing_tests` | Context | Not used in E() scoring. Step 15 reports test coverage; low/zero test count influences Step 7 advisory and Step 9 scaffolding decisions. |
+| `important_files` | Infrastructure | Not a scoring entity. Fallback list for Step 5: when `route_to_files` has no specific entry for a route, Step 5 Tree-sitter-parses these files instead. |
+
 **Extraction strategies:**
 - **Languages:** file extension counts → ordered list (most files first)
 - **API endpoints:** dispatched on `backend_framework` — Flask/FastAPI (tree-sitter Python decorated_definition + decorator regex), Django (regex on urls.py), Spring Boot (tree-sitter Java two-level: class `@RequestMapping` base + method `@GetMapping` etc.; Kotlin regex fallback), Express/NestJS (regex on .js/.ts)
@@ -880,6 +896,19 @@ Exact fields per edge:
 **Input:**
 - `step_3_5.project_context` (`project_type`, `frontend_framework`, `backend_framework`, `service_layout`, `frontend_tooling`, `test_strategy`) — bootstrap strategy + crawl mode
 - Step 4 result: `frontend_routes` (crawl seed list), `route_to_files` (static fallback: which source files to parse per route), `important_files` (fallback when route_to_files has no entry)
+
+**What Step 5 is building and why:**
+Step 5 is the runtime observation pass. It boots the actual app and records what a user can see and interact with — this is the L2 inventory. L3 (Step 4) tells you what the code declares; L2 (Step 5) tells you what actually renders when someone uses it. The distinction matters: a backend endpoint can exist in L3 but be unreachable via the UI (E()=0.5), or a UI element can exist in L2 but have no backend handler (E()=0.4). Step 6 computes E() by comparing L1a path entities against both layers simultaneously.
+
+**Extracted domains — purpose and layer:**
+
+| Domain | Layer | Purpose in scoring |
+|---|---|---|
+| `pages[].route` + `accessible` | L2 (node signal) | **Node entity E() scoring.** Step 6 checks: was this route reachable by Playwright? `accessible: true` → node E()=1.0 (L2 ∧ L3). `discovered_by: "static_fallback"` → node E()=0.5 (L3 only, L2 unconfirmed). |
+| `pages[].elements` | L2 (element signal) | **Element entity E() scoring.** The interactive widgets (inputs, buttons, selects) found on each page at runtime. Step 6 fuzzy-matches L1a path `element` entities against this list. `discovered_by: "playwright"` → element E()=1.0. `discovered_by: "static_fallback"` → element E()=0.5. |
+| `pages[].outbound_links` | Context | Not used in E() scoring. Navigation edges are excluded from the E() formula (programmatic navigation via `history.push()` is invisible to link detection). Outbound links are included for completeness and Step 15 reporting only. |
+| `pages[].api_calls_observed` | Context | **Supplementary cross-check only — not used for E() scoring.** Passive crawl captures page-load GET requests only; POST/PUT/DELETE from user interactions are never observed. Used to cross-reference Step 4 endpoints in Step 15 evidence pack. The L3 signal for action edge scoring comes from Step 4 `implementation_units`, not from this field. |
+| `unvisitable_routes` | Infrastructure | Drives the static fallback decision. Routes Playwright couldn't reach (auth-gated, redirect loop) trigger Tree-sitter parsing of `route_to_files` source files. The resulting elements are marked `discovered_by: "static_fallback"` and score at 0.5 rather than 1.0 in Step 6. |
 
 **Why no LLM here:**
 L1a requirements already contain `path: PathEntity[]` specifying which pages, elements, and edges each requirement asserts. Step 5 only collects what the running app actually has; Step 6 matches L1a path entities against it using an LLM fuzzy match. Step 5 itself is pure extraction — no judgment.
