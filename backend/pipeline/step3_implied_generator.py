@@ -313,7 +313,10 @@ def _validate_and_normalise(
         item.setdefault("functional_area", "general")
 
         raw_deps = item.get("depends_on", [])
-        item["depends_on"] = [d for d in (raw_deps if isinstance(raw_deps, list) else []) if d in valid_step1_ids]
+        item["depends_on"] = [
+            d for d in (raw_deps if isinstance(raw_deps, list) else [])
+            if isinstance(d, str) and d in valid_step1_ids
+        ]
 
         # Validate unpacks pointer
         unpacks = item.get("unpacks")

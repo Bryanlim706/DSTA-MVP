@@ -64,7 +64,15 @@ def _bootstrap_commands(ctx: dict, root: Path) -> list[_BootSpec]:
         else:
             # SSR: crawl via the backend renderer
             spec = _backend_spec(root, backend_fw)
-            return [spec] if spec else []
+            if spec:
+                return [spec]
+            # Backend not found (nested structure / non-standard dirs); try frontend fallback
+            if frontend_fw:
+                frontend_dir = _find_frontend_dir(root)
+                if frontend_dir:
+                    cmd, port = _npm_cmd(frontend_dir, tooling, frontend_fw)
+                    return [(cmd, port, frontend_dir)]
+            return []
 
     return []
 
@@ -92,26 +100,62 @@ def _backend_spec(root: Path, backend_fw: str) -> _BootSpec | None:
     if "express" in backend_fw or "nestjs" in backend_fw:
         return ([npm, "start"], _PORT_BACKEND_EXPRESS, root)
     if "spring" in backend_fw:
-        if (root / "mvnw.cmd").exists():
-            return (
-                ["cmd", "/c", "mvnw.cmd", "spring-boot:run",
-                 f"-Dspring-boot.run.jvmArguments=-Dserver.port={_PORT_BACKEND}"],
-                _PORT_BACKEND, root,
-            )
-        if (root / "mvnw").exists():
-            return (
-                [str(root / "mvnw"), "spring-boot:run",
-                 f"-Dspring-boot.run.jvmArguments=-Dserver.port={_PORT_BACKEND}"],
-                _PORT_BACKEND, root,
-            )
+        # Search root and up to 2 levels of subdirs for mvnw.cmd/mvnw
+        # (handles nested zip structures where the project is not at root)
+        search_dirs = [root]
+        for d1 in sorted(root.iterdir()):
+            if d1.is_dir():
+                search_dirs.append(d1)
+                for d2 in sorted(d1.iterdir()):
+                    if d2.is_dir():
+                        search_dirs.append(d2)
+        for spring_root in search_dirs:
+            if (spring_root / "mvnw.cmd").exists():
+                return (
+                    ["cmd", "/c", str(spring_root / "mvnw.cmd"), "spring-boot:run",
+                     f"-Dspring-boot.run.jvmArguments=-Dserver.port={_PORT_BACKEND}"],
+                    _PORT_BACKEND, spring_root,
+                )
+            if (spring_root / "mvnw").exists():
+                return (
+                    [str(spring_root / "mvnw"), "spring-boot:run",
+                     f"-Dspring-boot.run.jvmArguments=-Dserver.port={_PORT_BACKEND}"],
+                    _PORT_BACKEND, spring_root,
+                )
     return None
 
 
+_FRONTEND_DEPS = {"react", "vue", "@angular/core", "svelte", "@sveltejs/kit", "vite", "next"}
+
+
 def _find_frontend_dir(root: Path) -> Path | None:
+    """Return the frontend dir: standard names first, then any subdir with package.json + frontend dep."""
     for name in ("frontend", "client", "web", "ui"):
         d = root / name
         if d.is_dir() and (d / "package.json").exists():
             return d
+
+    def _is_frontend(d: Path) -> bool:
+        pkg = d / "package.json"
+        if not pkg.exists():
+            return False
+        try:
+            import json as _json
+            data = _json.loads(pkg.read_text(encoding="utf-8", errors="replace"))
+            all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+            return bool(_FRONTEND_DEPS & set(all_deps))
+        except Exception:
+            return False
+
+    # Scan up to 2 levels deep (handles nested zip structures)
+    for lvl1 in sorted(root.iterdir()):
+        if not lvl1.is_dir():
+            continue
+        if _is_frontend(lvl1):
+            return lvl1
+        for lvl2 in sorted(lvl1.iterdir()):
+            if lvl2.is_dir() and _is_frontend(lvl2):
+                return lvl2
     return None
 
 
@@ -311,7 +355,7 @@ _JSX_INPUT_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _JSX_BUTTON_RE = re.compile(
-    r"""<[Bb]utton\b([^>]*?)>([^<]{1,80})</[Bb]utton>""",
+    r"""<[Bb]utton\b([^>]*?)>(.*?)</[Bb]utton>""",
     re.DOTALL,
 )
 _ATTR_ARIA = re.compile(r"""aria-label\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
@@ -320,6 +364,17 @@ _ATTR_NAME = re.compile(r"""\bname\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
 _ATTR_TYPE = re.compile(r"""\btype\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
 
 _STATIC_EXTS = {".tsx", ".jsx", ".ts", ".js", ".html", ".jinja2", ".j2", ".erb", ".ejs"}
+
+# Comment patterns to strip before element extraction
+_JSX_BLOCK_COMMENT_RE = re.compile(r'\{/\*.*?\*/\}', re.DOTALL)
+_LINE_COMMENT_ONLY_RE = re.compile(r'^\s*//.*$', re.MULTILINE)
+
+
+def _strip_comments(text: str) -> str:
+    """Strip JSX block comments {/* */} and lines that are purely // comments."""
+    text = _JSX_BLOCK_COMMENT_RE.sub('', text)
+    text = _LINE_COMMENT_ONLY_RE.sub('', text)
+    return text
 
 
 def _label_from_attrs(attrs: str) -> str | None:
@@ -333,6 +388,7 @@ def _label_from_attrs(attrs: str) -> str | None:
 
 
 def _static_elements_from_text(text: str) -> list[dict]:
+    text = _strip_comments(text)
     elements: list[dict] = []
     seen: set[tuple[str, str | None]] = set()
 
@@ -352,11 +408,22 @@ def _static_elements_from_text(text: str) -> list[dict]:
 
     for m in _JSX_BUTTON_RE.finditer(text):
         attrs = m.group(1)
-        text_content = m.group(2).strip()
+        raw_text = m.group(2).strip()
+        # Arrow functions like onClick={(e) => {...}} cause the regex to capture
+        # everything after the `>` in `=>` as text content. Take only the part
+        # after the last `>` (the real tag close).
+        if '>' in raw_text:
+            raw_text = raw_text.rsplit('>', 1)[1].strip()
+        # If remaining text is a JSX expression {expr}, extract first quoted string
+        if raw_text.startswith('{') and not raw_text.strip('{}').strip():
+            raw_text = ''
+        elif raw_text.startswith('{'):
+            qm = re.search(r'"([^"]{1,80})"', raw_text)
+            raw_text = qm.group(1) if qm else re.sub(r'\{[^{}]*\}', '', raw_text).strip()
         type_m = _ATTR_TYPE.search(attrs)
         subtype = type_m.group(1) if type_m else None
         aria_m = _ATTR_ARIA.search(attrs)
-        label = (aria_m.group(1) if aria_m else text_content)[:80]
+        label = (aria_m.group(1) if aria_m else raw_text)[:80]
         if not label:
             continue
         key = (label, subtype)

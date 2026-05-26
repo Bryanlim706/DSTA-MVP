@@ -90,7 +90,7 @@ with warnings.catch_warnings():
         "  name: (identifier) @method_name)",
     )
 
-    # TSX/JSX: self-closing <Route path="..." />
+    # TSX: self-closing <Route path="..." />  (.tsx files)
     _Q_TSX_ROUTE_SC = Query(
         _LANG_TSX,
         "(jsx_self_closing_element"
@@ -100,9 +100,30 @@ with warnings.catch_warnings():
         "    (string (string_fragment) @path)))",
     )
 
-    # TSX/JSX: <Route path="...">...</Route>
+    # TSX: <Route path="...">...</Route>  (.tsx files)
     _Q_TSX_ROUTE_OPEN = Query(
         _LANG_TSX,
+        "(jsx_element"
+        "  open_tag: (jsx_opening_element"
+        "    name: (identifier) @tag"
+        "    (jsx_attribute"
+        "      (property_identifier) @attr"
+        "      (string (string_fragment) @path))))",
+    )
+
+    # JS: self-closing <Route path="..." />  (.jsx/.js files — same pattern, different language)
+    _Q_JS_ROUTE_SC = Query(
+        _LANG_JS,
+        "(jsx_self_closing_element"
+        "  name: (identifier) @tag"
+        "  (jsx_attribute"
+        "    (property_identifier) @attr"
+        "    (string (string_fragment) @path)))",
+    )
+
+    # JS: <Route path="...">...</Route>  (.jsx/.js files)
+    _Q_JS_ROUTE_OPEN = Query(
+        _LANG_JS,
         "(jsx_element"
         "  open_tag: (jsx_opening_element"
         "    name: (identifier) @tag"
@@ -547,6 +568,14 @@ def _endpoints_spring(files: list[Path], root: Path) -> list[dict]:
 # ─────────────────────────────────────────────────────────────
 
 _ROUTE_OBJ_PATH = re.compile(r"""(?:path|to)\s*:\s*['"]([^'"]+)['"]""")
+
+# React Router: extract route→component from <Route path="..." element={<ComponentName
+_ROUTE_COMPONENT_RE = re.compile(
+    r"""path\s*=\s*["']([^"']+)["'](?:[^>]*?\n?)*?element\s*=\s*\{[^<]*<(\w+)""",
+    re.DOTALL,
+)
+# Import statement: import Name from "path"
+_IMPORT_NAME_RE = re.compile(r"""import\s+(\w+)\s+from\s+['"]([^'"]+)['"]""")
 _VUE_ROUTE_PATH = re.compile(r"""path\s*:\s*['"]([^'"]*)['"]""")
 
 
@@ -606,8 +635,11 @@ def _extract_frontend_routes(
         if not parsed:
             continue
         _, tree = parsed
+        # Use JS queries for .jsx/.js files; TSX queries for .tsx files
+        q_sc = _Q_JS_ROUTE_SC if f.suffix in {".jsx", ".js"} else _Q_TSX_ROUTE_SC
+        q_open = _Q_JS_ROUTE_OPEN if f.suffix in {".jsx", ".js"} else _Q_TSX_ROUTE_OPEN
         # Self-closing
-        for _, caps in _run_query(_Q_TSX_ROUTE_SC, tree.root_node):
+        for _, caps in _run_query(q_sc, tree.root_node):
             tag_nodes = caps.get("tag", [])
             attr_nodes = caps.get("attr", [])
             path_nodes = caps.get("path", [])
@@ -618,7 +650,7 @@ def _extract_frontend_routes(
             ):
                 routes.add(_norm_path(_text(path_nodes[0])))
         # Opening element
-        for _, caps in _run_query(_Q_TSX_ROUTE_OPEN, tree.root_node):
+        for _, caps in _run_query(q_open, tree.root_node):
             tag_nodes = caps.get("tag", [])
             attr_nodes = caps.get("attr", [])
             path_nodes = caps.get("path", [])
@@ -847,6 +879,39 @@ def _identify_important_files(
 # ─────────────────────────────────────────────────────────────
 
 
+def _route_component_files(router_file: Path, root: Path) -> dict[str, str]:
+    """Given a React Router file, return {route: component_file_rel_path} by parsing
+    element={<ComponentName />} attributes and resolving imports."""
+    try:
+        text = router_file.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {}
+
+    # Build import map: ComponentName → resolved relative path
+    imports: dict[str, str] = {}
+    for m in _IMPORT_NAME_RE.finditer(text):
+        name = m.group(1)
+        import_path = m.group(2)
+        if not import_path.startswith("."):
+            continue
+        base = router_file.parent / import_path
+        for ext in ("", ".jsx", ".tsx", ".js", ".ts", "/index.jsx", "/index.tsx", "/index.js"):
+            candidate = Path(str(base) + ext) if ext and not ext.startswith("/") else base / ext.lstrip("/")
+            if candidate.is_file():
+                imports[name] = _rel(candidate, root)
+                break
+
+    # Map route → component file
+    result: dict[str, str] = {}
+    for m in _ROUTE_COMPONENT_RE.finditer(text):
+        route = _norm_path(m.group(1))
+        component_name = m.group(2)
+        comp_file = imports.get(component_name)
+        if comp_file:
+            result[route] = comp_file
+    return result
+
+
 def _build_route_to_files(
     all_files: list[Path],
     frontend_fw: str,
@@ -910,24 +975,35 @@ def _build_route_to_files(
         if not parsed:
             continue
         _, tree = parsed
+        q_sc = _Q_JS_ROUTE_SC if f.suffix in {".jsx", ".js"} else _Q_TSX_ROUTE_SC
+        q_open = _Q_JS_ROUTE_OPEN if f.suffix in {".jsx", ".js"} else _Q_TSX_ROUTE_OPEN
         found: set[str] = set()
-        for _, caps in _run_query(_Q_TSX_ROUTE_SC, tree.root_node):
+        for _, caps in _run_query(q_sc, tree.root_node):
             tag_n = caps.get("tag", [])
             attr_n = caps.get("attr", [])
             path_n = caps.get("path", [])
             if tag_n and attr_n and path_n and _text(tag_n[0]) == "Route" and _text(attr_n[0]) == "path":
                 found.add(_norm_path(_text(path_n[0])))
-        for _, caps in _run_query(_Q_TSX_ROUTE_OPEN, tree.root_node):
+        for _, caps in _run_query(q_open, tree.root_node):
             tag_n = caps.get("tag", [])
             attr_n = caps.get("attr", [])
             path_n = caps.get("path", [])
             if tag_n and attr_n and path_n and _text(tag_n[0]) == "Route" and _text(attr_n[0]) == "path":
                 found.add(_norm_path(_text(path_n[0])))
+        if not found:
+            continue
         rel_f = _rel(f, root)
         for r in found:
             lst = route_files.setdefault(r, [])
             if rel_f not in lst:
                 lst.append(rel_f)
+        # Also add each route's rendered component file (from element={<ComponentName />})
+        comp_map = _route_component_files(f, root)
+        for r, comp_file in comp_map.items():
+            if r in found and comp_file:
+                lst = route_files.setdefault(r, [])
+                if comp_file not in lst:
+                    lst.append(comp_file)
 
     if route_files:
         _fill_fallback(routes, route_files, important_files)
