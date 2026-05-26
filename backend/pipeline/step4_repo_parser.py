@@ -151,6 +151,18 @@ _ANN_TO_METHOD: dict[bytes, str] = {
     b"RequestMapping": "GET",
 }
 
+# Template file extensions for form_handler and route_to_files detection
+_TEMPLATE_EXTS = {
+    ".html", ".htm", ".jinja2", ".jinja", ".j2",
+    ".ejs", ".erb", ".cshtml", ".twig",
+}
+_TEMPLATE_DIRS = {"templates", "views", "partials", "layouts"}
+
+# HTML form tag parsing
+_FORM_TAG_RE = re.compile(r"<form\b([^>]*)>", re.IGNORECASE | re.DOTALL)
+_FORM_METHOD_RE = re.compile(r'\bmethod\s*=\s*["\']?(\w+)', re.IGNORECASE)
+_FORM_ACTION_RE = re.compile(r'\baction\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
+
 # ─────────────────────────────────────────────────────────────
 # Public entry point
 # ─────────────────────────────────────────────────────────────
@@ -170,11 +182,15 @@ async def run(step3_5_result: dict, extract_to: Path) -> dict:
         routes = _extract_frontend_routes(all_files, frontend_fw, extract_to)
         models = _extract_database_models(all_files, backend_fw)
         important = _identify_important_files(all_files, extract_to, endpoints)
+        route_to_files = _build_route_to_files(all_files, frontend_fw, extract_to, routes, endpoints, important)
+        impl_units = _build_implementation_units(endpoints, all_files, extract_to)
 
         return {
             "languages": languages,
             "frontend_routes": routes,
             "api_endpoints": endpoints,
+            "route_to_files": route_to_files,
+            "implementation_units": impl_units,
             "database_models": models,
             "important_files": important,
             "existing_tests": tests,
@@ -187,6 +203,8 @@ async def run(step3_5_result: dict, extract_to: Path) -> dict:
             "languages": [],
             "frontend_routes": [],
             "api_endpoints": [],
+            "route_to_files": {},
+            "implementation_units": [],
             "database_models": [],
             "important_files": [],
             "existing_tests": [],
@@ -822,3 +840,199 @@ def _identify_important_files(
             important.add(_rel(f, root))
 
     return sorted(important)[:20]
+
+
+# ─────────────────────────────────────────────────────────────
+# route_to_files: maps each frontend route → source file(s)
+# ─────────────────────────────────────────────────────────────
+
+
+def _build_route_to_files(
+    all_files: list[Path],
+    frontend_fw: str,
+    root: Path,
+    routes: list[str],
+    endpoints: list[dict],
+    important_files: list[str],
+) -> dict[str, list[str]]:
+    route_files: dict[str, list[str]] = {}
+
+    # ── Next.js pages/ (file-based routing) ──────────────────
+    for base_name in ("pages", "src/pages"):
+        pages_dir = root / base_name
+        if pages_dir.is_dir():
+            for f in pages_dir.rglob("*"):
+                if (
+                    f.is_file()
+                    and f.suffix in {".tsx", ".ts", ".jsx", ".js"}
+                    and not f.name.startswith("_")
+                    and not any(part in IGNORE_DIRS for part in f.parts)
+                ):
+                    r = _nextjs_path(f.relative_to(pages_dir))
+                    if r:
+                        route_files.setdefault(r, []).append(_rel(f, root))
+            if route_files:
+                _fill_fallback(routes, route_files, important_files)
+                return route_files
+
+    # ── Next.js App Router (app/) ─────────────────────────────
+    for base_name in ("app", "src/app"):
+        app_dir = root / base_name
+        if app_dir.is_dir():
+            for f in app_dir.rglob("page.tsx"):
+                if not any(part in IGNORE_DIRS for part in f.parts):
+                    rel = f.parent.relative_to(app_dir)
+                    route = _norm_path("/" + "/".join(rel.parts) if rel.parts else "/")
+                    route_files.setdefault(route, []).append(_rel(f, root))
+            if route_files:
+                _fill_fallback(routes, route_files, important_files)
+                return route_files
+
+    # ── SvelteKit (src/routes/) ───────────────────────────────
+    svelte_dir = root / "src" / "routes"
+    if svelte_dir.is_dir():
+        for f in svelte_dir.rglob("+page.svelte"):
+            if not any(part in IGNORE_DIRS for part in f.parts):
+                rel = f.parent.relative_to(svelte_dir)
+                route = _norm_path("/" + "/".join(rel.parts) if rel.parts else "/")
+                route_files.setdefault(route, []).append(_rel(f, root))
+        if route_files:
+            _fill_fallback(routes, route_files, important_files)
+            return route_files
+
+    # ── React Router: JSX files containing <Route path="..."> ─
+    for f in all_files:
+        if f.suffix not in {".tsx", ".jsx"}:
+            continue
+        if any(p in IGNORE_DIRS for p in f.parts):
+            continue
+        parsed = _ts_parse(f)
+        if not parsed:
+            continue
+        _, tree = parsed
+        found: set[str] = set()
+        for _, caps in _run_query(_Q_TSX_ROUTE_SC, tree.root_node):
+            tag_n = caps.get("tag", [])
+            attr_n = caps.get("attr", [])
+            path_n = caps.get("path", [])
+            if tag_n and attr_n and path_n and _text(tag_n[0]) == "Route" and _text(attr_n[0]) == "path":
+                found.add(_norm_path(_text(path_n[0])))
+        for _, caps in _run_query(_Q_TSX_ROUTE_OPEN, tree.root_node):
+            tag_n = caps.get("tag", [])
+            attr_n = caps.get("attr", [])
+            path_n = caps.get("path", [])
+            if tag_n and attr_n and path_n and _text(tag_n[0]) == "Route" and _text(attr_n[0]) == "path":
+                found.add(_norm_path(_text(path_n[0])))
+        rel_f = _rel(f, root)
+        for r in found:
+            lst = route_files.setdefault(r, [])
+            if rel_f not in lst:
+                lst.append(rel_f)
+
+    if route_files:
+        _fill_fallback(routes, route_files, important_files)
+        return route_files
+
+    # ── SSR (Flask/Django): endpoint file → route, then templates ──
+    # Use sets to accumulate, convert to list at end to avoid duplicates
+    route_file_sets: dict[str, set[str]] = {}
+
+    for ep in endpoints:
+        ep_path = ep.get("path", "")
+        if ep_path in routes and ep.get("file"):
+            route_file_sets.setdefault(ep_path, set()).add(ep["file"])
+
+    # Template files: match stem to route (e.g. login.html → /login)
+    for f in all_files:
+        if f.suffix.lower() not in _TEMPLATE_EXTS:
+            continue
+        if any(p in IGNORE_DIRS for p in f.parts):
+            continue
+        if not any(part in _TEMPLATE_DIRS for part in f.parts):
+            continue
+        slug = "/" + f.stem if f.stem != "index" else "/"
+        if slug in routes:
+            route_file_sets.setdefault(slug, set()).add(_rel(f, root))
+
+    # Static HTML fallback
+    for f in all_files:
+        if f.suffix != ".html" or any(p in IGNORE_DIRS for p in f.parts):
+            continue
+        slug = "/" if f.stem == "index" else f"/{f.stem}"
+        if slug in routes:
+            route_file_sets.setdefault(slug, set()).add(_rel(f, root))
+
+    for route, file_set in route_file_sets.items():
+        route_files[route] = sorted(file_set)
+
+    _fill_fallback(routes, route_files, important_files)
+    return route_files
+
+
+def _fill_fallback(
+    routes: list[str],
+    route_files: dict[str, list[str]],
+    important_files: list[str],
+) -> None:
+    fallback = important_files[:5]
+    for route in routes:
+        if route not in route_files:
+            route_files[route] = fallback
+
+
+# ─────────────────────────────────────────────────────────────
+# implementation_units: generalised api_endpoints + form_handlers
+# ─────────────────────────────────────────────────────────────
+
+
+def _build_implementation_units(
+    endpoints: list[dict],
+    all_files: list[Path],
+    root: Path,
+) -> list[dict]:
+    units: list[dict] = []
+
+    # Wrap all existing api_endpoints
+    for ep in endpoints:
+        units.append({
+            "kind": "api_endpoint",
+            "method": ep.get("method"),
+            "path": ep.get("path"),
+            "file": ep.get("file"),
+            "handler": ep.get("handler"),
+        })
+
+    # HTML template form handlers
+    seen: set[tuple[str | None, str | None]] = set()
+    for f in all_files:
+        suffix = f.suffix.lower()
+        is_template = suffix in _TEMPLATE_EXTS or f.name.endswith(".blade.php")
+        if not is_template:
+            continue
+        if any(p in IGNORE_DIRS for p in f.parts):
+            continue
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        for m in _FORM_TAG_RE.finditer(text):
+            attrs = m.group(1)
+            method_m = _FORM_METHOD_RE.search(attrs)
+            action_m = _FORM_ACTION_RE.search(attrs)
+            method = method_m.group(1).upper() if method_m else "POST"
+            if method not in {"POST", "PUT", "DELETE", "PATCH"}:
+                continue
+            action = _norm_path(action_m.group(1)) if action_m else None
+            key = (method, action)
+            if key in seen:
+                continue
+            seen.add(key)
+            units.append({
+                "kind": "form_handler",
+                "method": method,
+                "path": action,
+                "file": _rel(f, root),
+                "handler": None,
+            })
+
+    return units

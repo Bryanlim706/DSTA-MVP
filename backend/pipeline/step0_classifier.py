@@ -109,6 +109,14 @@ _PYTHON_JINJA2_BACKENDS = {
     "aiohttp", "Tornado", "Bottle", "Sanic", "Quart",
 }
 
+# SPA frameworks render client-side — SSR template engines are not the rendering layer.
+# Meta-frameworks that do SSR (Next.js, Nuxt, SvelteKit, Remix, Gatsby) are NOT in this set.
+_SPA_FRAMEWORKS = {
+    "React", "Vue", "Angular", "Svelte", "Preact", "SolidJS",
+    "Qwik", "Alpine.js", "Ember", "Lit",
+    "React Native", "Expo",
+}
+
 
 def _has_html_views(file_tree: list[str]) -> bool:
     """True if the project appears to server-side render HTML pages."""
@@ -167,11 +175,30 @@ def _detect_template_engine(file_tree: list[str], java_build_content: str = "") 
     return None
 
 
-def _detect_service_layout(file_tree: list[str], project_type: str, template_engine: str | None) -> str:
+def _detect_service_layout(
+    file_tree: list[str],
+    project_type: str,
+    template_engine: str | None,
+    frontend_fw: str | None = None,
+) -> str:
     top_dirs = {p.split("/")[0] for p in file_tree if "/" in p}
-    frontend_dirs = {"frontend", "client", "web", "ui"}
-    backend_dirs = {"backend", "server", "api", "service"}
-    if top_dirs & frontend_dirs and top_dirs & backend_dirs:
+    frontend_kws = {"frontend", "client", "web", "ui"}
+    backend_kws = {"backend", "server", "api", "service"}
+
+    def _matches(d: str, kws: set[str]) -> bool:
+        dl = d.lower()
+        return any(
+            dl == kw or dl.startswith(kw + "-") or dl.startswith(kw + "_") or dl.startswith(kw + " ")
+            for kw in kws
+        )
+
+    has_frontend_dir = any(_matches(d, frontend_kws) for d in top_dirs)
+    has_backend_dir = any(_matches(d, backend_kws) for d in top_dirs)
+
+    if has_frontend_dir and has_backend_dir:
+        return "separate_frontend_backend"
+    # SPA in a frontend-named subdir alongside a non-frontend backend (e.g. Spring Boot in src/)
+    if has_frontend_dir and frontend_fw in _SPA_FRAMEWORKS and project_type == "full_stack_web_app":
         return "separate_frontend_backend"
     if project_type == "monorepo":
         return "monorepo"
@@ -754,9 +781,12 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
     jbc = _java_build_content(scan.get("config_files", {}))
     frontend_tooling = _detect_frontend_tooling(js_deps, file_tree)
     template_engine = _detect_template_engine(file_tree, jbc)
-    if template_engine is None and project_type == "full_stack_web_app" and backend_framework in _PYTHON_JINJA2_BACKENDS and _has_html_views(file_tree):
+    if frontend_fw in _SPA_FRAMEWORKS:
+        # SPA handles rendering client-side; any SSR template engine found is not the rendering layer
+        template_engine = None
+    elif template_engine is None and project_type == "full_stack_web_app" and backend_framework in _PYTHON_JINJA2_BACKENDS and _has_html_views(file_tree):
         template_engine = "Jinja2"
-    service_layout = _detect_service_layout(file_tree, project_type, template_engine)
+    service_layout = _detect_service_layout(file_tree, project_type, template_engine, frontend_fw)
     server_routes = _detect_server_routes(frontend_fw, file_tree)
 
     return {
@@ -834,7 +864,9 @@ async def _classify_by_llm(scan: dict, client: anthropic.AsyncAnthropic) -> dict
         jbc = _java_build_content(scan.get("config_files", {}))
         parsed["frontend_tooling"] = _detect_frontend_tooling(scan["js_deps"], scan.get("file_tree", []))
         parsed["template_engine"] = _detect_template_engine(scan.get("file_tree", []), jbc)
-        if (
+        if parsed.get("frontend_framework") in _SPA_FRAMEWORKS:
+            parsed["template_engine"] = None
+        elif (
             parsed["template_engine"] is None
             and parsed.get("project_type") == "full_stack_web_app"
             and parsed.get("backend_framework") in _PYTHON_JINJA2_BACKENDS
@@ -842,7 +874,8 @@ async def _classify_by_llm(scan: dict, client: anthropic.AsyncAnthropic) -> dict
         ):
             parsed["template_engine"] = "Jinja2"
         parsed["service_layout"] = _detect_service_layout(
-            scan.get("file_tree", []), parsed["project_type"], parsed["template_engine"]
+            scan.get("file_tree", []), parsed["project_type"], parsed["template_engine"],
+            parsed.get("frontend_framework"),
         )
         parsed["server_routes_detected"] = _detect_server_routes(
             parsed.get("frontend_framework"), scan.get("file_tree", [])
