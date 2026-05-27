@@ -1008,3 +1008,182 @@ def test_springboot_react_vite_full_parse(tmp_path):
     impl_units = _build_implementation_units(endpoints, files, root)
     assert all(u["kind"] == "api_endpoint" for u in impl_units)
     assert len(impl_units) == 3
+
+
+# ---------------------------------------------------------------------------
+# 15. Flask SSR endpoint-based route fallback
+# ---------------------------------------------------------------------------
+
+def test_flask_ssr_routes_from_endpoints_not_html(tmp_path):
+    """For Flask apps, frontend_routes should come from GET endpoint paths,
+    not from HTML template filenames (which include layouts and partials)."""
+    root = make_project(tmp_path, {
+        "app.py": (
+            "from flask import Flask, render_template\n"
+            "app = Flask(__name__)\n"
+            "@app.get('/')\n"
+            "def index(): return render_template('home.html')\n"
+            "@app.route('/login', methods=['GET', 'POST'])\n"
+            "def login(): return render_template('login.html')\n"
+            "@app.get('/logout')\n"
+            "def logout(): return redirect('/')\n"
+        ),
+        "templates/home.html": "<html></html>",
+        "templates/login.html": "<html></html>",
+        "templates/layout.html": "<html></html>",    # partial — should NOT be a route
+        "templates/macros.html": "<html></html>",    # partial — should NOT be a route
+    })
+    files = _walk_files(root)
+    endpoints = _extract_api_endpoints(files, "flask", root)
+    routes = _extract_frontend_routes(files, "", root, endpoints=endpoints)
+    # Routes from GET endpoints
+    assert "/" in routes
+    assert "/login" in routes
+    assert "/logout" in routes
+    # Partial/layout templates must NOT appear as routes
+    assert "/layout" not in routes
+    assert "/macros" not in routes
+    # home.html stem maps to /home — that should NOT appear (no /home GET endpoint)
+    assert "/home" not in routes
+
+
+def test_flask_ssr_root_route_present(tmp_path):
+    """/ must appear even when the index template is named home.html (not index.html)."""
+    root = make_project(tmp_path, {
+        "app.py": (
+            "@app.get('/')\n"
+            "def index(): return render_template('home.html')\n"
+        ),
+        "templates/home.html": "<html></html>",
+    })
+    files = _walk_files(root)
+    endpoints = _extract_api_endpoints(files, "flask", root)
+    routes = _extract_frontend_routes(files, "", root, endpoints=endpoints)
+    assert "/" in routes
+    assert "/home" not in routes
+
+
+# ---------------------------------------------------------------------------
+# 16. React SPA / Electron: route_to_files adds App component
+# ---------------------------------------------------------------------------
+
+def test_route_to_files_spa_adds_app_component_from_important(tmp_path):
+    """When route '/' maps only to an HTML shell, the App component from
+    important_files must also be added so Step 5 reads real JSX source."""
+    root = make_project(tmp_path, {
+        "public/index.html": "<html><body><div id='root'></div></body></html>",
+        "src/App.tsx": "export default function App() { return <div>hello</div>; }",
+    })
+    files = _walk_files(root)
+    routes = ["/"]
+    # important_files already contains App.tsx
+    important = ["public/index.html", "src/App.tsx"]
+    result = _build_route_to_files(files, "react", root, routes, [], important)
+    mapped = result.get("/", [])
+    assert "src/App.tsx" in mapped
+
+
+def test_route_to_files_spa_finds_app_component_from_walk(tmp_path):
+    """App component found via file-walk when not in important_files."""
+    root = make_project(tmp_path, {
+        "public/index.html": "<html></html>",
+        "src/App.jsx": "export default function App() {}",
+    })
+    files = _walk_files(root)
+    routes = ["/"]
+    result = _build_route_to_files(files, "react", root, routes, [], ["public/index.html"])
+    mapped = result.get("/", [])
+    assert "src/App.jsx" in mapped
+
+
+def test_route_to_files_spa_no_duplicate_app(tmp_path):
+    """App.tsx added only once even if present in both important_files and file-walk."""
+    root = make_project(tmp_path, {
+        "public/index.html": "<html></html>",
+        "src/App.tsx": "export default function App() {}",
+    })
+    files = _walk_files(root)
+    routes = ["/"]
+    important = ["public/index.html", "src/App.tsx"]
+    result = _build_route_to_files(files, "react", root, routes, [], important)
+    assert result.get("/", []).count("src/App.tsx") == 1
+
+
+# ---------------------------------------------------------------------------
+# 17. Blade template expression paths filtered from form_handlers
+# ---------------------------------------------------------------------------
+
+def test_impl_units_blade_expression_path_is_none(tmp_path):
+    """Blade template expressions like {{ route('x') }} cannot be resolved
+    statically and must be stored as path=None, not as a literal string."""
+    root = make_project(tmp_path, {
+        "resources/views/form.blade.php": (
+            "<form method='POST' action='{{ route(\"users.store\") }}'>\n"
+            "  <input type='text' name='name'>\n"
+            "</form>\n"
+        ),
+    })
+    files = _walk_files(root)
+    units = _build_implementation_units([], files, root)
+    form_units = [u for u in units if u["kind"] == "form_handler"]
+    assert len(form_units) == 1
+    assert form_units[0]["path"] is None   # expression, not a literal path
+
+
+def test_impl_units_blade_url_helper_path_is_none(tmp_path):
+    """{{ url('...') }} helper in action attribute → path=None."""
+    root = make_project(tmp_path, {
+        "resources/views/login.blade.php": (
+            "<form method='POST' action='{{ url(\"/auth/login\") }}'></form>\n"
+        ),
+    })
+    files = _walk_files(root)
+    units = _build_implementation_units([], files, root)
+    form_units = [u for u in units if u["kind"] == "form_handler"]
+    assert len(form_units) == 1
+    assert form_units[0]["path"] is None
+
+
+def test_impl_units_literal_blade_path_preserved(tmp_path):
+    """Literal (non-template-expression) action paths in Blade files are kept."""
+    root = make_project(tmp_path, {
+        "resources/views/settings.blade.php": (
+            "<form method='POST' action='/settings/save'></form>\n"
+        ),
+    })
+    files = _walk_files(root)
+    units = _build_implementation_units([], files, root)
+    form_units = [u for u in units if u["kind"] == "form_handler"]
+    assert len(form_units) == 1
+    assert form_units[0]["path"] == "/settings/save"
+
+
+# ---------------------------------------------------------------------------
+# 18. assets/ directory excluded from route and file walk
+# ---------------------------------------------------------------------------
+
+def test_walk_files_ignores_assets_dir(tmp_path):
+    """Files under assets/ must be excluded from _walk_files."""
+    root = make_project(tmp_path, {
+        "src/app.py": "# real source",
+        "public/assets/js/chart/index.html": "<html>chart lib</html>",
+        "public/assets/vendor/lib.js": "// third-party",
+    })
+    files = _walk_files(root)
+    paths = [str(f) for f in files]
+    assert any("app.py" in p for p in paths)
+    assert not any("chart" in p for p in paths)
+    assert not any("vendor" in p for p in paths)
+
+
+def test_routes_html_fallback_ignores_assets(tmp_path):
+    """HTML files inside assets/ must NOT appear in frontend_routes."""
+    root = make_project(tmp_path, {
+        "index.html": "<html></html>",                          # real entry
+        "public/assets/js/chart/index.html": "<html></html>",  # library file
+    })
+    files = _walk_files(root)
+    routes = _extract_frontend_routes(files, "", root)
+    assert "/" in routes
+    # The chart library html must not create a second '/' or any route
+    assert routes.count("/") == 1

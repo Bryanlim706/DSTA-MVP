@@ -141,6 +141,7 @@ IGNORE_DIRS = {
     "coverage", ".tox", ".mypy_cache", "target", ".gradle", "out", ".idea",
     ".vscode", ".cache", "vendor", "bower_components", "eggs", ".eggs",
     "htmlcov", ".pytest_cache", "examples", "demo", "demos", "sample", "samples",
+    "assets",  # static asset dirs (e.g. public/assets/js/) contain no app source
 }
 
 _LANG_NAMES: dict[str, str] = {
@@ -200,7 +201,7 @@ async def run(step3_5_result: dict, extract_to: Path) -> dict:
         languages = _detect_languages(all_files)
         tests = _find_test_files(all_files, extract_to)
         endpoints = _extract_api_endpoints(all_files, backend_fw, extract_to)
-        routes = _extract_frontend_routes(all_files, frontend_fw, extract_to)
+        routes = _extract_frontend_routes(all_files, frontend_fw, extract_to, endpoints=endpoints)
         models = _extract_database_models(all_files, backend_fw)
         important = _identify_important_files(all_files, extract_to, endpoints)
         route_to_files = _build_route_to_files(all_files, frontend_fw, extract_to, routes, endpoints, important)
@@ -580,7 +581,7 @@ _VUE_ROUTE_PATH = re.compile(r"""path\s*:\s*['"]([^'"]*)['"]""")
 
 
 def _extract_frontend_routes(
-    files: list[Path], frontend_fw: str, root: Path
+    files: list[Path], frontend_fw: str, root: Path, *, endpoints: list[dict] | None = None
 ) -> list[str]:
     routes: set[str] = set()
 
@@ -696,6 +697,14 @@ def _extract_frontend_routes(
             continue
         for m in _VUE_ROUTE_PATH.finditer(text):
             routes.add(_norm_path(m.group(1)))
+
+    # ── SSR endpoint fallback (Flask/Django/PHP — no JS frontend) ────────
+    # For SSR apps the HTML files are templates (includes layouts/partials).
+    # Use GET endpoint paths as the authoritative page list instead.
+    if not routes and not frontend_fw and endpoints:
+        for ep in endpoints:
+            if ep.get("method") == "GET" and ep.get("path"):
+                routes.add(_norm_path(ep["path"]))
 
     # ── Static HTML fallback ─────────────────────
     if not routes:
@@ -1038,6 +1047,26 @@ def _build_route_to_files(
         if slug in routes:
             route_file_sets.setdefault(slug, set()).add(_rel(f, root))
 
+    # For React SPA / Electron: route '/' maps to an HTML shell which has no
+    # interactive elements. Also add the main App component (App.tsx/App.jsx)
+    # so Step 5 static fallback reads real JSX source.
+    _APP_NAMES = {"App.tsx", "App.jsx", "App.ts", "App.js"}
+    for slug, file_set in route_file_sets.items():
+        if all(p.endswith(".html") for p in file_set):
+            # All mapped files are HTML shells — look for App component
+            app_file = next(
+                (imp for imp in important_files if Path(imp).name in _APP_NAMES),
+                None,
+            )
+            if app_file is None:
+                app_file = next(
+                    (_rel(f, root) for f in all_files if f.name in _APP_NAMES
+                     and not any(p in IGNORE_DIRS for p in f.parts)),
+                    None,
+                )
+            if app_file:
+                file_set.add(app_file)
+
     for route, file_set in route_file_sets.items():
         route_files[route] = sorted(file_set)
 
@@ -1098,7 +1127,11 @@ def _build_implementation_units(
             method = method_m.group(1).upper() if method_m else "POST"
             if method not in {"POST", "PUT", "DELETE", "PATCH"}:
                 continue
-            action = _norm_path(action_m.group(1)) if action_m else None
+            raw_action = action_m.group(1) if action_m else None
+            # Blade/Jinja/Twig template expressions can't be resolved statically
+            if raw_action and ("{{" in raw_action or "{%" in raw_action or raw_action.startswith("{")):
+                raw_action = None
+            action = _norm_path(raw_action) if raw_action else None
             key = (method, action)
             if key in seen:
                 continue
