@@ -26,6 +26,8 @@ from pipeline.step4_repo_parser import (
     _identify_important_files,
     _build_route_to_files,
     _build_implementation_units,
+    _shallow_component_imports,
+    _expand_with_shallow_imports,
 )
 
 
@@ -770,12 +772,12 @@ def test_important_angular_routing_module(tmp_path):
     important = _identify_important_files(files, root, [])
     assert "app/app-routing.module.ts" in important
 
-def test_important_capped_at_20(tmp_path):
-    files_dict = {f"dir{i}/main.py": "# entry" for i in range(25)}
+def test_important_capped_at_100(tmp_path):
+    files_dict = {f"dir{i}/main.py": "# entry" for i in range(110)}
     root = make_project(tmp_path, files_dict)
     files = _walk_files(root)
     important = _identify_important_files(files, root, [])
-    assert len(important) <= 20
+    assert len(important) <= 100
 
 
 # ---------------------------------------------------------------------------
@@ -788,8 +790,7 @@ def test_route_to_files_nextjs_exact_mapping(tmp_path):
         "pages/about.tsx": "export default function About() {}",
     })
     files = _walk_files(root)
-    routes = _extract_frontend_routes(files, "next.js", root)
-    result = _build_route_to_files(files, "next.js", root, routes, [], [])
+    result = _build_route_to_files(files, "next.js", root, [], [])
     assert result.get("/") == ["pages/index.tsx"]
     assert result.get("/about") == ["pages/about.tsx"]
 
@@ -799,8 +800,7 @@ def test_route_to_files_sveltekit_exact_mapping(tmp_path):
         "src/routes/about/+page.svelte": "<script></script>",
     })
     files = _walk_files(root)
-    routes = _extract_frontend_routes(files, "svelte", root)
-    result = _build_route_to_files(files, "svelte", root, routes, [], [])
+    result = _build_route_to_files(files, "svelte", root, [], [])
     assert result.get("/") == ["src/routes/+page.svelte"]
     assert result.get("/about") == ["src/routes/about/+page.svelte"]
 
@@ -818,21 +818,21 @@ def test_route_to_files_react_router_maps_jsx_file(tmp_path):
         ),
     })
     files = _walk_files(root)
-    routes = ["/dashboard"]
-    result = _build_route_to_files(files, "react", root, routes, [], [])
+    result = _build_route_to_files(files, "react", root, [], [])
     assert "src/App.tsx" in result.get("/dashboard", [])
 
-def test_route_to_files_fallback_for_unmapped(tmp_path):
+def test_route_to_files_no_mapping_for_missing_route(tmp_path):
+    """Routes with no backing file are absent from route_to_files after consolidation."""
     root = make_project(tmp_path, {
         "index.html": "<html/>",
         "about.html": "<html/>",
         "main.py": "# entry",
     })
     files = _walk_files(root)
-    routes = ["/", "/about", "/dashboard"]
-    important = ["main.py"]
-    result = _build_route_to_files(files, "", root, routes, [], important)
-    assert result.get("/dashboard") == ["main.py"]
+    result = _build_route_to_files(files, "", root, [], [])
+    assert "/" in result
+    assert "/about" in result
+    assert "/dashboard" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -998,7 +998,7 @@ def test_springboot_react_vite_full_parse(tmp_path):
 
     # route_to_files: React Router JSX file maps the routes
     important = _identify_important_files(files, root, endpoints)
-    rtf = _build_route_to_files(files, "react", root, routes, endpoints, important)
+    rtf = _build_route_to_files(files, "react", root, endpoints, important)
     assert any("frontend/src/App.tsx" in (rtf.get(r) or []) for r in ["/users", "/users/:id", "/"])
     # No SSR templates → no HTML file paths in route_to_files
     all_mapped_files = {f for flist in rtf.values() for f in flist}
@@ -1075,10 +1075,8 @@ def test_route_to_files_spa_adds_app_component_from_important(tmp_path):
         "src/App.tsx": "export default function App() { return <div>hello</div>; }",
     })
     files = _walk_files(root)
-    routes = ["/"]
-    # important_files already contains App.tsx
     important = ["public/index.html", "src/App.tsx"]
-    result = _build_route_to_files(files, "react", root, routes, [], important)
+    result = _build_route_to_files(files, "react", root, [], important)
     mapped = result.get("/", [])
     assert "src/App.tsx" in mapped
 
@@ -1090,8 +1088,7 @@ def test_route_to_files_spa_finds_app_component_from_walk(tmp_path):
         "src/App.jsx": "export default function App() {}",
     })
     files = _walk_files(root)
-    routes = ["/"]
-    result = _build_route_to_files(files, "react", root, routes, [], ["public/index.html"])
+    result = _build_route_to_files(files, "react", root, [], ["public/index.html"])
     mapped = result.get("/", [])
     assert "src/App.jsx" in mapped
 
@@ -1103,9 +1100,8 @@ def test_route_to_files_spa_no_duplicate_app(tmp_path):
         "src/App.tsx": "export default function App() {}",
     })
     files = _walk_files(root)
-    routes = ["/"]
     important = ["public/index.html", "src/App.tsx"]
-    result = _build_route_to_files(files, "react", root, routes, [], important)
+    result = _build_route_to_files(files, "react", root, [], important)
     assert result.get("/", []).count("src/App.tsx") == 1
 
 
@@ -1187,3 +1183,146 @@ def test_routes_html_fallback_ignores_assets(tmp_path):
     assert "/" in routes
     # The chart library html must not create a second '/' or any route
     assert routes.count("/") == 1
+
+
+# ---------------------------------------------------------------------------
+# 19. Shallow component import expansion for Step 5 static fallback
+# ---------------------------------------------------------------------------
+
+def test_shallow_component_imports_finds_local_jsx(tmp_path):
+    """Local .jsx import in a page component is returned as a relative path."""
+    root = make_project(tmp_path, {
+        "src/pages/Login.tsx": (
+            "import LoginForm from '../components/LoginForm';\n"
+            "export default function Login() { return <LoginForm />; }\n"
+        ),
+        "src/components/LoginForm.jsx": (
+            "export default function LoginForm() {\n"
+            "  return <form><input type='text' /><button>Submit</button></form>;\n"
+            "}\n"
+        ),
+    })
+    results = _shallow_component_imports("src/pages/Login.tsx", root)
+    assert "src/components/LoginForm.jsx" in results
+
+
+def test_shallow_component_imports_skips_node_modules(tmp_path):
+    """Imports from third-party packages (no leading '.') must not be included."""
+    root = make_project(tmp_path, {
+        "src/App.tsx": (
+            "import React from 'react';\n"
+            "import { Route } from 'react-router-dom';\n"
+            "export default function App() {}\n"
+        ),
+    })
+    results = _shallow_component_imports("src/App.tsx", root)
+    assert results == []
+
+
+def test_shallow_component_imports_skips_missing_files(tmp_path):
+    """Imports that don't resolve to an existing file are silently skipped."""
+    root = make_project(tmp_path, {
+        "src/pages/Dashboard.tsx": (
+            "import Chart from '../charts/Chart';\n"
+            "export default function Dashboard() {}\n"
+        ),
+        # Chart.tsx intentionally absent
+    })
+    results = _shallow_component_imports("src/pages/Dashboard.tsx", root)
+    assert results == []
+
+
+def test_shallow_component_imports_resolves_tsx_and_jsx(tmp_path):
+    """Both .tsx and .jsx child imports are resolved."""
+    root = make_project(tmp_path, {
+        "src/pages/Home.tsx": (
+            "import HeroSection from '../components/HeroSection';\n"
+            "import FooterBar from '../components/FooterBar';\n"
+            "export default function Home() {}\n"
+        ),
+        "src/components/HeroSection.tsx": "export default function HeroSection() {}",
+        "src/components/FooterBar.jsx": "export default function FooterBar() {}",
+    })
+    results = _shallow_component_imports("src/pages/Home.tsx", root)
+    assert "src/components/HeroSection.tsx" in results
+    assert "src/components/FooterBar.jsx" in results
+
+
+def test_expand_with_shallow_imports_react_router(tmp_path):
+    """For a React Router project, route_to_files must include child components
+    imported by the page component, not just the page file itself."""
+    root = make_project(tmp_path, {
+        "src/App.tsx": (
+            'import { Routes, Route } from "react-router-dom";\n'
+            'import Login from "./screens/Login";\n'
+            "export function App() {\n"
+            "  return (\n"
+            "    <Routes>\n"
+            '      <Route path="/login" element={<Login />} />\n'
+            "    </Routes>\n"
+            "  );\n"
+            "}\n"
+        ),
+        "src/screens/Login.tsx": (
+            'import LoginForm from "../components/LoginForm";\n'
+            "export default function Login() { return <LoginForm />; }\n"
+        ),
+        "src/components/LoginForm.tsx": (
+            "export default function LoginForm() {\n"
+            '  return <form><input type="text" name="username" />'
+            '<button type="submit">Login</button></form>;\n'
+            "}\n"
+        ),
+    })
+    files = _walk_files(root)
+    result = _build_route_to_files(files, "react", root, [], [])
+    mapped = result.get("/login", [])
+    # Router file + page component (existing behaviour)
+    assert "src/App.tsx" in mapped
+    assert "src/screens/Login.tsx" in mapped
+    # Child component imported by Login.tsx (new behaviour)
+    assert "src/components/LoginForm.tsx" in mapped
+
+
+def test_expand_with_shallow_imports_no_duplicates(tmp_path):
+    """A file already in the list via direct mapping is not added again."""
+    root = make_project(tmp_path, {
+        "src/App.tsx": (
+            'import { Routes, Route } from "react-router-dom";\n'
+            'import Home from "./screens/Home";\n'
+            "export function App() {\n"
+            "  return (\n"
+            "    <Routes>\n"
+            '      <Route path="/" element={<Home />} />\n'
+            "    </Routes>\n"
+            "  );\n"
+            "}\n"
+        ),
+        "src/screens/Home.tsx": (
+            # Home imports App.tsx itself (contrived circular-ish ref)
+            'import App from "../App";\n'
+            "export default function Home() {}\n"
+        ),
+    })
+    files = _walk_files(root)
+    result = _build_route_to_files(files, "react", root, [], [])
+    mapped = result.get("/", [])
+    assert mapped.count("src/App.tsx") == 1
+
+
+def test_expand_with_shallow_imports_nextjs_page(tmp_path):
+    """Next.js page file's child components are included via shallow expansion."""
+    root = make_project(tmp_path, {
+        "pages/dashboard.tsx": (
+            'import StatsCard from "./StatsCard";\n'
+            "export default function Dashboard() { return <StatsCard />; }\n"
+        ),
+        "pages/StatsCard.tsx": (
+            "export default function StatsCard() { return <div><button>Refresh</button></div>; }\n"
+        ),
+    })
+    files = _walk_files(root)
+    result = _build_route_to_files(files, "next", root, [], [])
+    mapped = result.get("/dashboard", [])
+    assert "pages/dashboard.tsx" in mapped
+    assert "pages/StatsCard.tsx" in mapped

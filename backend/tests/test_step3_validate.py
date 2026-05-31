@@ -21,10 +21,11 @@ def test_l1a_placement_and_depends_on_filter():
             "reasoning": "Pattern A -- login stated; no profile screen found",
             "confidence_score": 0.88,
             "confidence_reason": "Auth pattern fires",
-            "category": "sop_a",
+            "category": "sop",
             "depends_on": ["REQ-001", "REQ-999"],  # REQ-999 invalid
             "priority": "high",
             "functional_area": "auth",
+            "path": [{"type": "node", "label": "Profile", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -32,7 +33,7 @@ def test_l1a_placement_and_depends_on_filter():
     assert dropped == 0
     r = valid[0]
     assert r["req_id"] == "GEN-001"
-    assert r["l1_recommendation"] == "l1a"
+    assert r["placement"] == "l1a"
     assert r["strength"] is None
     assert r["weight"] == 3.0  # high priority
     assert r["depends_on"] == ["REQ-001"]  # REQ-999 filtered out
@@ -47,15 +48,16 @@ def test_l1b_strongly_implied():
             "reasoning": "SOP-B -- task list is a list node",
             "confidence_score": 0.65,
             "confidence_reason": "List node; filter expected",
-            "category": "sop_b",
+            "category": "sop",
             "depends_on": ["REQ-002", "OBV-001"],
             "functional_area": "tasks",
+            "path": [{"type": "node", "label": "Task List", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
     assert len(valid) == 1
     r = valid[0]
-    assert r["l1_recommendation"] == "l1b"
+    assert r["placement"] == "l1b"
     assert r["strength"] == "strongly_implied"
     assert r["weight"] == 3.0
     assert "priority" not in r
@@ -68,8 +70,9 @@ def test_l1b_medium():
             "reasoning": "INF-D -- export not covered",
             "confidence_score": 0.50,
             "confidence_reason": "Moderately likely",
-            "category": "inf_d",
+            "category": "inf",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Export", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -84,8 +87,9 @@ def test_l1b_weak():
             "reasoning": "INF-E -- power user feature",
             "confidence_score": 0.30,
             "confidence_reason": "Speculative",
-            "category": "inf_e",
+            "category": "inf",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Bulk Delete", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -100,8 +104,9 @@ def test_duplicate_of_stated_dropped():
             "reasoning": "dup",
             "confidence_score": 0.9,
             "confidence_reason": "dup",
-            "category": "sop_a",
+            "category": "sop",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Login", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -116,8 +121,9 @@ def test_duplicate_of_obvious_dropped():
             "reasoning": "dup",
             "confidence_score": 0.9,
             "confidence_reason": "dup",
-            "category": "sop_a",
+            "category": "sop",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Task List", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -132,16 +138,18 @@ def test_invalid_confidence_dropped():
             "reasoning": "test",
             "confidence_score": None,
             "confidence_reason": "N/A",
-            "category": "sop_a",
+            "category": "sop",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Something", "primary": True}],
         },
         {
             "description": "System must do another thing.",
             "reasoning": "test",
             "confidence_score": 1.5,  # out of range
             "confidence_reason": "N/A",
-            "category": "sop_a",
+            "category": "sop",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Another Thing", "primary": True}],
         },
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -158,6 +166,7 @@ def test_invalid_category_dropped():
             "confidence_reason": "N/A",
             "category": "made_up_category",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Something", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -172,8 +181,9 @@ def test_missing_reasoning_dropped():
             "reasoning": "",
             "confidence_score": 0.75,
             "confidence_reason": "N/A",
-            "category": "sop_a",
+            "category": "sop",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Something", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -188,17 +198,19 @@ def test_req_id_renumbering():
             "reasoning": "Pattern A",
             "confidence_score": 0.85,
             "confidence_reason": "Auth",
-            "category": "sop_a",
+            "category": "sop",
             "depends_on": [],
             "priority": "high",
+            "path": [{"type": "node", "label": "Profile", "primary": True}],
         },
         {
             "description": "System must show sync status.",
             "reasoning": "Pattern D",
             "confidence_score": 0.70,
             "confidence_reason": "Sync stated",
-            "category": "sop_a",
+            "category": "sop",
             "depends_on": [],
+            "path": [{"type": "node", "label": "Sync Status", "primary": True}],
         },
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
@@ -221,16 +233,17 @@ Here is my YES/NO reasoning:
 
 
 def test_sop_b_count_vs_inf_count():
+    _p = lambda label: [{"type": "node", "label": label, "primary": True}]
     items = [
-        {"description": "System must filter.", "reasoning": "sop_b test", "confidence_score": 0.82, "confidence_reason": "ok", "category": "sop_b", "depends_on": [], "priority": "medium"},
-        {"description": "System must search.", "reasoning": "sop_a test", "confidence_score": 0.81, "confidence_reason": "ok", "category": "sop_a", "depends_on": [], "priority": "medium"},
-        {"description": "System must show audit log.", "reasoning": "inf_c test", "confidence_score": 0.50, "confidence_reason": "ok", "category": "inf_c", "depends_on": []},
-        {"description": "System must export CSV.", "reasoning": "inf_d test", "confidence_score": 0.45, "confidence_reason": "ok", "category": "inf_d", "depends_on": []},
-        {"description": "System must cross-link.", "reasoning": "inf_e test", "confidence_score": 0.60, "confidence_reason": "ok", "category": "inf_e", "depends_on": []},
+        {"description": "System must filter.", "reasoning": "sop test", "confidence_score": 0.82, "confidence_reason": "ok", "category": "sop", "depends_on": [], "priority": "medium", "path": _p("Filter")},
+        {"description": "System must search.", "reasoning": "sop test", "confidence_score": 0.81, "confidence_reason": "ok", "category": "sop", "depends_on": [], "priority": "medium", "path": _p("Search")},
+        {"description": "System must show audit log.", "reasoning": "inf test", "confidence_score": 0.50, "confidence_reason": "ok", "category": "inf", "depends_on": [], "path": _p("Audit Log")},
+        {"description": "System must export CSV.", "reasoning": "inf test", "confidence_score": 0.45, "confidence_reason": "ok", "category": "inf", "depends_on": [], "path": _p("Export")},
+        {"description": "System must cross-link.", "reasoning": "inf test", "confidence_score": 0.60, "confidence_reason": "ok", "category": "inf", "depends_on": [], "path": _p("Cross Link")},
     ]
     valid, dropped = _validate_and_normalise(items, STEP1, STEP2)
-    sop = sum(1 for r in valid if r.get("category", "").startswith("sop"))
-    inf = sum(1 for r in valid if r.get("category", "").startswith("inf"))
+    sop = sum(1 for r in valid if r.get("category") == "sop")
+    inf = sum(1 for r in valid if r.get("category") == "inf")
     assert sop == 2
     assert inf == 3
 

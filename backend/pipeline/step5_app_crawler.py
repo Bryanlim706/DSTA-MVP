@@ -1,18 +1,17 @@
 """
 Step 5: App Crawler — L2 element inventory.
 
-Two-pass:
-1. Dynamic (Playwright): boot the app, visit each route, record interactive elements,
-   outbound links, and observed network requests.
-2. Static fallback (Tree-sitter / regex): for routes Playwright could not visit
-   (auth-gated, redirects, boot failure), parse source JSX/TSX files from route_to_files.
+Playwright crawl: boot the app, visit each route, record interactive elements,
+outbound links, and observed network requests.
+
+L3 element inventory (source-level) is owned by Step 4 (route_elements).
+Step 5 is purely L2 — what the running app actually renders.
 
 No LLM call.
 """
 from __future__ import annotations
 
 import asyncio
-import re
 import shutil
 import sys
 from pathlib import Path
@@ -347,131 +346,24 @@ def _empty_playwright_page(route: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────
-# Static fallback — JSX/TSX/HTML regex element extraction
+# Unvisitable route shell (no element extraction — L3 elements owned by Step 4)
 # ─────────────────────────────────────────────────────────────
 
-_JSX_INPUT_RE = re.compile(
-    r"""<(input|textarea|select)\b([^>]*?)(?:/>|>)""",
-    re.IGNORECASE | re.DOTALL,
-)
-_JSX_BUTTON_RE = re.compile(
-    r"""<[Bb]utton\b([^>]*?)>(.*?)</[Bb]utton>""",
-    re.DOTALL,
-)
-_ATTR_ARIA = re.compile(r"""aria-label\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
-_ATTR_PH = re.compile(r"""placeholder\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
-_ATTR_NAME = re.compile(r"""\bname\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
-_ATTR_TYPE = re.compile(r"""\btype\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
-
-_STATIC_EXTS = {".tsx", ".jsx", ".ts", ".js", ".html", ".jinja2", ".j2", ".erb", ".ejs"}
-
-# Comment patterns to strip before element extraction
-_JSX_BLOCK_COMMENT_RE = re.compile(r'\{/\*.*?\*/\}', re.DOTALL)
-_LINE_COMMENT_ONLY_RE = re.compile(r'^\s*//.*$', re.MULTILINE)
-
-
-def _strip_comments(text: str) -> str:
-    """Strip JSX block comments {/* */} and lines that are purely // comments."""
-    text = _JSX_BLOCK_COMMENT_RE.sub('', text)
-    text = _LINE_COMMENT_ONLY_RE.sub('', text)
-    return text
-
-
-def _label_from_attrs(attrs: str) -> str | None:
-    for pat in (_ATTR_ARIA, _ATTR_PH, _ATTR_NAME):
-        m = pat.search(attrs)
-        if m:
-            v = m.group(1).strip()
-            if v:
-                return v
-    return None
-
-
-def _static_elements_from_text(text: str) -> list[dict]:
-    text = _strip_comments(text)
-    elements: list[dict] = []
-    seen: set[tuple[str, str | None]] = set()
-
-    for m in _JSX_INPUT_RE.finditer(text):
-        tag = m.group(1).lower()
-        attrs = m.group(2)
-        type_m = _ATTR_TYPE.search(attrs)
-        subtype = type_m.group(1) if type_m else None
-        label = _label_from_attrs(attrs)
-        if not label:
-            continue
-        key = (label, subtype)
-        if key in seen:
-            continue
-        seen.add(key)
-        elements.append({"type": tag, "subtype": subtype, "label": label, "selector": None, "visible": None})
-
-    for m in _JSX_BUTTON_RE.finditer(text):
-        attrs = m.group(1)
-        raw_text = m.group(2).strip()
-        # Arrow functions like onClick={(e) => {...}} cause the regex to capture
-        # everything after the `>` in `=>` as text content. Take only the part
-        # after the last `>` (the real tag close).
-        if '>' in raw_text:
-            raw_text = raw_text.rsplit('>', 1)[1].strip()
-        # If remaining text is a JSX expression {expr}, extract first quoted string
-        if raw_text.startswith('{') and not raw_text.strip('{}').strip():
-            raw_text = ''
-        elif raw_text.startswith('{'):
-            qm = re.search(r'"([^"]{1,80})"', raw_text)
-            raw_text = qm.group(1) if qm else re.sub(r'\{[^{}]*\}', '', raw_text).strip()
-        type_m = _ATTR_TYPE.search(attrs)
-        subtype = type_m.group(1) if type_m else None
-        aria_m = _ATTR_ARIA.search(attrs)
-        label = (aria_m.group(1) if aria_m else raw_text)[:80]
-        if not label:
-            continue
-        key = (label, subtype)
-        if key in seen:
-            continue
-        seen.add(key)
-        elements.append({"type": "button", "subtype": subtype, "label": label, "selector": None, "visible": None})
-
-    return elements
-
-
-def _static_page(route: str, files: list[str], root: Path) -> dict:
-    elements: list[dict] = []
-    seen: set[tuple[str, str | None]] = set()
-
-    for rel in files:
-        p = root / rel
-        if p.suffix.lower() not in _STATIC_EXTS:
-            continue
-        try:
-            text = p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        for el in _static_elements_from_text(text):
-            key = (el["label"] or "", el["subtype"])
-            if key not in seen:
-                seen.add(key)
-                elements.append(el)
-
+def _static_page(route: str) -> dict:
+    """Shell page for routes Playwright could not visit. Elements come from Step 4 route_elements."""
     return {
         "route": route,
         "title": None,
         "discovered_by": "static_fallback",
         "accessible": None,
-        "elements": elements,
+        "elements": [],
         "outbound_links": [],
         "api_calls_observed": [],
     }
 
 
-def _full_static(
-    routes: list[str],
-    route_to_files: dict[str, list[str]],
-    important_files: list[str],
-    root: Path,
-    reason: str = "no_bootstrap",
-) -> dict:
-    pages = [_static_page(r, route_to_files.get(r, important_files[:5]), root) for r in routes]
+def _full_static(routes: list[str], reason: str = "no_bootstrap") -> dict:
+    pages = [_static_page(r) for r in routes]
     unvisitable = [{"route": r, "reason": reason} for r in routes]
     return {"pages": pages, "unvisitable_routes": unvisitable, "total_pages": len(pages), "error": None}
 
@@ -483,9 +375,9 @@ def _full_static(
 async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dict:
     """Boot the app, crawl routes with Playwright, fall back to Tree-sitter for unvisitable routes."""
     ctx = step3_5_result.get("project_context", {})
-    routes: list[str] = step4_result.get("frontend_routes", [])
-    route_to_files: dict[str, list[str]] = step4_result.get("route_to_files", {})
-    important_files: list[str] = step4_result.get("important_files", [])
+    # frontend_routes is list[dict] ({path, dynamic, params[]}) — normalise to plain strings.
+    raw_routes = step4_result.get("frontend_routes", [])
+    routes: list[str] = [r["path"] if isinstance(r, dict) else r for r in raw_routes]
 
     if not routes:
         return {"pages": [], "unvisitable_routes": [], "total_pages": 0,
@@ -494,7 +386,7 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
     bootstrap = _bootstrap_commands(ctx, extract_to)
 
     if not bootstrap:
-        return _full_static(routes, route_to_files, important_files, extract_to)
+        return _full_static(routes)
 
     processes: list[asyncio.subprocess.Process] = []
     try:
@@ -514,7 +406,7 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
         app_started = bool(processes) and await _wait_for_port(crawl_port)
 
         if not app_started:
-            return _full_static(routes, route_to_files, important_files, extract_to, reason="boot_failed")
+            return _full_static(routes, reason="boot_failed")
 
         playwright_pages, playwright_unvisitable = await _crawl_routes(routes, crawl_port)
 
@@ -526,18 +418,13 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
 
         for p in playwright_pages:
             if p["route"] in unvisitable_routes:
-                # Replace inaccessible playwright page with static fallback elements
-                pages.append(_static_page(
-                    p["route"],
-                    route_to_files.get(p["route"], important_files[:5]),
-                    extract_to,
-                ))
+                pages.append(_static_page(p["route"]))
             else:
                 pages.append(p)
 
         for route in routes:
             if route not in visited_routes:
-                pages.append(_static_page(route, route_to_files.get(route, important_files[:5]), extract_to))
+                pages.append(_static_page(route))
                 unvisitable.append({"route": route, "reason": "not_visited"})
 
         return {"pages": pages, "unvisitable_routes": unvisitable, "total_pages": len(pages), "error": None}

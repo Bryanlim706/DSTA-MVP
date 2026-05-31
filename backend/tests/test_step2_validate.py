@@ -19,6 +19,7 @@ def test_depends_on_filters_invalid_ids():
             "depends_on": ["REQ-002", "REQ-999"],
             "priority": "high",
             "functional_area": "navigation",
+            "path": [{"type": "edge", "label": "navigate to task list", "from": "home", "to": "Task List", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1)
@@ -34,6 +35,7 @@ def test_depends_on_empty_list_when_none_provided():
             "reasoning": "CHECK 3 -- login has no exit path",
             "priority": "medium",
             "functional_area": "navigation",
+            "path": [{"type": "edge", "label": "exit login", "from": "Login", "to": "home", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1)
@@ -50,8 +52,6 @@ def test_build_user_message_includes_req_ids():
     msg = _build_user_message(step0, STEP1)
     assert "[REQ-001]" in msg
     assert "[REQ-002]" in msg
-    assert "[auth]" in msg
-    assert "[tasks]" in msg
 
 
 def test_parse_llm_response_skips_preamble():
@@ -122,12 +122,14 @@ def test_check2_and_check3_kept():
             "reasoning": "CHECK 2 — Settings page has no stated inbound navigation element.",
             "depends_on": ["REQ-001"],
             "priority": "critical",
+            "path": [{"type": "edge", "label": "nav to settings", "from": "home", "to": "Settings", "primary": True}],
         },
         {
             "description": "System must provide a way to leave the Settings page.",
             "reasoning": "CHECK 3 — Settings page has no stated exit path.",
             "depends_on": [],
             "priority": "high",
+            "path": [{"type": "edge", "label": "exit settings", "from": "Settings", "to": "home", "primary": True}],
         },
     ]
     valid, dropped = _validate_and_normalise(items, STEP1)

@@ -303,6 +303,58 @@ No `structural_edge` category — entry/exit paths are baked into each function'
 
 ## Pipeline Steps
 
+### Data Flow DAG — Steps 0 → 3.5
+
+```
+ ┌────────────────────────────────────────────────────────────────────────────────────────────┐
+ │                        User Input (zip archive + requirements text)                         │
+ └────────────────────────┬──────────────────────────────────────────┬───────────────────────┘
+                          │                                          │
+           file tree / config files                    README + spec docs (≤ depth 2)
+                          │                                          │
+                          ▼                                          ▼
+ ┌──────────────────────────────────────┐    ┌────────────────────────────────────────────────┐
+ │       STEP 0 · Classifier            │    │          STEP 1 · Req Extractor                │
+ │  project_type, frameworks            │    │  REQ-xxx: stated functions + path[]            │
+ │  discovered_pages, template_engine   │    │  project_summary                               │
+ │  service_layout, test_strategy       │    │  vague, functional_area                        │
+ └─────────────┬────────────────────────┘    └────────────────────────┬───────────────────────┘
+               │                                                       │
+       discovered_pages                              node inventory (from path[])
+               │                                     stated functions · project_summary
+               │                                                       │
+               └────────────────────────┬──────────────────────────────┘
+                                        ▼
+ ┌────────────────────────────────────────────────────────────────────────────────────────────┐
+ │                          STEP 2 · Obvious Generator                                         │
+ │          OBV-xxx (navigation gaps — CHECK 2: missing entry · CHECK 3: missing exit)        │
+ └────────────────────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                         REQ-xxx (1) · project_summary (1) · OBV-xxx
+                                        │
+                                        ▼
+ ┌────────────────────────────────────────────────────────────────────────────────────────────┐
+ │                          STEP 3 · Implied Generator                                         │
+ │       GEN-xxx · Pass 1: SOP pattern table · Pass 2: INF domain inference                  │
+ │       placement: l1a (conf ≥ 0.80) · l1b advisory (< 0.80) · unpacks (vague parents)      │
+ └────────────────────────────────────────────────────────────────────────────────────────────┘
+
+ project_context (0) ────────────────────────────────────────────────────────────────────►┐
+ project_summary (1) ────────────────────────────────────────────────────────────────────►│
+ REQ-xxx (1) · OBV-xxx (2) ──────────────────────────────────────────────────────────────►│
+ GEN-xxx l1a / l1b (3) ──────────────────────────────────────────────────────────────────►│
+                                                                                            ▼
+                         ┌──────────────────────────────────────────────────────────────────┐
+                         │                  STEP 3.5 · Confirmation Gate                     │
+                         │  confirmed_requirements (L1a)   advisory_requirements (L1b)       │
+                         │  project_context (Step 0 passthrough)   project_summary           │
+                         └──────────────────────────────────────────────────────────────────┘
+```
+
+Steps 0 and 1 execute **in parallel** — both read directly from the uploaded zip with no dependency on each other. Step 2 waits for both. Step 3 waits for Step 2. Step 3.5 waits for human confirmation after Step 3. Step 1 reads from disk independently of Step 0. Step 0 bypasses Step 1 and feeds directly into Steps 2, 3, and 3.5. Step 3.5 is a full fan-in that reads all four prior step results simultaneously plus the HTTP body from the frontend.
+
+---
+
 ### Data Flow DAG — Steps 3.5 → 7
 
 ```
@@ -810,43 +862,6 @@ depends_on: list[str], source_quote: str|null
 
 ---
 
-### Data Flow — Steps 0 to 3.5
-
-The pipeline is a DAG, not a linear chain. Step 1 reads from disk independently of Step 0. Step 0 bypasses Step 1 and feeds directly into Steps 2, 3, and 3.5. Step 3.5 is a full fan-in that reads all four prior step results simultaneously plus the HTTP body from the frontend.
-
-```
-DISK (file tree / configs)
-  └──────────────────────────────────────────────► Step 0
-
-DISK (README + spec docs)
-job["requirements_text"]
-  └──────────────────────────────────────────────► Step 1
-
-                            Step 0 [discovered_pages]
-                            Step 1 [requirements[]]
-                                   └──────────────► Step 2
-
-                            Step 0 [project_type,
-                                    frontend_framework,
-                                    backend_framework,
-                                    discovered_pages]
-                            Step 1 [requirements[],
-                                    project_summary]
-                            Step 2 [requirements[]
-                                    (descriptions only)]
-                                   └──────────────► Step 3
-
-                            Step 0 [10 context fields]
-                            Step 1 [requirements[] (lookup),
-                                    project_summary]
-                            Step 2 [requirements[] (lookup),
-                                    req_id set]
-                            Step 3 [requirements[] where
-                                    placement=="l1b"]
-                            HTTP body [confirmed list,
-                                       skipped flag]
-                                   └──────────────► Step 3.5
-```
 
 Exact fields per edge:
 - **Disk → Step 0:** file tree, config file contents (package.json, pom.xml, build.gradle, etc.)
@@ -872,115 +887,138 @@ Exact fields per edge:
 **Ignores:** node_modules, .git, dist, build, .next, venv, __pycache__, coverage, target, .gradle, examples, demo, sample
 
 **What Step 4 is building and why:**
-Step 4 is the static code analysis pass. It reads the codebase without executing it and builds the L3 inventory — what is *implemented* in the source. This feeds Step 6's E() scoring: for each entity in a requirement's `path[]`, Step 6 asks "does this exist in L3?" and "does this exist in L2 (Step 5)?" The answers determine E() per entity, which rolls up to FCom and FA.
+Step 4 is the static code analysis pass. It reads the codebase without executing it and builds the complete L3 inventory — what is *implemented* in the source. This feeds Step 6's E() scoring via the exhaustive completeness model:
+
+| Entity type | L3 check (Step 4) | L2 check (Step 5) |
+|---|---|---|
+| `node` | Route in `frontend_routes` | Page accessible via Playwright |
+| `element` | Element in `route_elements` (parsed from source) | Element rendered in DOM |
+| `navigation edge` | Nav trigger in `navigation_graph` (Link/anchor in source) | Nav trigger rendered in DOM |
+| `data edge` | Backend handler in `implementation_units` | Trigger element rendered in DOM |
+
+Linkage (is the trigger element wired to that endpoint?) → FCor (Step 11), not FCom.
 
 **Extracted domains — purpose and layer:**
 
 | Domain | Layer | Purpose in scoring |
 |---|---|---|
-| `languages` | Context | Reporting and Step 15/16 evidence pack only. Not used in E() formula. |
-| `frontend_routes` | L3 seed → L2 seed | Two jobs: (1) L3 evidence for `node` entity E() — if a route isn't here, node E() ≤ 0.5; (2) crawl seed list for Step 5 — Playwright visits each route in this list. |
-| `api_endpoints` | L3 (raw) | Raw backend handler list. Consumed by Step 6 for unlinked L3 detection (endpoints not matched by any L1a requirement). Also used before wrapping into `implementation_units`. |
-| `implementation_units` | L3 (action signal) | Authoritative L3 signal for **action edge E() scoring** in Step 6. Wraps `api_endpoints` plus SSR HTML form handlers (`kind: "form_handler"`) so both REST apps and traditional form-submission apps are covered by the same scoring path. |
-| `route_to_files` | Infrastructure | Not a scoring entity. Maps frontend route → source file(s) so Step 5's static fallback knows which files to Tree-sitter-parse when Playwright can't visit an auth-gated route. |
-| `database_models` | Context | Not used in E() scoring. Feeds Step 7.5 (positive-grounded FA advisor) — the LLM uses model names to generate codebase-specific improvement suggestions. Also in Step 15/16 evidence pack. |
-| `existing_tests` | Context | Not used in E() scoring. Step 15 reports test coverage; low/zero test count influences Step 7 advisory and Step 9 scaffolding decisions. |
-| `important_files` | Infrastructure | Not a scoring entity. Fallback list for Step 5: when `route_to_files` has no specific entry for a route, Step 5 Tree-sitter-parses these files instead. |
+| `frontend_routes` | L3 → L2 seed | **Node entity L3 check.** If a route isn't here, node E() ≤ 0.5. Also the Playwright crawl seed list for Step 5. Each entry is `{path, dynamic, params[]}`. |
+| `route_elements` | L3 (element signal) | **Element entity L3 check.** Per-route inventory of interactive elements (`{type, subtype, label}`) parsed from source files. Step 6 uses this for E()=0.5 when Playwright couldn't reach a page. |
+| `navigation_graph` | L3 (navigation signal) | **Navigation edge L3 check.** Per-route list of target routes found in navigation triggers (`<Link to>`, `<a href>`, `navigate()`, `router.push()`). Step 6 checks this to score whether a navigation trigger exists in source. |
+| `implementation_units` | L3 (action signal) | **Data edge L3 check.** Backend handler existence — `kind: "api_endpoint"` for REST handlers, `kind: "form_handler"` for SSR HTML forms. Covers both REST APIs and traditional form-submission apps. |
+| `route_to_files` | Infrastructure | Route → source file(s) mapping. Used internally by Step 4 to determine which files to parse for `route_elements` and `navigation_graph`. Each route's list includes 1-level-deep local imports so child components are included. |
+| `important_files` | Infrastructure | Wider file inventory (capped at 100) for Step 7.5 advisor context and evidence pack. |
+| `database_models` | Context | Step 7.5 FA advisor (codebase-grounded suggestions). Step 15/16 evidence pack. |
+| `existing_tests` | Context | Step 15 test coverage report; Step 9 scaffolding decisions. |
+| `languages` | Context | Reporting and Steps 15/16 evidence pack only. |
 
 **Extraction strategies:**
-- **Languages:** file extension counts → ordered list (most files first)
-- **API endpoints:** dispatched on `backend_framework` — Flask/FastAPI (tree-sitter Python decorated_definition + decorator regex), Django (regex on urls.py), Spring Boot (tree-sitter Java two-level: class `@RequestMapping` base + method `@GetMapping` etc.; Kotlin regex fallback), Express/NestJS (regex on .js/.ts)
-- **Frontend routes:** Next.js (file-based walk of pages/ or app/), SvelteKit (+page.svelte walk), React Router (tree-sitter TSX `<Route path>` + regex for object-based createBrowserRouter), Vue/Angular Router (regex on router config files), static HTML fallback
-- **route_to_files:** maps each frontend route → source file(s) responsible for it. File-based routers (Next.js, SvelteKit) get exact 1:1 mapping. React Router gets the file containing `<Route>` definitions; routes without a specific file fall back to `important_files[:5]`.
-- **implementation_units:** unified list of backend handlers — wraps all `api_endpoints` as `kind: "api_endpoint"` plus any HTML `<form method="POST/PUT/DELETE">` tags found in SSR template files as `kind: "form_handler"`. This is the authoritative L3 signal for Step 6 action edge E() scoring; it covers both REST APIs and SSR form submissions.
-- **Database models:** SQLAlchemy/Django ORM (Python class regex), JPA `@Entity` (Java tree-sitter), TypeORM `@Entity()` (TS regex), Mongoose `new Schema(...)` (JS/TS regex), Prisma `.prisma` model blocks
-- **Test files:** glob patterns — `test_*.py`, `*.test.ts`, `*Test.java`, etc. — capped at 100
-- **Important files:** entry-point names + files hosting endpoints + router/model config names — capped at 20
+- **Frontend routes + file mapping (single pass):** `_build_route_to_files` discovers routes AND maps them to files. Priority: Next.js pages/ → Next.js app/ → SvelteKit → React Router JSX + createBrowserRouter → Vue/Angular Router → SSR endpoint fallback → static HTML. Route strings enriched as `{path, dynamic, params[]}` via `_route_entry()`. 1-level-deep shallow import expansion on all mapped files.
+- **API endpoints:** dispatched on `backend_framework` — Flask/FastAPI (tree-sitter Python), Django (regex on urls.py), Spring Boot (tree-sitter Java two-level: class `@RequestMapping` + method mappings; Kotlin regex fallback), Express/NestJS (regex on .js/.ts)
+- **implementation_units:** wraps all `api_endpoints` as `kind: "api_endpoint"` + HTML `<form method="POST/PUT/DELETE">` in SSR templates as `kind: "form_handler"`.
+- **route_elements:** for each route's file list from `route_to_files`, parse source for `<input>`, `<button>`, `<textarea>`, `<select>` via regex. Returns `{type, subtype, label}` — no runtime fields. Comment stripping applied first.
+- **navigation_graph:** for each route's file list, scan for static string paths in `to=`, `href=`, `routerLink=`, `navigate()`, `router.push()`, `history.push()` — skips template literals and variables. Returns `{route: [target_routes]}`.
+- **Database models:** SQLAlchemy/Django ORM (Python class regex), JPA `@Entity` (Java), TypeORM `@Entity()` (TS), Mongoose `new Schema(...)`, Prisma `.prisma` model blocks.
+- **Test files / Important files / Languages:** glob patterns + extension counts.
 
 **Output — stored at `job["step_results"]["step_4"]`:**
 ```json
 {
-  "languages": ["Java", "JavaScript"],
-  "frontend_routes": ["/", "/login", "/dashboard"],
-  "api_endpoints": [
-    { "method": "POST", "path": "/api/auth/login", "file": "src/.../AuthController.java", "handler": "login" }
+  "frontend_routes": [
+    { "path": "/", "dynamic": false, "params": [] },
+    { "path": "/login", "dynamic": false, "params": [] },
+    { "path": "/users/:id", "dynamic": true, "params": ["id"] }
   ],
-  "route_to_files": {
-    "/login": ["src/pages/Login.tsx"],
-    "/dashboard": ["src/App.jsx", "src/.../AppController.java"]
-  },
   "implementation_units": [
     { "kind": "api_endpoint", "method": "POST", "path": "/api/auth/login", "file": "src/.../AuthController.java", "handler": "login" },
     { "kind": "form_handler", "method": "POST", "path": "/login", "file": "templates/login.html", "handler": null }
   ],
+  "route_elements": {
+    "/login": [
+      { "type": "input", "subtype": "email", "label": "Email address" },
+      { "type": "input", "subtype": "password", "label": "Password" },
+      { "type": "button", "subtype": "submit", "label": "Log in" }
+    ]
+  },
+  "navigation_graph": {
+    "/": ["/login", "/register"],
+    "/dashboard": ["/tasks", "/profile"]
+  },
+  "route_to_files": {
+    "/login": ["src/pages/Login.tsx", "src/components/LoginForm.tsx"],
+    "/users/:id": ["src/pages/UserDetail.tsx"]
+  },
+  "important_files": ["src/pages/Login.tsx", "src/.../AuthController.java", "src/services/api.ts"],
   "database_models": ["User", "Task"],
-  "important_files": ["src/pages/Login.tsx", "src/.../AuthController.java"],
   "existing_tests": ["src/test/java/.../AppTests.java"],
+  "languages": ["Java", "JavaScript"],
   "total_endpoints": 8,
   "total_routes": 3,
   "error": null
 }
 ```
+*L3 scoring inputs: `frontend_routes` (node), `route_elements` (element), `navigation_graph` (navigation edge), `implementation_units` (data edge). Infrastructure: `route_to_files`, `important_files`. Context: `database_models`, `existing_tests`, `languages`.*
 
 **Output consumed by:**
 | Field(s) | Consumed by |
 |---|---|
-| `frontend_routes` | Step 5 — Playwright crawl seed list; Step 6 — L3 evidence for `node` entity E() |
-| `route_to_files` | Step 5 — static Tree-sitter fallback: which source files to parse for auth-gated routes |
-| `implementation_units` | Step 6 — action edge E() scoring: does this requirement's submit/create/delete edge have a backend handler? Covers REST endpoints and SSR form submissions. |
-| `api_endpoints` | Step 6 — also read directly for unlinked L3 detection (endpoints not matched by any L1a requirement) |
-| `important_files` | Step 5 — static fallback scope when route→file mapping is unavailable |
-| `database_models` | Step 7.5 — positive-grounded FA advisor (codebase-grounded improvement suggestions) |
-| `languages`, `existing_tests` | Step 15 — evidence pack; Step 16 — LLM ISO evaluator context |
+| `frontend_routes` | Step 5 — Playwright crawl seed list; Step 6 — node entity L3 check |
+| `route_elements` | Step 6 — element entity L3 check (E()=0.5 for routes Playwright couldn't reach) |
+| `navigation_graph` | Step 6 — navigation edge L3 check (does a nav trigger exist in source?) |
+| `implementation_units` | Step 6 — data edge L3 check; unlinked L3 detection: `[u for u in implementation_units if u["kind"] == "api_endpoint"]` |
+| `route_to_files` | Internal to Step 4 (source for route_elements + navigation_graph); retained for downstream reference |
+| `important_files` | Step 7.5 — FA advisor context; Steps 15/16 — evidence pack |
+| `database_models` | Step 7.5 — FA advisor; Steps 15/16 — evidence pack |
+| `languages`, `existing_tests` | Steps 15/16 — evidence pack |
 
 ---
 
 ### Step 5: App Crawler — L2 Element Inventory
 **Phase: FCom — builds L2 element inventory**
-**Tools:** Playwright (dynamic), Tree-sitter (static fallback), Python
+**Tools:** Playwright, Python
 **Input:**
 - `step_3_5.project_context` (`project_type`, `frontend_framework`, `backend_framework`, `service_layout`, `frontend_tooling`, `test_strategy`) — bootstrap strategy + crawl mode
-- Step 4 result: `frontend_routes` (crawl seed list), `route_to_files` (static fallback: which source files to parse per route), `important_files` (fallback when route_to_files has no entry)
+- Step 4 result: `frontend_routes` (crawl seed list)
 
 **What Step 5 is building and why:**
-Step 5 is the runtime observation pass. It boots the actual app and records what a user can see and interact with — this is the L2 inventory. L3 (Step 4) tells you what the code declares; L2 (Step 5) tells you what actually renders when someone uses it. The distinction matters: a backend endpoint can exist in L3 but be unreachable via the UI (E()=0.5), or a UI element can exist in L2 but have no backend handler (E()=0.4). Step 6 computes E() by comparing L1a path entities against both layers simultaneously.
+Step 5 is the runtime observation pass. It boots the actual app and records what a user can see and interact with — the L2 inventory. L3 (Step 4) tells you what the code declares; L2 (Step 5) tells you what actually renders. The distinction matters: an element can exist in L3 source but be conditionally hidden at runtime, or be accessible in L2 but have no backend handler (E()=0.4). Step 4 owns all L3 evidence including source-level element extraction (`route_elements`) and navigation trigger parsing (`navigation_graph`). Step 5 is purely L2 — Playwright only.
 
 **Extracted domains — purpose and layer:**
 
 | Domain | Layer | Purpose in scoring |
 |---|---|---|
-| `pages[].route` + `accessible` | L2 (node signal) | **Node entity E() scoring.** Step 6 checks: was this route reachable by Playwright? `accessible: true` → node E()=1.0 (L2 ∧ L3). `discovered_by: "static_fallback"` → node E()=0.5 (L3 only, L2 unconfirmed). |
-| `pages[].elements` | L2 (element signal) | **Element entity E() scoring.** The interactive widgets (inputs, buttons, selects) found on each page at runtime. Step 6 fuzzy-matches L1a path `element` entities against this list. `discovered_by: "playwright"` → element E()=1.0. `discovered_by: "static_fallback"` → element E()=0.5. |
-| `pages[].outbound_links` | Context | Not used in E() scoring. Navigation edges are excluded from the E() formula (programmatic navigation via `history.push()` is invisible to link detection). Outbound links are included for completeness and Step 15 reporting only. |
-| `pages[].api_calls_observed` | Context | **Supplementary cross-check only — not used for E() scoring.** Passive crawl captures page-load GET requests only; POST/PUT/DELETE from user interactions are never observed. Used to cross-reference Step 4 endpoints in Step 15 evidence pack. The L3 signal for action edge scoring comes from Step 4 `implementation_units`, not from this field. |
-| `unvisitable_routes` | Infrastructure | Drives the static fallback decision. Routes Playwright couldn't reach (auth-gated, redirect loop) trigger Tree-sitter parsing of `route_to_files` source files. The resulting elements are marked `discovered_by: "static_fallback"` and score at 0.5 rather than 1.0 in Step 6. |
+| `pages[].route` + `accessible` | L2 (node signal) | **Node entity L2 check.** `accessible: true` → node E()=1.0 (L2 ∧ L3). Route in `unvisitable_routes` → Step 6 falls back to Step 4 `route_elements` → E()=0.5. |
+| `pages[].elements` | L2 (element + nav signal) | **Element and navigation edge L2 check.** Interactive widgets (inputs, buttons, selects, links) found on each page at runtime. `discovered_by: "playwright"` → E()=1.0. For unvisitable routes, Step 6 uses Step 4 `route_elements` → E()=0.5. |
+| `pages[].outbound_links` | Context | Supplementary; not used in E() scoring. Step 15 reporting only. |
+| `pages[].api_calls_observed` | Context | Passive page-load GETs only — POST/PUT/DELETE never observed. Cross-check against Step 4 endpoints in Step 15 evidence pack. Not used for E() scoring. |
+| `unvisitable_routes` | Scoring signal | Tells Step 6 which routes Playwright couldn't reach. Step 6 treats those routes as L3-only (E()=0.5) using Step 4 `route_elements`. |
 
 **Why no LLM here:**
-L1a requirements already contain `path: PathEntity[]` specifying which pages, elements, and edges each requirement asserts. Step 5 only collects what the running app actually has; Step 6 matches L1a path entities against it using an LLM fuzzy match. Step 5 itself is pure extraction — no judgment.
+Step 5 is pure extraction — no judgment. Step 6 does the matching of L1a path entities against the inventory using LLM fuzzy matching.
 
-**Step 5 is L2, not L3. Step 9 does NOT read Step 5 selectors.**
-Step 5 captures what the running browser renders — this is runtime L2 evidence, distinct from Step 4's static L3 code evidence. Step 9 (test generation) generates Playwright locators (`getByRole`, `getByText`, `getByPlaceholder`) directly from path entity labels via LLM — it does not read Step 5 CSS selectors, because static source selectors are unreliable (CSS-in-JS generates hash suffixes; component libraries render different DOM than JSX source).
+**Step 5 is L2 only. Step 9 does NOT read Step 5 selectors.**
+Step 9 generates Playwright locators (`getByRole`, `getByText`) from path entity labels via LLM — not from Step 5 CSS selectors, which are unreliable across CSS-in-JS and component libraries.
 
 **App bootstrap (heuristic from `project_context`):**
 - `frontend_only` + Vite/CRA → `npm run dev` or `npm start`
 - `backend_api_only` + FastAPI → `uvicorn main:app --port 8000`
 - `backend_api_only` + Flask → `flask run`
 - `backend_api_only` + Express/NestJS → `npm start`
-- `full_stack_web_app` → start backend first (per above), then frontend; wait for both ports
+- `full_stack_web_app` → start backend (per above) or frontend; wait for port
 - Health check: poll until port responds (timeout 30s), then begin crawl
+- Boot failure → all routes returned as `unvisitable_routes` with `reason: "boot_failed"`; Step 6 uses Step 4 `route_elements` for all
 - Job status: `step_4_complete` → `step_5_running` → `step_5_complete` (or `step_5_error`)
 
-**Two-pass process:**
+**Playwright crawl:**
+Boot the app. Visit each route from Step 4 `frontend_routes`. For each page, record:
+- Page title (`document.title`)
+- All visible interactive elements: inputs (type + label), buttons, links, selects, textareas. Label priority: `aria-label` → `placeholder` → `textContent` → `title` → `name`
+- CSS selectors from running DOM
+- Outbound navigation links
+- Network requests during page load (XHR/fetch, passive — `api_calls_observed`)
+- Accessibility: `accessible: true/false` (final URL matches requested route)
 
-1. **Dynamic pass (Playwright):** Boot the app. Visit each route from Step 4 `frontend_routes`. For each page, record:
-   - Page title / primary heading (`document.title`, `h1` text)
-   - All visible interactive elements: inputs (type + label), buttons (text/label), links (text + href), selects, checkboxes, textareas. Label extraction priority: `aria-label` → `placeholder` → `textContent` → `title` → `name`
-   - CSS selectors from Playwright's own locator (from running DOM — reliable)
-   - Outbound navigation links visible on the page
-   - Network requests observed during page load (XHR/fetch GET only — passive crawl) — `api_calls_observed`
-   - Whether the page was accessible or blocked (auth-gated, 404, redirect) → `accessible: true/false`
-
-2. **Static fallback (Tree-sitter):** For routes Playwright could not visit (auth-gated, redirect loops), run Tree-sitter on the corresponding source files from Step 4 `important_files`. Extract JSX `<input>`, `<button>`, `<textarea>`, `<select>` elements with label attributes. Marked `discovered_by: "static_fallback"`, `accessible: null`, `selector: null`.
+Routes Playwright cannot visit (auth-gated, 404, timeout) → `unvisitable_routes` + shell page with `elements: []`. Step 6 fills element evidence from Step 4 `route_elements`.
 
 **Output — stored at `job["step_results"]["step_5"]`:**
 ```json
@@ -1004,9 +1042,7 @@ Step 5 captures what the running browser renders — this is runtime L2 evidence
       "title": null,
       "discovered_by": "static_fallback",
       "accessible": null,
-      "elements": [
-        { "type": "button", "subtype": null, "label": "Add Task", "selector": null, "visible": null }
-      ],
+      "elements": [],
       "outbound_links": [],
       "api_calls_observed": []
     }
@@ -1016,11 +1052,11 @@ Step 5 captures what the running browser renders — this is runtime L2 evidence
   ]
 }
 ```
+*`discovered_by: "static_fallback"` means Playwright could not reach the route — `elements` is empty. Step 6 uses Step 4 `route_elements` for those routes (E()=0.5).*
 
 **Key value:**
-- Playwright gives ground-truth of what is rendered and interactive at runtime — not just what is declared in source. `document.title` and `h1` text enable reliable page-name → route matching in Step 6.
-- CSS selectors come from running DOM (stable), not source code (unstable due to CSS-in-JS, component libraries).
-- Static fallback prevents auth-gated pages from being entirely invisible to Step 6.
+- Playwright gives ground-truth of what is rendered at runtime — conditional rendering, dynamic state, hidden elements are all correctly captured.
+- CSS selectors come from running DOM (stable), not source code (unstable due to CSS-in-JS).
 - `api_calls_observed` cross-checks Step 4's static endpoint list (supplementary — not used for E() scoring).
 
 ---
@@ -1032,7 +1068,7 @@ Step 5 captures what the running browser renders — this is runtime L2 evidence
 - `step_3_5.confirmed_requirements` (L1a, each with `path: PathEntity[]`)
 - `step_3_5.advisory_requirements` (L1b, each with `path: PathEntity[]`)
 - Step 5 result: per-page element inventory (`pages[]`, `unvisitable_routes[]`)
-- Step 4 result: `implementation_units` (action edge L3 matching — covers REST endpoints + SSR form handlers), `api_endpoints` (unlinked L3 detection), `frontend_routes`
+- Step 4 result: `implementation_units` (data edge L3 matching — covers REST endpoints + SSR form handlers; unlinked L3 detection uses `[u for u in implementation_units if u["kind"] == "api_endpoint"]`), `frontend_routes`, `route_elements` (element L3 fallback for unvisitable routes), `navigation_graph` (navigation edge L3 fallback)
 
 **Per-entity E() — piecewise functions by entity type:**
 
@@ -1046,19 +1082,19 @@ The Conceptual Model formula `E(L1x) = α × [∑ E(primary_i) / P] + (1−α) �
 | ✓ | `discovered_by: "static_fallback"` only | 0.5 |
 | ✗ | — | 0.0 |
 
-**`element` entity** (UI element) — evidence: element presence in Step 5 (L2 only; no L3 equivalent):
+**`element` entity** (UI element) — evidence: element presence in Step 5 Playwright DOM (L2) + Step 4 `route_elements` (L3 fallback):
 
-| Element found in Step 5 | E(element) |
-|---|---|
-| `discovered_by: "playwright"` | 1.0 |
-| `discovered_by: "static_fallback"` | 0.5 |
-| Not found | 0.0 |
+| Element in Step 5 Playwright DOM | Element in Step 4 `route_elements` (L3) | E(element) |
+|---|---|---|
+| ✓ | — | 1.0 |
+| ✗ | ✓ | 0.5 |
+| ✗ | ✗ | 0.0 |
 
-LLM batch call per page: given primary element entity labels from requirements sharing this page + Step 5 `elements[]` on matched page → `matched: true | false` per entity (fuzzy label matching — "add task control" vs "Add a task... (input)").
+LLM batch call per page: given primary element entity labels from requirements sharing this page + Step 5 `elements[]` on matched page (Playwright) → `matched: true | false` per entity (fuzzy label matching — "add task control" vs "Add a task... (input)"). For unvisitable pages (empty Step 5 `elements[]`), use Step 4 `route_elements[route]` as the element candidate list at E()=0.5.
 
-**action `edge` entity** (edge label implies HTTP mutation — submit/create/add/delete/remove/update/save/mark):
+**`data` edge entity** (edge label implies HTTP mutation — submit/create/add/delete/remove/update/save/mark):
 
-| Endpoint in Step 4 | Triggering element on matched page in Step 5 | E(action_edge) |
+| Endpoint in Step 4 `implementation_units` | Triggering element on matched page in Step 5 | E(data_edge) |
 |---|---|---|
 | ✓ | found | 1.0 |
 | ✓ | not found | 0.5 |
@@ -1067,17 +1103,24 @@ LLM batch call per page: given primary element entity labels from requirements s
 
 HTTP verb heuristic on edge label: submit/add/create → POST; remove/delete → DELETE; update/edit/save/mark → PATCH or PUT; view/navigate/load → GET. LLM batch call: edge label + requirement description + Step 4 endpoint list → matched endpoint or null.
 
-**navigation `edge` entity** (navigate/go to/return/open — no HTTP mutation implied):
-Not scored. Outbound link detection in Step 5 is unreliable for programmatic navigation (React Router `history.push()` does not appear in `outbound_links`). Navigation correctness is verified in Step 11 (E2E test execution), not Step 6. Navigation edges are excluded from P and S counts in the aggregation formula.
+**navigation `edge` entity** (navigate/go to/return/open — no HTTP mutation implied) — evidence: navigation trigger in Step 5 Playwright DOM (L2) + Step 4 `navigation_graph` (L3 fallback):
+
+| Nav trigger in Step 5 Playwright DOM | In Step 4 `navigation_graph` (L3) | E(navigation_edge) |
+|---|---|---|
+| ✓ | — | 1.0 |
+| ✗ | ✓ | 0.5 |
+| ✗ | ✗ | 0.0 |
+
+Navigation triggers are scored via the same Playwright element presence mechanism as `element` entities — links and navigation-triggering buttons appear in `pages[].elements`. Step 4 `navigation_graph` captures static `<Link to>`, `<a href>`, `navigate()`, `router.push()` targets per route and serves as the L3 fallback signal. `outbound_links` is NOT used (unreliable for programmatic navigation).
 
 **Aggregation:**
 ```
-E(req) = α   × [∑ E(primary_i,  excluding nav edges) / P]
-       + (1-α) × [∑ E(secondary_j, excluding nav edges) / S]
+E(req) = α   × [∑ E(primary_i)   / P]
+       + (1-α) × [∑ E(secondary_j) / S]
 where α = 0.7. If S = 0, α = 1.0.
 ```
 
-**Note on `api_calls_observed`:** Step 5's passive crawl only captures page-load GET requests. POST/PUT/DELETE from form submissions are never observed. `api_calls_observed` is supplementary cross-check against Step 4 only — not used for E() scoring. The L3 signal comes entirely from Step 4 `api_endpoints`.
+**Note on `api_calls_observed`:** Step 5's passive crawl only captures page-load GET requests. POST/PUT/DELETE from form submissions are never observed. `api_calls_observed` is supplementary cross-check against Step 4 only — not used for E() scoring. The L3 signal comes entirely from Step 4 `implementation_units` (filtered to `kind == "api_endpoint"`).
 
 **Unlinked detection:**
 ```python
@@ -1101,8 +1144,8 @@ l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys_by_
         { "label": "email input",     "type": "element", "primary": true,  "e": 1.0, "matched_selector": "input[type='email']" },
         { "label": "password input",  "type": "element", "primary": true,  "e": 1.0, "matched_selector": "input[type='password']" },
         { "label": "login button",    "type": "element", "primary": true,  "e": 1.0, "matched_selector": "button[type='submit']" },
-        { "label": "submit login",    "type": "edge",    "primary": true,  "e": 1.0, "matched_endpoint": "POST /api/auth/login", "edge_kind": "action" },
-        { "label": "navigate to dashboard", "type": "edge", "primary": true, "e": null, "edge_kind": "navigation", "note": "not scored" }
+        { "label": "submit login",    "type": "edge",    "primary": true,  "e": 1.0, "matched_endpoint": "POST /api/auth/login", "edge_kind": "data" },
+        { "label": "navigate to dashboard", "type": "edge", "primary": true, "e": 1.0, "edge_kind": "navigation", "matched_nav_target": "/dashboard" }
       ]
     }
   ],

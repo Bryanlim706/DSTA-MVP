@@ -119,10 +119,15 @@ export interface ConfirmedRequirement {
   source: string
   promoted?: boolean
   unpacks?: string | null
+  depends_on: string[]
+  source_quote: string | null
 }
 
 export interface Step35Result {
   confirmed_requirements: ConfirmedRequirement[]
+  advisory_requirements: Step3Requirement[]
+  project_context: Record<string, unknown>
+  project_summary: string | null
   confirmed_at: string
   skipped: boolean
   l1a_count: number
@@ -138,10 +143,32 @@ export interface ApiEndpoint {
   handler: string
 }
 
+export interface FrontendRoute {
+  path: string
+  dynamic: boolean
+  params: string[]
+}
+
+export interface ImplementationUnit {
+  kind: 'api_endpoint' | 'form_handler'
+  method: string
+  path: string | null
+  file: string | null
+  handler: string | null
+}
+
+export interface Step4Element {
+  type: 'input' | 'button' | 'select' | 'textarea'
+  subtype: string | null
+  label: string
+}
+
 export interface Step4Result {
   languages: string[]
-  frontend_routes: string[]
-  api_endpoints: ApiEndpoint[]
+  frontend_routes: FrontendRoute[]
+  implementation_units: ImplementationUnit[]
+  route_elements: Record<string, Step4Element[]>
+  navigation_graph: Record<string, string[]>
   database_models: string[]
   important_files: string[]
   existing_tests: string[]

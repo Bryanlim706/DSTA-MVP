@@ -201,35 +201,42 @@ async def run(step3_5_result: dict, extract_to: Path) -> dict:
         languages = _detect_languages(all_files)
         tests = _find_test_files(all_files, extract_to)
         endpoints = _extract_api_endpoints(all_files, backend_fw, extract_to)
-        routes = _extract_frontend_routes(all_files, frontend_fw, extract_to, endpoints=endpoints)
         models = _extract_database_models(all_files, backend_fw)
         important = _identify_important_files(all_files, extract_to, endpoints)
-        route_to_files = _build_route_to_files(all_files, frontend_fw, extract_to, routes, endpoints, important)
+        route_to_files = _build_route_to_files(all_files, frontend_fw, extract_to, endpoints, important)
+        routes = sorted(route_to_files.keys())
         impl_units = _build_implementation_units(endpoints, all_files, extract_to)
+        route_elements = _extract_route_elements(route_to_files, extract_to)
+        navigation_graph = _extract_navigation_graph(route_to_files, extract_to)
 
         return {
-            "languages": languages,
-            "frontend_routes": routes,
-            "api_endpoints": endpoints,
-            "route_to_files": route_to_files,
+            # L3 scoring inputs — consumed by Step 6 E() formula
+            "frontend_routes": [_route_entry(r) for r in routes],
             "implementation_units": impl_units,
-            "database_models": models,
+            "route_elements": route_elements,
+            "navigation_graph": navigation_graph,
+            # Infrastructure — route→file mapping used internally for route_elements/navigation_graph
+            "route_to_files": route_to_files,
             "important_files": important,
+            # Context / reporting — Step 15/16 evidence pack, Step 7.5 advisor
+            "database_models": models,
             "existing_tests": tests,
+            "languages": languages,
             "total_endpoints": len(endpoints),
             "total_routes": len(routes),
             "error": None,
         }
     except Exception as exc:
         return {
-            "languages": [],
             "frontend_routes": [],
-            "api_endpoints": [],
-            "route_to_files": {},
             "implementation_units": [],
-            "database_models": [],
+            "route_elements": {},
+            "navigation_graph": {},
+            "route_to_files": {},
             "important_files": [],
+            "database_models": [],
             "existing_tests": [],
+            "languages": [],
             "total_endpoints": 0,
             "total_routes": 0,
             "error": str(exc),
@@ -578,143 +585,22 @@ _ROUTE_COMPONENT_RE = re.compile(
 # Import statement: import Name from "path"
 _IMPORT_NAME_RE = re.compile(r"""import\s+(\w+)\s+from\s+['"]([^'"]+)['"]""")
 _VUE_ROUTE_PATH = re.compile(r"""path\s*:\s*['"]([^'"]*)['"]""")
+_DYNAMIC_SEGMENT = re.compile(r'(:\w+|\{\w+\}|\[[^\]]+\]|<\w+>)')
+
+
+def _route_entry(path: str) -> dict:
+    """Return {path, dynamic, params} metadata for a route path string."""
+    params = _DYNAMIC_SEGMENT.findall(path)
+    param_names = [re.sub(r'[:{}\[\]<>]', '', p) for p in params]
+    return {"path": path, "dynamic": bool(params), "params": param_names}
 
 
 def _extract_frontend_routes(
     files: list[Path], frontend_fw: str, root: Path, *, endpoints: list[dict] | None = None
 ) -> list[str]:
-    routes: set[str] = set()
-
-    # ── Next.js file-based (pages/) ─────────────
-    for base_name in ("pages", "src/pages"):
-        pages_dir = root / base_name
-        if pages_dir.is_dir():
-            for f in pages_dir.rglob("*"):
-                if (
-                    f.is_file()
-                    and f.suffix in {".tsx", ".ts", ".jsx", ".js"}
-                    and not f.name.startswith("_")
-                    and not any(part in IGNORE_DIRS for part in f.parts)
-                ):
-                    r = _nextjs_path(f.relative_to(pages_dir))
-                    if r:
-                        routes.add(r)
-            if routes:
-                return sorted(routes)
-
-    # ── Next.js App Router (app/) ────────────────
-    for base_name in ("app", "src/app"):
-        app_dir = root / base_name
-        if app_dir.is_dir():
-            for f in app_dir.rglob("page.tsx"):
-                if not any(part in IGNORE_DIRS for part in f.parts):
-                    rel = f.parent.relative_to(app_dir)
-                    route = "/" + "/".join(rel.parts) if rel.parts else "/"
-                    routes.add(_norm_path(route))
-            if routes:
-                return sorted(routes)
-
-    # ── SvelteKit (src/routes/) ──────────────────
-    svelte_dir = root / "src" / "routes"
-    if svelte_dir.is_dir():
-        for f in svelte_dir.rglob("+page.svelte"):
-            if not any(part in IGNORE_DIRS for part in f.parts):
-                rel = f.parent.relative_to(svelte_dir)
-                route = "/" + "/".join(rel.parts) if rel.parts else "/"
-                routes.add(_norm_path(route))
-        if routes:
-            return sorted(routes)
-
-    # ── React Router — JSX <Route path="..." /> ──
-    jsx_files = [
-        f for f in files
-        if f.suffix in {".tsx", ".jsx"}
-        and not any(p in IGNORE_DIRS for p in f.parts)
-    ]
-    for f in jsx_files:
-        parsed = _ts_parse(f)
-        if not parsed:
-            continue
-        _, tree = parsed
-        # Use JS queries for .jsx/.js files; TSX queries for .tsx files
-        q_sc = _Q_JS_ROUTE_SC if f.suffix in {".jsx", ".js"} else _Q_TSX_ROUTE_SC
-        q_open = _Q_JS_ROUTE_OPEN if f.suffix in {".jsx", ".js"} else _Q_TSX_ROUTE_OPEN
-        # Self-closing
-        for _, caps in _run_query(q_sc, tree.root_node):
-            tag_nodes = caps.get("tag", [])
-            attr_nodes = caps.get("attr", [])
-            path_nodes = caps.get("path", [])
-            if (
-                tag_nodes and attr_nodes and path_nodes
-                and _text(tag_nodes[0]) == "Route"
-                and _text(attr_nodes[0]) == "path"
-            ):
-                routes.add(_norm_path(_text(path_nodes[0])))
-        # Opening element
-        for _, caps in _run_query(q_open, tree.root_node):
-            tag_nodes = caps.get("tag", [])
-            attr_nodes = caps.get("attr", [])
-            path_nodes = caps.get("path", [])
-            if (
-                tag_nodes and attr_nodes and path_nodes
-                and _text(tag_nodes[0]) == "Route"
-                and _text(attr_nodes[0]) == "path"
-            ):
-                routes.add(_norm_path(_text(path_nodes[0])))
-
-    # ── React Router v6 object-based (createBrowserRouter) ──
-    for f in files:
-        if f.suffix not in {".ts", ".tsx", ".js", ".jsx"}:
-            continue
-        if any(p in IGNORE_DIRS for p in f.parts):
-            continue
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        if "react-router" not in text and "createBrowserRouter" not in text and "useRoutes" not in text:
-            continue
-        for m in _ROUTE_OBJ_PATH.finditer(text):
-            candidate = m.group(1)
-            if candidate and (candidate.startswith("/") or candidate == "*"):
-                routes.add(_norm_path(candidate))
-
-    # ── Vue Router / Angular routing ─────────────
-    for f in files:
-        if any(p in IGNORE_DIRS for p in f.parts):
-            continue
-        fname = f.name
-        is_vue_router = fname in {"router.js", "router.ts"} or (
-            f.parent.name in {"router", "routes"}
-            and fname in {"index.ts", "index.js"}
-        )
-        is_angular = fname.endswith("-routing.module.ts")
-        if not is_vue_router and not is_angular:
-            continue
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        for m in _VUE_ROUTE_PATH.finditer(text):
-            routes.add(_norm_path(m.group(1)))
-
-    # ── SSR endpoint fallback (Flask/Django/PHP — no JS frontend) ────────
-    # For SSR apps the HTML files are templates (includes layouts/partials).
-    # Use GET endpoint paths as the authoritative page list instead.
-    if not routes and not frontend_fw and endpoints:
-        for ep in endpoints:
-            if ep.get("method") == "GET" and ep.get("path"):
-                routes.add(_norm_path(ep["path"]))
-
-    # ── Static HTML fallback ─────────────────────
-    if not routes:
-        for f in files:
-            if f.suffix == ".html" and not any(p in IGNORE_DIRS for p in f.parts):
-                stem = f.stem
-                routes.add("/" if stem == "index" else f"/{stem}")
-
-    # Filter out wildcard-only catch-all (* alone)
-    return sorted(r for r in routes if r != "/*" or len(routes) == 1)
+    """Thin wrapper retained for direct test calls. Returns sorted route paths."""
+    route_to_files = _build_route_to_files(files, frontend_fw, root, endpoints or [], [])
+    return sorted(route_to_files.keys())
 
 
 def _nextjs_path(rel: Path) -> str | None:
@@ -859,6 +745,15 @@ _MODEL_CFG_NAMES = {
     "models.py", "schema.prisma", "database.py", "db.py",
     "entities.py", "schemas.py",
 }
+_PAGE_DIRS = {"pages", "screens", "views"}
+_COMPONENT_DIRS = {"components"}
+_SERVICE_DIRS = {"services", "api", "hooks", "store"}
+_CONFIG_FILE_NAMES = {
+    "application.properties", "application.yml", "application.yaml",
+    "pom.xml", "build.gradle", "build.gradle.kts",
+    "package.json", "settings.py",
+}
+_JAVA_LAYER_DIRS = {"service", "services", "security", "config", "repository", "repositories"}
 
 
 def _identify_important_files(
@@ -872,7 +767,11 @@ def _identify_important_files(
             important.add(ep["file"])
 
     for f in files:
+        if any(p in IGNORE_DIRS for p in f.parts):
+            continue
         fname = f.name
+
+        # Entry points, route configs, model configs
         if fname in _ENTRY_NAMES or fname in _ROUTE_CFG_NAMES or fname in _MODEL_CFG_NAMES:
             important.add(_rel(f, root))
         if fname.endswith("-routing.module.ts"):
@@ -880,7 +779,27 @@ def _identify_important_files(
         if fname in {"index.ts", "index.js"} and f.parent.name in {"router", "routes", "api"}:
             important.add(_rel(f, root))
 
-    return sorted(important)[:20]
+        # Frontend page components (pages/, screens/, views/)
+        if f.suffix in {".tsx", ".jsx", ".vue", ".svelte"} and f.parent.name in _PAGE_DIRS:
+            important.add(_rel(f, root))
+
+        # Frontend UI components
+        if f.suffix in {".tsx", ".jsx", ".vue"} and f.parent.name in _COMPONENT_DIRS:
+            important.add(_rel(f, root))
+
+        # Service / API client files
+        if f.suffix in {".ts", ".js"} and f.parent.name in _SERVICE_DIRS:
+            important.add(_rel(f, root))
+
+        # Config and properties files
+        if fname in _CONFIG_FILE_NAMES:
+            important.add(_rel(f, root))
+
+        # Java service / security / repository layer
+        if f.suffix == ".java" and f.parent.name in _JAVA_LAYER_DIRS:
+            important.add(_rel(f, root))
+
+    return sorted(important)[:100]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -921,14 +840,60 @@ def _route_component_files(router_file: Path, root: Path) -> dict[str, str]:
     return result
 
 
+def _shallow_component_imports(component_rel: str, root: Path) -> list[str]:
+    """Return relative paths of all directly imported local files from a component (1 level deep).
+    Gives Step 5 static fallback visibility into child component files where form elements live."""
+    abs_path = root / component_rel
+    root_resolved = root.resolve()
+    try:
+        text = abs_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return []
+    results: list[str] = []
+    seen: set[str] = set()
+    for m in _IMPORT_NAME_RE.finditer(text):
+        import_path = m.group(2)
+        if not import_path.startswith("."):
+            continue
+        base = abs_path.parent / import_path
+        for ext in ("", ".jsx", ".tsx", ".js", ".ts", "/index.jsx", "/index.tsx", "/index.js"):
+            candidate = (
+                Path(str(base) + ext) if ext and not ext.startswith("/")
+                else base / ext.lstrip("/")
+            )
+            if candidate.is_file():
+                # resolve() normalises '..' segments (e.g. src/pages/../components/X → src/components/X)
+                rel = _rel(candidate.resolve(), root_resolved)
+                if rel not in seen:
+                    seen.add(rel)
+                    results.append(rel)
+                break
+    return results
+
+
+def _expand_with_shallow_imports(route_files: dict[str, list[str]], root: Path) -> None:
+    """Expand each route's file list with 1-level-deep local imports.
+    Ensures Step 5 static fallback sees child components (forms, modals, layout) not just the page root."""
+    for files in route_files.values():
+        existing = set(files)
+        additions: list[str] = []
+        for rel in list(files):
+            for child in _shallow_component_imports(rel, root):
+                if child not in existing:
+                    existing.add(child)
+                    additions.append(child)
+        files.extend(additions)
+
+
 def _build_route_to_files(
     all_files: list[Path],
     frontend_fw: str,
     root: Path,
-    routes: list[str],
     endpoints: list[dict],
     important_files: list[str],
 ) -> dict[str, list[str]]:
+    """Discover every frontend route and map it to its source file(s) in one pass.
+    Route discovery and file mapping are unified — no external routes list needed."""
     route_files: dict[str, list[str]] = {}
 
     # ── Next.js pages/ (file-based routing) ──────────────────
@@ -946,7 +911,7 @@ def _build_route_to_files(
                     if r:
                         route_files.setdefault(r, []).append(_rel(f, root))
             if route_files:
-                _fill_fallback(routes, route_files, important_files)
+                _expand_with_shallow_imports(route_files, root)
                 return route_files
 
     # ── Next.js App Router (app/) ─────────────────────────────
@@ -959,7 +924,7 @@ def _build_route_to_files(
                     route = _norm_path("/" + "/".join(rel.parts) if rel.parts else "/")
                     route_files.setdefault(route, []).append(_rel(f, root))
             if route_files:
-                _fill_fallback(routes, route_files, important_files)
+                _expand_with_shallow_imports(route_files, root)
                 return route_files
 
     # ── SvelteKit (src/routes/) ───────────────────────────────
@@ -971,10 +936,11 @@ def _build_route_to_files(
                 route = _norm_path("/" + "/".join(rel.parts) if rel.parts else "/")
                 route_files.setdefault(route, []).append(_rel(f, root))
         if route_files:
-            _fill_fallback(routes, route_files, important_files)
+            _expand_with_shallow_imports(route_files, root)
             return route_files
 
-    # ── React Router: JSX files containing <Route path="..."> ─
+    # ── React Router: JSX <Route> + createBrowserRouter/useRoutes ─
+    # Step 1: tree-sitter JSX <Route path="...">
     for f in all_files:
         if f.suffix not in {".tsx", ".jsx"}:
             continue
@@ -1006,7 +972,6 @@ def _build_route_to_files(
             lst = route_files.setdefault(r, [])
             if rel_f not in lst:
                 lst.append(rel_f)
-        # Also add each route's rendered component file (from element={<ComponentName />})
         comp_map = _route_component_files(f, root)
         for r, comp_file in comp_map.items():
             if r in found and comp_file:
@@ -1014,46 +979,96 @@ def _build_route_to_files(
                 if comp_file not in lst:
                     lst.append(comp_file)
 
-    if route_files:
-        _fill_fallback(routes, route_files, important_files)
-        return route_files
-
-    # ── SSR (Flask/Django): endpoint file → route, then templates ──
-    # Use sets to accumulate, convert to list at end to avoid duplicates
-    route_file_sets: dict[str, set[str]] = {}
-
-    for ep in endpoints:
-        ep_path = ep.get("path", "")
-        if ep_path in routes and ep.get("file"):
-            route_file_sets.setdefault(ep_path, set()).add(ep["file"])
-
-    # Template files: match stem to route (e.g. login.html → /login)
+    # Step 2: createBrowserRouter / useRoutes object-based paths
     for f in all_files:
-        if f.suffix.lower() not in _TEMPLATE_EXTS:
+        if f.suffix not in {".ts", ".tsx", ".js", ".jsx"}:
             continue
         if any(p in IGNORE_DIRS for p in f.parts):
             continue
-        if not any(part in _TEMPLATE_DIRS for part in f.parts):
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
             continue
-        slug = "/" + f.stem if f.stem != "index" else "/"
-        if slug in routes:
-            route_file_sets.setdefault(slug, set()).add(_rel(f, root))
+        if "react-router" not in text and "createBrowserRouter" not in text and "useRoutes" not in text:
+            continue
+        rel_f = _rel(f, root)
+        for m in _ROUTE_OBJ_PATH.finditer(text):
+            candidate = m.group(1)
+            if candidate and (candidate.startswith("/") or candidate == "*"):
+                r = _norm_path(candidate)
+                lst = route_files.setdefault(r, [])
+                if rel_f not in lst:
+                    lst.append(rel_f)
 
-    # Static HTML fallback
+    if route_files:
+        _expand_with_shallow_imports(route_files, root)
+        if "/*" in route_files and len(route_files) > 1:
+            del route_files["/*"]
+        return route_files
+
+    # ── Vue Router / Angular routing ──────────────────────────
+    for f in all_files:
+        if any(p in IGNORE_DIRS for p in f.parts):
+            continue
+        fname = f.name
+        is_vue_router = fname in {"router.js", "router.ts"} or (
+            f.parent.name in {"router", "routes"}
+            and fname in {"index.ts", "index.js"}
+        )
+        is_angular = fname.endswith("-routing.module.ts")
+        if not is_vue_router and not is_angular:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        rel_f = _rel(f, root)
+        for m in _VUE_ROUTE_PATH.finditer(text):
+            route = _norm_path(m.group(1))
+            lst = route_files.setdefault(route, [])
+            if rel_f not in lst:
+                lst.append(rel_f)
+
+    if route_files:
+        return route_files
+
+    # ── SSR endpoint fallback (Flask/Django — no JS frontend) ──
+    if not frontend_fw and endpoints:
+        for ep in endpoints:
+            if ep.get("method") == "GET" and ep.get("path") and ep.get("file"):
+                route = _norm_path(ep["path"])
+                lst = route_files.setdefault(route, [])
+                if ep["file"] not in lst:
+                    lst.append(ep["file"])
+        # Also add matching template files
+        for f in all_files:
+            if f.suffix.lower() not in _TEMPLATE_EXTS:
+                continue
+            if any(p in IGNORE_DIRS for p in f.parts):
+                continue
+            if not any(part in _TEMPLATE_DIRS for part in f.parts):
+                continue
+            slug = _norm_path("/" + f.stem if f.stem != "index" else "/")
+            if slug in route_files:
+                rel = _rel(f, root)
+                if rel not in route_files[slug]:
+                    route_files[slug].append(rel)
+        if route_files:
+            return route_files
+
+    # ── Static HTML fallback ──────────────────────────────────
+    route_file_sets: dict[str, set[str]] = {}
     for f in all_files:
         if f.suffix != ".html" or any(p in IGNORE_DIRS for p in f.parts):
             continue
-        slug = "/" if f.stem == "index" else f"/{f.stem}"
-        if slug in routes:
-            route_file_sets.setdefault(slug, set()).add(_rel(f, root))
+        stem = f.stem
+        slug = "/" if stem == "index" else f"/{stem}"
+        route_file_sets.setdefault(slug, set()).add(_rel(f, root))
 
-    # For React SPA / Electron: route '/' maps to an HTML shell which has no
-    # interactive elements. Also add the main App component (App.tsx/App.jsx)
-    # so Step 5 static fallback reads real JSX source.
+    # SPA/Electron: route maps only to HTML shell — also add App component
     _APP_NAMES = {"App.tsx", "App.jsx", "App.ts", "App.js"}
     for slug, file_set in route_file_sets.items():
         if all(p.endswith(".html") for p in file_set):
-            # All mapped files are HTML shells — look for App component
             app_file = next(
                 (imp for imp in important_files if Path(imp).name in _APP_NAMES),
                 None,
@@ -1070,19 +1085,7 @@ def _build_route_to_files(
     for route, file_set in route_file_sets.items():
         route_files[route] = sorted(file_set)
 
-    _fill_fallback(routes, route_files, important_files)
     return route_files
-
-
-def _fill_fallback(
-    routes: list[str],
-    route_files: dict[str, list[str]],
-    important_files: list[str],
-) -> None:
-    fallback = important_files[:5]
-    for route in routes:
-        if route not in route_files:
-            route_files[route] = fallback
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1145,3 +1148,151 @@ def _build_implementation_units(
             })
 
     return units
+
+
+# ─────────────────────────────────────────────────────────────
+# L3 element inventory: parse source files per route
+# ─────────────────────────────────────────────────────────────
+
+_STATIC_EXTS = {".tsx", ".jsx", ".ts", ".js", ".html", ".jinja2", ".j2", ".erb", ".ejs"}
+
+_JSX_INPUT_RE = re.compile(
+    r"""<(input|textarea|select)\b([^>]*?)(?:/>|>)""",
+    re.IGNORECASE | re.DOTALL,
+)
+_JSX_BUTTON_RE = re.compile(
+    r"""<[Bb]utton\b([^>]*?)>(.*?)</[Bb]utton>""",
+    re.DOTALL,
+)
+_ATTR_ARIA = re.compile(r"""aria-label\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
+_ATTR_PH = re.compile(r"""placeholder\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
+_ATTR_NAME = re.compile(r"""\bname\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
+_ATTR_TYPE = re.compile(r"""\btype\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
+_JSX_BLOCK_COMMENT_RE = re.compile(r'\{/\*.*?\*/\}', re.DOTALL)
+_LINE_COMMENT_ONLY_RE = re.compile(r'^\s*//.*$', re.MULTILINE)
+
+
+def _strip_comments(text: str) -> str:
+    text = _JSX_BLOCK_COMMENT_RE.sub('', text)
+    text = _LINE_COMMENT_ONLY_RE.sub('', text)
+    return text
+
+
+def _label_from_attrs(attrs: str) -> str | None:
+    for pat in (_ATTR_ARIA, _ATTR_PH, _ATTR_NAME):
+        m = pat.search(attrs)
+        if m:
+            v = m.group(1).strip()
+            if v:
+                return v
+    return None
+
+
+def _elements_from_text(text: str) -> list[dict]:
+    """Extract interactive elements from source. Returns {type, subtype, label} — no runtime fields."""
+    text = _strip_comments(text)
+    elements: list[dict] = []
+    seen: set[tuple[str, str | None]] = set()
+
+    for m in _JSX_INPUT_RE.finditer(text):
+        tag = m.group(1).lower()
+        attrs = m.group(2)
+        type_m = _ATTR_TYPE.search(attrs)
+        subtype = type_m.group(1) if type_m else None
+        label = _label_from_attrs(attrs)
+        if not label:
+            continue
+        key = (label, subtype)
+        if key in seen:
+            continue
+        seen.add(key)
+        elements.append({"type": tag, "subtype": subtype, "label": label})
+
+    for m in _JSX_BUTTON_RE.finditer(text):
+        attrs = m.group(1)
+        raw_text = m.group(2).strip()
+        if '>' in raw_text:
+            raw_text = raw_text.rsplit('>', 1)[1].strip()
+        if raw_text.startswith('{') and not raw_text.strip('{}').strip():
+            raw_text = ''
+        elif raw_text.startswith('{'):
+            qm = re.search(r'"([^"]{1,80})"', raw_text)
+            raw_text = qm.group(1) if qm else re.sub(r'\{[^{}]*\}', '', raw_text).strip()
+        type_m = _ATTR_TYPE.search(attrs)
+        subtype = type_m.group(1) if type_m else None
+        aria_m = _ATTR_ARIA.search(attrs)
+        label = (aria_m.group(1) if aria_m else raw_text)[:80]
+        if not label:
+            continue
+        key = (label, subtype)
+        if key in seen:
+            continue
+        seen.add(key)
+        elements.append({"type": "button", "subtype": subtype, "label": label})
+
+    return elements
+
+
+def _extract_route_elements(
+    route_to_files: dict[str, list[str]], root: Path
+) -> dict[str, list[dict]]:
+    """L3 element inventory: {route: [{type, subtype, label}, ...]} parsed from source files."""
+    result: dict[str, list[dict]] = {}
+    for route, files in route_to_files.items():
+        elements: list[dict] = []
+        seen: set[tuple[str, str | None]] = set()
+        for rel in files:
+            p = root / rel
+            if p.suffix.lower() not in _STATIC_EXTS:
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            for el in _elements_from_text(text):
+                key = (el["label"], el["subtype"])
+                if key not in seen:
+                    seen.add(key)
+                    elements.append(el)
+        if elements:
+            result[route] = elements
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# L3 navigation graph: parse source files per route
+# ─────────────────────────────────────────────────────────────
+
+# Matches static string paths in navigation directives — skips template literals and variables.
+# Covers: <Link to="/p">, <a href="/p">, navigate("/p"), router.push("/p"), history.push("/p"),
+#         <RouterLink to="/p">, <a routerLink="/p">
+_NAV_TARGET_RE = re.compile(
+    r'(?:(?:to|href|routerLink)\s*=\s*["\']'
+    r'|(?:navigate|router\.push|history\.push)\s*\(\s*["\'])'
+    r'([/][^"\'?#\s]*)["\']',
+    re.IGNORECASE,
+)
+
+
+def _extract_navigation_graph(
+    route_to_files: dict[str, list[str]], root: Path
+) -> dict[str, list[str]]:
+    """L3 navigation graph: {route: [target_routes...]} from navigation triggers in source."""
+    graph: dict[str, list[str]] = {}
+    for route, files in route_to_files.items():
+        targets: set[str] = set()
+        for rel in files:
+            p = root / rel
+            if p.suffix.lower() not in _STATIC_EXTS:
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            for m in _NAV_TARGET_RE.finditer(text):
+                target = _norm_path(m.group(1))
+                if target != route:
+                    targets.add(target)
+        if targets:
+            graph[route] = sorted(targets)
+    return graph
