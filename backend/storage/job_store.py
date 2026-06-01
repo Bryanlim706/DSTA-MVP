@@ -61,19 +61,19 @@ def add_step_result(job_id: str, step_key: str, result: dict) -> dict:
 def list_jobs(limit: int = 10) -> list[dict]:
     if not JOBS_DIR.exists():
         return []
-    files = sorted(JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    result = []
-    for p in files[:limit]:
+    summaries = []
+    for p in JOBS_DIR.glob("*.json"):
         j = get_job(p.stem)
         if j:
-            result.append({
+            summaries.append({
                 "job_id": j["job_id"],
                 "status": j["status"],
                 "current_step": j.get("current_step", -1),
                 "created_at": j.get("created_at"),
                 "steps_complete": list(j.get("step_results", {}).keys()),
             })
-    return result
+    summaries.sort(key=lambda j: j["created_at"] or "")
+    return summaries[-limit:] if limit else summaries
 
 
 def _write(job_id: str, job: dict) -> None:
