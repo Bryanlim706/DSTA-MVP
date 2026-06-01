@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from pipeline.step4_repo_parser import (
     _norm_path,
     _join,
+    _elements_from_text,
     _detect_languages,
     _walk_files,
     _endpoints_python,
@@ -833,6 +834,64 @@ def test_route_to_files_no_mapping_for_missing_route(tmp_path):
     assert "/" in result
     assert "/about" in result
     assert "/dashboard" not in result
+
+
+# ---------------------------------------------------------------------------
+# 13a. _elements_from_text — L3 element extraction
+# ---------------------------------------------------------------------------
+
+def test_elements_basic_placeholder():
+    jsx = '<input name="email" placeholder="Email address" />'
+    elems = _elements_from_text(jsx)
+    assert any(e["label"] == "Email address" for e in elems)
+
+
+def test_elements_arrow_function_in_onchange():
+    """Inputs with onChange={(e) => ...} arrow functions must still extract placeholder."""
+    jsx = (
+        '<input type="text" value={username} onChange={(e) => setUser(e.target.value)}'
+        ' placeholder="Enter your username" />'
+    )
+    elems = _elements_from_text(jsx)
+    labels = [e["label"] for e in elems]
+    assert "Enter your username" in labels
+
+
+def test_elements_password_arrow_function():
+    """Password input with arrow function onChange extracts placeholder correctly."""
+    jsx = (
+        '<input type="password" value={pw} onChange={(e) => setPw(e.target.value)}'
+        ' placeholder="Enter your password" />'
+    )
+    elems = _elements_from_text(jsx)
+    labels = [e["label"] for e in elems]
+    assert "Enter your password" in labels
+    pw_elem = next(e for e in elems if e["label"] == "Enter your password")
+    assert pw_elem["subtype"] == "password"
+
+
+def test_elements_multiline_arrow_function():
+    """Multiline input with arrow function onChange across lines still extracts placeholder."""
+    jsx = (
+        '<input\n'
+        '  type="text"\n'
+        '  value={username}\n'
+        '  onChange={(e) => setUsername(e.target.value)}\n'
+        '  required\n'
+        '  placeholder="Enter your username"\n'
+        '/>'
+    )
+    elems = _elements_from_text(jsx)
+    labels = [e["label"] for e in elems]
+    assert "Enter your username" in labels
+
+
+def test_elements_simple_onchange_handler():
+    """Simple onChange={handler} (no arrow) continues to work."""
+    jsx = '<input name="firstName" onChange={handleChange} placeholder="First Name" />'
+    elems = _elements_from_text(jsx)
+    labels = [e["label"] for e in elems]
+    assert "First Name" in labels
 
 
 # ---------------------------------------------------------------------------

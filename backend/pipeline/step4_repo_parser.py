@@ -1157,7 +1157,7 @@ def _build_implementation_units(
 _STATIC_EXTS = {".tsx", ".jsx", ".ts", ".js", ".html", ".jinja2", ".j2", ".erb", ".ejs"}
 
 _JSX_INPUT_RE = re.compile(
-    r"""<(input|textarea|select)\b([^>]*?)(?:/>|>)""",
+    r"""<(input|textarea|select)\b((?:[^>{}]|\{(?:[^{}]|\{[^{}]*\})*\})*?)(?:/>|>)""",
     re.IGNORECASE | re.DOTALL,
 )
 _JSX_BUTTON_RE = re.compile(
