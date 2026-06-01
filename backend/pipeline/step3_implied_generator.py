@@ -318,12 +318,11 @@ def _validate_and_normalise(
             if isinstance(d, str) and d in valid_step1_ids
         ]
 
-        # Validate unpacks pointer
+        # Validate unpacks pointer — LLM occasionally returns a list instead of a string
         unpacks = item.get("unpacks")
-        if unpacks and unpacks not in valid_step1_ids:
-            item["unpacks"] = None
-        else:
-            item.setdefault("unpacks", None)
+        if not isinstance(unpacks, str):
+            unpacks = None
+        item["unpacks"] = unpacks if unpacks and unpacks in valid_step1_ids else None
 
         valid.append(item)
 

@@ -37,8 +37,8 @@ edge with edge_kind "structural":
   {"entity_index": N, "type": "edge", "edge_kind": "structural", "trigger_element_label": "label" | null, "match_source": "playwright" | "route_elements" | null}
 
 Matching rules:
-1. ONLY match items explicitly present in the inventory. Set null if not found.
-2. node: match the label to a route path by semantic similarity (e.g. "Login Page" → "/login", "Home" → "/").
+1. Match items present in the inventory. Set null only when no reasonable match exists anywhere in the inventory.
+2. node: Match the label to a route path using BOTH the route path AND its element content listed under "Available routes". Route paths are technical names; requirement labels are human-facing names that often differ significantly. Use element content as the primary evidence when route names are ambiguous. Examples: "Employee List Page" → "/search" if that route has employee-filter inputs; "Product Detail" → "/products/:id" (dynamic); "Home" → "/"; "Login Page" → "/login". Prefer the route whose element content best matches the expected page over a literal name match.
 3. element: after resolving a nearby node entity, search that route's element inventory for the best label match. Copy the inventory source label ("playwright" or "route_elements") into match_source.
 4. edge/data: match to implementation_units using the edge label to infer HTTP verb (submit/add/create → POST, delete/remove → DELETE, update/edit/save → PATCH or PUT). Return "METHOD /path" format.
 5. edge/navigation: check if a rendered link or button in the element inventory navigates to a matching target route → "playwright_element"; otherwise check the static navigation_graph → "navigation_graph".
@@ -108,26 +108,46 @@ def _build_nav_inventory(navigation_graph: dict, step5_pages: list) -> dict:
 
 def _candidate_routes(path: list, route_paths: list) -> list:
     """Heuristically select relevant routes for this requirement's inventory scoping."""
+    # For small apps always include all routes — cheap and avoids missing the relevant route
+    if len(route_paths) <= 10:
+        return route_paths
+
     node_labels = [e.get("label", "").lower() for e in path if e.get("type") == "node"]
     if not node_labels:
         return route_paths[:10]
 
     candidates: list = []
-    home_words = {"home", "landing", "main", "index", "root"}
+    # Words that suggest the root "/" route
+    home_words = {"home", "landing", "main", "index", "root", "dashboard", "overview"}
+    # Generic UI words stripped before name matching (route base names are concise)
+    _STRIP_RE = re.compile(r"\b(page|screen|view|panel|list|detail|section|tab)\b")
 
     for label in node_labels:
-        label_clean = re.sub(r"\b(page|screen|view|panel|list|detail)\b", "", label).strip()
+        label_clean = _STRIP_RE.sub("", label).strip()
+        label_words = set(re.findall(r"\b\w{3,}\b", label_clean))  # meaningful words only
+
         for route in route_paths:
             route_base = (
-                route.lstrip("/").replace("-", " ").replace("_", " ").replace("/", " ").lower().strip()
+                route.lstrip("/").split("/")[0]
+                .replace("-", " ").replace("_", " ").lower().strip()
             )
-            if route_base and (route_base in label_clean or label_clean in route_base):
+            route_words = set(re.findall(r"\b\w{3,}\b", route_base))
+
+            # Direct word overlap between label words and route base words
+            if route_words and (route_words & label_words):
                 if route not in candidates:
                     candidates.append(route)
-            elif route == "/" and any(w in label for w in home_words):
+                continue
+
+            # Root "/" heuristics
+            if route == "/" and (
+                any(w in label for w in home_words)
+                or not route_base  # "/" always included as a candidate when label has no better match
+            ):
                 if route not in candidates:
                     candidates.append(route)
 
+    # Always include "/" — it's often the main page, LLM needs it for context
     if "/" in route_paths and "/" not in candidates:
         candidates.append("/")
 
@@ -162,10 +182,17 @@ def _build_grounding_user_message(
     candidates = _candidate_routes(path, route_paths)
 
     lines.append("")
-    lines.append("Available routes:")
+    lines.append("Available routes (with top element labels as context for node matching):")
     for r in route_paths:
         flag = " (dynamic)" if r in dynamic_routes else ""
-        lines.append(f"- {r}{flag}")
+        inv = page_inventory.get(r, {})
+        top_labels = [
+            e.get("label", "")
+            for e in inv.get("elements", [])
+            if e.get("label", "").strip()
+        ][:5]
+        hint = f"  [{', '.join(top_labels)}]" if top_labels else ""
+        lines.append(f"- {r}{flag}{hint}")
 
     lines.append("")
     lines.append("Element inventory (by route):")

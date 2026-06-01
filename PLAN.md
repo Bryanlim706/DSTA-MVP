@@ -794,12 +794,13 @@ Linkage (is the trigger element wired to that endpoint?) → FCor (Step 11), not
 {
   "frontend_routes": [
     { "path": "/", "dynamic": false, "params": [] },
+    { "path": "/dashboard", "dynamic": false, "params": [] },
     { "path": "/login", "dynamic": false, "params": [] },
     { "path": "/users/:id", "dynamic": true, "params": ["id"] }
   ],
   "implementation_units": [
-    { "kind": "api_endpoint", "method": "POST", "path": "/api/auth/login", "file": "src/.../AuthController.java", "handler": "login" },
-    { "kind": "form_handler", "method": "POST", "path": "/login", "file": "templates/login.html", "handler": null }
+    { "kind": "api_endpoint", "method": "POST", "path": "/api/auth/login", "file": "src/main/java/.../AuthController.java", "handler": "login" },
+    { "kind": "api_endpoint", "method": "GET",  "path": "/api/users/{id}", "file": "src/main/java/.../UserController.java", "handler": "getUser" }
   ],
   "route_elements": {
     "/login": [
@@ -809,19 +810,22 @@ Linkage (is the trigger element wired to that endpoint?) → FCor (Step 11), not
     ]
   },
   "navigation_graph": {
-    "/": ["/login", "/register"],
-    "/dashboard": ["/tasks", "/profile"]
+    "/": ["/dashboard", "/login"],
+    "/login": ["/", "/dashboard"],
+    "/dashboard": ["/", "/users/:id"]
   },
   "route_to_files": {
+    "/": ["src/pages/Home.tsx"],
+    "/dashboard": ["src/pages/Dashboard.tsx"],
     "/login": ["src/pages/Login.tsx", "src/components/LoginForm.tsx"],
     "/users/:id": ["src/pages/UserDetail.tsx"]
   },
-  "important_files": ["src/pages/Login.tsx", "src/.../AuthController.java", "src/services/api.ts"],
+  "important_files": ["src/pages/Login.tsx", "src/main/java/.../AuthController.java", "src/services/api.ts"],
   "database_models": ["User", "Task"],
-  "existing_tests": ["src/test/java/.../AppTests.java"],
-  "languages": ["Java", "JavaScript"],
+  "existing_tests": ["src/test/java/.../AuthControllerTest.java"],
+  "languages": ["Java", "TypeScript"],
   "total_endpoints": 8,
-  "total_routes": 3,
+  "total_routes": 4,
   "error": null
 }
 ```
@@ -892,6 +896,17 @@ Routes Playwright cannot visit (auth-gated, 404, timeout) → `unvisitable_route
 {
   "pages": [
     {
+      "route": "/",
+      "title": "Home",
+      "discovered_by": "playwright",
+      "accessible": true,
+      "elements": [
+        { "type": "a", "subtype": "link", "label": "Login", "selector": "a[href='/login']", "visible": true }
+      ],
+      "outbound_links": ["/login"],
+      "api_calls_observed": []
+    },
+    {
       "route": "/login",
       "title": "Login",
       "discovered_by": "playwright",
@@ -912,12 +927,22 @@ Routes Playwright cannot visit (auth-gated, 404, timeout) → `unvisitable_route
       "elements": [],
       "outbound_links": [],
       "api_calls_observed": []
+    },
+    {
+      "route": "/users/:id",
+      "title": null,
+      "discovered_by": "static_fallback",
+      "accessible": null,
+      "elements": [],
+      "outbound_links": [],
+      "api_calls_observed": []
     }
   ],
   "unvisitable_routes": [
-    { "route": "/dashboard", "reason": "auth_required" }
+    { "route": "/dashboard", "reason": "auth_required" },
+    { "route": "/users/:id", "reason": "auth_required" }
   ],
-  "total_pages": 2,
+  "total_pages": 4,
   "error": null
 }
 ```
@@ -1057,21 +1082,20 @@ l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys_by_
       "description": "User can log in",
       "e_score": 1.0,
       "entity_scores": [
-        { "label": "Login Page",      "type": "node",    "primary": false, "e": 1.0, "evidence": "route /login found + page accessible" },
-        { "label": "email input",     "type": "element", "primary": true,  "e": 1.0, "matched_selector": "input[type='email']" },
-        { "label": "password input",  "type": "element", "primary": true,  "e": 1.0, "matched_selector": "input[type='password']" },
-        { "label": "login button",    "type": "element", "primary": true,  "e": 1.0, "matched_selector": "button[type='submit']" },
-        { "label": "submit login",    "type": "edge",    "primary": true,  "e": 1.0, "matched_endpoint": "POST /api/auth/login", "edge_kind": "data" },
-        { "label": "navigate to dashboard", "type": "edge", "primary": true, "e": 1.0, "edge_kind": "navigation", "matched_nav_target": "/dashboard" },
-        { "label": "filter tasks by status", "type": "edge", "primary": true, "e": 1.0, "edge_kind": "structural", "triggering_element_found": true }
+        { "label": "navigate to login",     "type": "edge",    "primary": true, "e": 1.0, "edge_kind": "navigation", "matched_nav_target": "/login" },
+        { "label": "Login Page",            "type": "node",    "primary": true, "e": 1.0, "matched_route": "/login", "evidence": "route /login found + page accessible" },
+        { "label": "email input",           "type": "element", "primary": true, "e": 1.0, "matched_selector": "input[type='email']" },
+        { "label": "password input",        "type": "element", "primary": true, "e": 1.0, "matched_selector": "input[type='password']" },
+        { "label": "login button",          "type": "element", "primary": true, "e": 1.0, "matched_selector": "button[type='submit']" },
+        { "label": "navigate to dashboard", "type": "edge",    "primary": true, "e": 1.0, "edge_kind": "navigation", "matched_nav_target": "/dashboard" }
       ]
     }
   ],
   "unlinked_l2": [
-    { "route": "/admin", "title": "Admin Panel", "note": "No L1a requirement's path[] node entity matched this route" }
+    { "route": "/", "title": "Home", "note": "No L1a requirement's path[] node entity matched this route" }
   ],
   "unlinked_l3": [
-    { "method": "DELETE", "path": "/api/users/:id", "handler": "delete_user", "file": "routes/users.py", "note": "No L1a requirement matched this endpoint as its L3 signal" }
+    { "method": "GET", "path": "/api/users/{id}", "handler": "getUser", "file": "src/main/java/.../UserController.java", "note": "No L1a requirement matched this endpoint as its L3 signal" }
   ]
 }
 ```
@@ -1103,23 +1127,23 @@ l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys_by_
         { "req_id": "OBV-003", "description": "User can edit a task", "e_score": 0.0, "gap": "Not found in L2 or L3" }
       ],
       "unlinked_routes": [
-        { "route": "/admin", "title": "Admin Panel", "note": "No L1a requirement's path[] visits this route" }
+        { "route": "/", "title": "Home", "note": "No L1a requirement's path[] visits this route" }
       ],
       "unlinked_endpoints": [
-        { "method": "DELETE", "path": "/api/users/:id", "note": "No L1a requirement implies this endpoint" }
+        { "method": "GET", "path": "/api/users/{id}", "note": "No L1a requirement implies this endpoint" }
       ]
     }
   },
   "functional_appropriateness": {
     "score": 0.71,
     "per_implied": [
-      { "req_id": "L1B-001", "description": "User can filter tasks", "e_score": 1.0, "weight": 3.0, "contribution": 3.0 },
-      { "req_id": "L1B-002", "description": "User can bulk-delete tasks", "e_score": 0.0, "weight": 1.0, "contribution": 0.0 }
+      { "req_id": "GEN-008", "description": "User can filter tasks", "e_score": 1.0, "weight": 3.0, "contribution": 3.0 },
+      { "req_id": "GEN-009", "description": "User can bulk-delete tasks", "e_score": 0.0, "weight": 1.0, "contribution": 0.0 }
     ],
     "advisory": {
       "missing_l1b": [
         {
-          "req_id": "L1B-002",
+          "req_id": "GEN-009",
           "description": "User can bulk-delete tasks",
           "e_score": 0.0,
           "strength": "weak",

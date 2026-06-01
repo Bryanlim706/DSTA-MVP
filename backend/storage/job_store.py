@@ -34,8 +34,11 @@ def get_job(job_id: str) -> dict | None:
     p = _path(job_id)
     if not p.exists():
         return None
-    with open(p, encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def update_job(job_id: str, updates: dict) -> dict:
@@ -63,11 +66,14 @@ def list_jobs(limit: int = 10) -> list[dict]:
         return []
     summaries = []
     for p in JOBS_DIR.glob("*.json"):
-        j = get_job(p.stem)
-        if j:
+        try:
+            j = get_job(p.stem)
+        except Exception:
+            continue
+        if j and j.get("job_id"):
             summaries.append({
-                "job_id": j["job_id"],
-                "status": j["status"],
+                "job_id": j.get("job_id", p.stem),
+                "status": j.get("status", "unknown"),
                 "current_step": j.get("current_step", -1),
                 "created_at": j.get("created_at"),
                 "steps_complete": list(j.get("step_results", {}).keys()),

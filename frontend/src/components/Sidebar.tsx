@@ -39,24 +39,46 @@ const GROUPS: { id: string; label: string; steps: Step[] }[] = [
   },
 ]
 
-const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4])
+const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4, 5, 6, 7])
+
+// Ordered pipeline statuses — a step is "complete" when the job status is at or past it
+const STATUS_ORDER = [
+  'confirmed',
+  'step_4_running', 'step_4_complete', 'step_4_error',
+  'step_5_running', 'step_5_complete', 'step_5_error',
+  'step_6_running', 'step_6_complete', 'step_6_error',
+  'step_7_running', 'step_7_complete', 'step_7_error',
+]
+
+function statusIndex(s?: string): number {
+  return s ? STATUS_ORDER.indexOf(s) : -1
+}
 
 function activeStepId(stage: Stage, currentStep?: number, jobStatus?: string): number {
   if (stage === 'upload') return -1
   if (stage === 'loading') return currentStep ?? 0
   if (stage === 'confirming') return 3.5
-  if (stage === 'step_3_complete' && jobStatus === 'step_4_running') return 4
+  if (stage !== 'step_3_complete') return -99
+  if (jobStatus === 'step_4_running') return 4
+  if (jobStatus === 'step_5_running') return 5
+  if (jobStatus === 'step_6_running') return 6
+  if (jobStatus === 'step_7_running') return 7
   return -99
 }
 
 function isComplete(id: number, stage: Stage, currentStep?: number, jobStatus?: string): boolean {
-  if (stage === 'step_3_complete') {
-    const base = id === -1 || id === 0 || id === 1 || id === 2 || id === 3 || id === 3.5
-    const step4done = jobStatus === 'step_4_complete' || jobStatus === 'step_4_error'
-    return base || (id === 4 && step4done)
-  }
   if (stage === 'confirming') return id === -1 || id === 0 || id === 1 || id === 2 || id === 3
   if (stage === 'loading')    return id === -1 || (id >= 0 && id < (currentStep ?? 0))
+  if (stage !== 'step_3_complete') return false
+
+  // Steps 0–3.5 always complete once we reach results stage
+  if (id === -1 || id === 0 || id === 1 || id === 2 || id === 3 || id === 3.5) return true
+
+  const si = statusIndex(jobStatus)
+  if (id === 4) return si >= statusIndex('step_4_complete')
+  if (id === 5) return si >= statusIndex('step_5_complete')
+  if (id === 6) return si >= statusIndex('step_6_complete')
+  if (id === 7) return si >= statusIndex('step_7_complete')
   return false
 }
 

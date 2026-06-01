@@ -76,16 +76,26 @@ def _bootstrap_commands(ctx: dict, root: Path) -> list[_BootSpec]:
     return []
 
 
+def _wrap_npm_cmd(cmd: list[str]) -> list[str]:
+    """On Windows, npm is a .cmd file. CreateProcess can't run .cmd without cmd /c."""
+    if sys.platform != "win32":
+        return cmd
+    exe = cmd[0] if cmd else ""
+    if isinstance(exe, str) and (exe.lower().endswith((".cmd", ".bat")) or exe.lower() == "npm"):
+        return ["cmd", "/c"] + cmd
+    return cmd
+
+
 def _npm_cmd(cwd: Path, tooling: str, frontend_fw: str) -> tuple[list[str], int]:
     npm = shutil.which("npm") or "npm"
     if "vite" in tooling or "vite" in frontend_fw:
-        return ([npm, "run", "dev", "--", "--port", str(_PORT_FRONTEND_VITE)], _PORT_FRONTEND_VITE)
+        return (_wrap_npm_cmd([npm, "run", "dev", "--", "--port", str(_PORT_FRONTEND_VITE)]), _PORT_FRONTEND_VITE)
     if "next" in frontend_fw:
-        return ([npm, "run", "dev", "--", "-p", str(_PORT_FRONTEND_CRA)], _PORT_FRONTEND_CRA)
+        return (_wrap_npm_cmd([npm, "run", "dev", "--", "-p", str(_PORT_FRONTEND_CRA)]), _PORT_FRONTEND_CRA)
     if "sveltekit" in frontend_fw or "svelte" in frontend_fw:
-        return ([npm, "run", "dev", "--", "--port", str(_PORT_FRONTEND_VITE)], _PORT_FRONTEND_VITE)
+        return (_wrap_npm_cmd([npm, "run", "dev", "--", "--port", str(_PORT_FRONTEND_VITE)]), _PORT_FRONTEND_VITE)
     # CRA / Webpack / generic
-    return ([npm, "start"], _PORT_FRONTEND_CRA)
+    return (_wrap_npm_cmd([npm, "start"]), _PORT_FRONTEND_CRA)
 
 
 def _backend_spec(root: Path, backend_fw: str) -> _BootSpec | None:
@@ -97,7 +107,7 @@ def _backend_spec(root: Path, backend_fw: str) -> _BootSpec | None:
     if "django" in backend_fw:
         return ([sys.executable, "manage.py", "runserver", str(_PORT_BACKEND)], _PORT_BACKEND, root)
     if "express" in backend_fw or "nestjs" in backend_fw:
-        return ([npm, "start"], _PORT_BACKEND_EXPRESS, root)
+        return (_wrap_npm_cmd([npm, "start"]), _PORT_BACKEND_EXPRESS, root)
     if "spring" in backend_fw:
         # Search root and up to 2 levels of subdirs for mvnw.cmd/mvnw
         # (handles nested zip structures where the project is not at root)
@@ -158,11 +168,29 @@ def _find_frontend_dir(root: Path) -> Path | None:
     return None
 
 
+async def _npm_install_if_needed(cwd: Path) -> None:
+    """Run `npm install` when node_modules is absent (project zips rarely include it)."""
+    if (cwd / "node_modules").exists():
+        return
+    npm = shutil.which("npm") or "npm"
+    cmd = _wrap_npm_cmd([npm, "install", "--prefer-offline", "--no-audit", "--loglevel=error"])
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=180.0)
+    except Exception:
+        pass
+
+
 # ─────────────────────────────────────────────────────────────
 # Port readiness poll
 # ─────────────────────────────────────────────────────────────
 
-async def _wait_for_port(port: int, timeout: float = 30.0) -> bool:
+async def _wait_for_port(port: int, timeout: float = 60.0) -> bool:
     try:
         import httpx
         deadline = asyncio.get_running_loop().time() + timeout
@@ -391,6 +419,9 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
     processes: list[asyncio.subprocess.Process] = []
     try:
         for cmd, _port, cwd in bootstrap:
+            # Install npm deps if node_modules is absent (common when zip excludes them)
+            if any("npm" in (c.lower() if isinstance(c, str) else "") for c in cmd):
+                await _npm_install_if_needed(cwd)
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
