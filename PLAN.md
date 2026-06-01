@@ -930,7 +930,7 @@ Routes Playwright cannot visit (auth-gated, 404, timeout) → `unvisitable_route
 
 ---
 
-### Step 6: Requirement → L2/L3 Entity Mapper
+### Step 6: Requirement → L2/L3 Entity Mapper — **COMPLETE**
 **Phase: FCom — computes E() per requirement**
 **Tools:** Python, LLM (AsyncAnthropic — entity label matching)
 **Input:**
@@ -1078,7 +1078,7 @@ l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys_by_
 
 ---
 
-### Step 7: Functional Completeness + Appropriateness Scorer
+### Step 7: Functional Completeness + Appropriateness Scorer — **COMPLETE**
 **Phase: FCom — numeric scoring**
 **Tools:** Python (formula only — no LLM for numeric scoring)
 **Input:** Step 6 (traceability matrix with E() scores per requirement) + `step_3_5.confirmed_requirements` (L1a weights) + `step_3_5.advisory_requirements` (L1b weights)

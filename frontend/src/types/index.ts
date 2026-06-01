@@ -207,6 +207,60 @@ export interface Step5Result {
   error: string | null
 }
 
+export interface EntityScore {
+  label: string
+  type: 'node' | 'element' | 'edge'
+  primary: boolean
+  e: number | null
+  evidence?: string
+  matched_route?: string | null
+  matched_element_label?: string | null
+  matched_selector?: string | null
+  match_source?: string | null
+  edge_kind?: 'data' | 'navigation' | 'structural'
+  matched_endpoint?: string | null
+  trigger_element_label?: string | null
+  matched_nav_target?: string | null
+  triggering_element_found?: boolean | null
+}
+
+export interface MappedRequirement {
+  req_id: string
+  description: string
+  e_score: number
+  entity_scores: EntityScore[]
+}
+
+export interface Step6Result {
+  mapped: MappedRequirement[]
+  unlinked_l2: { route: string; title: string | null; note: string }[]
+  unlinked_l3: { method?: string | null; path?: string | null; handler?: string | null; file?: string | null; note: string }[]
+  llm_model: string | null
+  error: string | null
+}
+
+export interface Step7Advisory {
+  req_id: string
+  description: string
+  e_score: number
+  weight: number
+  strength?: string | null
+}
+
+export interface Step7Result {
+  fcom: number
+  fa: number
+  fcom_detail: { numerator: number; denominator: number; requirement_count: number }
+  fa_detail: { numerator: number; denominator: number; requirement_count: number }
+  fcom_advisory: {
+    missing_l1a: Step7Advisory[]
+    unlinked_routes: Step6Result['unlinked_l2']
+    unlinked_endpoints: Step6Result['unlinked_l3']
+  }
+  fa_advisory: { missing_l1b: Step7Advisory[] }
+  error: string | null
+}
+
 export interface StepResults {
   step_0?: Step0Result
   step_1?: Step1Result
@@ -215,6 +269,8 @@ export interface StepResults {
   step_3_5?: Step35Result
   step_4?: Step4Result
   step_5?: Step5Result
+  step_6?: Step6Result
+  step_7?: Step7Result
 }
 
 export type JobStatus =
@@ -230,6 +286,12 @@ export type JobStatus =
   | 'step_5_running'
   | 'step_5_complete'
   | 'step_5_error'
+  | 'step_6_running'
+  | 'step_6_complete'
+  | 'step_6_error'
+  | 'step_7_running'
+  | 'step_7_complete'
+  | 'step_7_error'
   | 'complete'
   | 'error'
 

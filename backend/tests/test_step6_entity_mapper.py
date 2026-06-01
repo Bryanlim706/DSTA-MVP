@@ -1,0 +1,497 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from pipeline.step6_entity_mapper import (
+    _aggregate,
+    _build_nav_inventory,
+    _build_page_inventory,
+    _candidate_routes,
+    _classify_edge_kind,
+    _compute_unlinked,
+    _parse_grounding_response,
+    _score_entity,
+)
+
+
+# ---------------------------------------------------------------------------
+# _classify_edge_kind
+# ---------------------------------------------------------------------------
+
+def test_classify_data_submit():
+    assert _classify_edge_kind("submit order") == "data"
+
+def test_classify_data_delete():
+    assert _classify_edge_kind("delete item") == "data"
+
+def test_classify_data_create():
+    assert _classify_edge_kind("create account") == "data"
+
+def test_classify_data_update():
+    assert _classify_edge_kind("update profile") == "data"
+
+def test_classify_data_save():
+    assert _classify_edge_kind("save changes") == "data"
+
+def test_classify_structural_filter():
+    assert _classify_edge_kind("filter by status") == "structural"
+
+def test_classify_structural_search():
+    assert _classify_edge_kind("search results") == "structural"
+
+def test_classify_structural_sort():
+    assert _classify_edge_kind("sort by date") == "structural"
+
+def test_classify_navigation_navigate():
+    assert _classify_edge_kind("navigate to dashboard") == "navigation"
+
+def test_classify_navigation_go_to():
+    assert _classify_edge_kind("go to cart") == "navigation"
+
+def test_classify_navigation_open():
+    assert _classify_edge_kind("open details page") == "navigation"
+
+def test_classify_unknown_defaults_navigation():
+    assert _classify_edge_kind("proceed") == "navigation"
+
+def test_classify_empty_defaults_navigation():
+    assert _classify_edge_kind("") == "navigation"
+
+def test_classify_case_insensitive():
+    assert _classify_edge_kind("DELETE record") == "data"
+    assert _classify_edge_kind("FILTER items") == "structural"
+
+
+# ---------------------------------------------------------------------------
+# _build_page_inventory
+# ---------------------------------------------------------------------------
+
+def test_build_page_inventory_playwright_accessible():
+    pages = [{
+        "route": "/login",
+        "accessible": True,
+        "discovered_by": "playwright",
+        "elements": [{"type": "input", "label": "email", "selector": "input[type=email]"}],
+        "outbound_links": [],
+        "api_calls_observed": [],
+    }]
+    route_elements = {}
+    inv = _build_page_inventory(pages, route_elements)
+    assert inv["/login"]["source"] == "playwright"
+    assert inv["/login"]["elements"][0]["label"] == "email"
+
+
+def test_build_page_inventory_static_fallback_uses_route_elements():
+    pages = [{
+        "route": "/dashboard",
+        "accessible": None,
+        "discovered_by": "static_fallback",
+        "elements": [],
+        "outbound_links": [],
+        "api_calls_observed": [],
+    }]
+    route_elements = {"/dashboard": [{"type": "button", "label": "Add Item", "subtype": None}]}
+    inv = _build_page_inventory(pages, route_elements)
+    assert inv["/dashboard"]["source"] == "route_elements"
+    assert any(e["label"] == "Add Item" for e in inv["/dashboard"]["elements"])
+
+
+def test_build_page_inventory_auth_gated_uses_route_elements():
+    pages = [{
+        "route": "/admin",
+        "accessible": False,
+        "discovered_by": "playwright",
+        "elements": [],
+        "outbound_links": [],
+        "api_calls_observed": [],
+    }]
+    route_elements = {"/admin": [{"type": "button", "label": "Manage Users", "subtype": None}]}
+    inv = _build_page_inventory(pages, route_elements)
+    assert inv["/admin"]["source"] == "route_elements"
+
+
+def test_build_page_inventory_supplement_from_route_elements():
+    pages = []
+    route_elements = {"/products": [{"type": "button", "label": "Add Product", "subtype": None}]}
+    inv = _build_page_inventory(pages, route_elements)
+    assert "/products" in inv
+    assert inv["/products"]["source"] == "route_elements"
+
+
+def test_build_page_inventory_empty_route_elements_source_none():
+    pages = [{
+        "route": "/about",
+        "accessible": False,
+        "discovered_by": "static_fallback",
+        "elements": [],
+        "outbound_links": [],
+        "api_calls_observed": [],
+    }]
+    route_elements = {}
+    inv = _build_page_inventory(pages, route_elements)
+    assert inv["/about"]["source"] == "none"
+
+
+# ---------------------------------------------------------------------------
+# _build_nav_inventory
+# ---------------------------------------------------------------------------
+
+def test_build_nav_inventory_merges_graph_and_outbound():
+    nav_graph = {"/login": ["/dashboard"]}
+    pages = [{
+        "route": "/login",
+        "outbound_links": ["/home", "/dashboard"],
+    }]
+    nav = _build_nav_inventory(nav_graph, pages)
+    assert "/dashboard" in nav["/login"]
+    assert "/home" in nav["/login"]
+    # No duplicates
+    assert nav["/login"].count("/dashboard") == 1
+
+
+def test_build_nav_inventory_page_without_graph_entry():
+    nav_graph = {}
+    pages = [{"route": "/cart", "outbound_links": ["/checkout"]}]
+    nav = _build_nav_inventory(nav_graph, pages)
+    assert "/checkout" in nav["/cart"]
+
+
+# ---------------------------------------------------------------------------
+# _candidate_routes
+# ---------------------------------------------------------------------------
+
+def test_candidate_routes_login_page():
+    path = [{"type": "node", "label": "Login Page"}]
+    routes = ["/", "/login", "/dashboard", "/products"]
+    candidates = _candidate_routes(path, routes)
+    assert "/login" in candidates
+
+
+def test_candidate_routes_home_node():
+    path = [{"type": "node", "label": "Home"}]
+    routes = ["/", "/about", "/products"]
+    candidates = _candidate_routes(path, routes)
+    assert "/" in candidates
+
+
+def test_candidate_routes_no_nodes_returns_all():
+    path = [{"type": "element", "label": "Submit"}]
+    routes = ["/a", "/b", "/c"]
+    candidates = _candidate_routes(path, routes)
+    assert set(candidates) == {"/a", "/b", "/c"}
+
+
+def test_candidate_routes_always_includes_root():
+    path = [{"type": "node", "label": "Dashboard"}]
+    routes = ["/", "/dashboard"]
+    candidates = _candidate_routes(path, routes)
+    assert "/" in candidates
+
+
+# ---------------------------------------------------------------------------
+# _parse_grounding_response
+# ---------------------------------------------------------------------------
+
+def test_parse_grounding_valid_json():
+    raw = '[{"entity_index": 0, "type": "node", "matched_route": "/login"}]'
+    result = _parse_grounding_response(raw, 1)
+    assert result[0]["matched_route"] == "/login"
+
+
+def test_parse_grounding_markdown_block():
+    raw = '```json\n[{"entity_index": 0, "type": "node", "matched_route": "/home"}]\n```'
+    result = _parse_grounding_response(raw, 1)
+    assert result[0]["matched_route"] == "/home"
+
+
+def test_parse_grounding_leading_text():
+    raw = 'Here is my analysis:\n[{"entity_index": 0, "type": "element", "matched_element_label": "email"}]'
+    result = _parse_grounding_response(raw, 1)
+    assert result[0].get("matched_element_label") == "email"
+
+
+def test_parse_grounding_invalid_json_returns_empty_list():
+    result = _parse_grounding_response("not json at all", 3)
+    assert result == [{}, {}, {}]
+
+
+def test_parse_grounding_out_of_range_index_ignored():
+    raw = '[{"entity_index": 99, "type": "node", "matched_route": "/x"}]'
+    result = _parse_grounding_response(raw, 2)
+    assert result == [{}, {}]
+
+
+def test_parse_grounding_pads_missing_entities():
+    raw = '[{"entity_index": 0, "type": "node", "matched_route": "/login"}]'
+    result = _parse_grounding_response(raw, 3)
+    assert len(result) == 3
+    assert result[1] == {}
+    assert result[2] == {}
+
+
+# ---------------------------------------------------------------------------
+# _score_entity
+# ---------------------------------------------------------------------------
+
+_PAGE_INV = {
+    "/login": {"source": "playwright", "elements": [
+        {"label": "Enter email", "type": "input", "selector": "input[type=email]"},
+    ]},
+    "/dashboard": {"source": "route_elements", "elements": [
+        {"label": "Add Task", "type": "button"},
+    ]},
+}
+
+
+def test_score_entity_node_accessible():
+    entity = {"type": "node", "label": "Login Page", "primary": True}
+    grounding = {"matched_route": "/login"}
+    e, extra = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 1.0
+    assert extra["matched_route"] == "/login"
+
+
+def test_score_entity_node_static_fallback():
+    entity = {"type": "node", "label": "Dashboard", "primary": True}
+    grounding = {"matched_route": "/dashboard"}
+    e, extra = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.5
+
+
+def test_score_entity_node_not_found():
+    entity = {"type": "node", "label": "Unknown Page", "primary": True}
+    grounding = {"matched_route": None}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.0
+
+
+def test_score_entity_node_matched_route_not_in_inventory():
+    entity = {"type": "node", "label": "Ghost", "primary": True}
+    grounding = {"matched_route": "/ghost"}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.0
+
+
+def test_score_entity_element_playwright():
+    entity = {"type": "element", "label": "email input", "primary": True}
+    grounding = {"matched_element_label": "Enter email", "match_source": "playwright"}
+    e, extra = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 1.0
+    assert extra["matched_selector"] == "input[type=email]"
+
+
+def test_score_entity_element_route_elements():
+    entity = {"type": "element", "label": "add task button", "primary": True}
+    grounding = {"matched_element_label": "Add Task", "match_source": "route_elements"}
+    e, extra = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.5
+    assert extra["match_source"] == "route_elements"
+
+
+def test_score_entity_element_not_found():
+    entity = {"type": "element", "label": "missing", "primary": True}
+    grounding = {"matched_element_label": None, "match_source": None}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.0
+
+
+def test_score_entity_data_edge_both_found():
+    entity = {"type": "edge", "label": "submit login", "primary": True}
+    grounding = {
+        "matched_endpoint": "POST /api/auth/login",
+        "trigger_element_label": "Login button",
+    }
+    e, extra = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 1.0
+    assert extra["edge_kind"] == "data"
+    assert extra["matched_endpoint"] == "POST /api/auth/login"
+
+
+def test_score_entity_data_edge_endpoint_only():
+    entity = {"type": "edge", "label": "submit login", "primary": True}
+    grounding = {"matched_endpoint": "POST /api/auth/login", "trigger_element_label": None}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.5
+
+
+def test_score_entity_data_edge_trigger_only():
+    entity = {"type": "edge", "label": "delete item", "primary": True}
+    grounding = {"matched_endpoint": None, "trigger_element_label": "Delete"}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.4
+
+
+def test_score_entity_data_edge_neither():
+    entity = {"type": "edge", "label": "create order", "primary": True}
+    grounding = {"matched_endpoint": None, "trigger_element_label": None}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.0
+
+
+def test_score_entity_navigation_playwright_element():
+    entity = {"type": "edge", "label": "navigate to dashboard", "primary": True}
+    grounding = {"matched_nav_target": "/dashboard", "match_source": "playwright_element"}
+    e, extra = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 1.0
+    assert extra["edge_kind"] == "navigation"
+
+
+def test_score_entity_navigation_graph():
+    entity = {"type": "edge", "label": "go to home", "primary": True}
+    grounding = {"matched_nav_target": "/", "match_source": "navigation_graph"}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.5
+
+
+def test_score_entity_navigation_not_found():
+    entity = {"type": "edge", "label": "open cart", "primary": True}
+    grounding = {"matched_nav_target": None, "match_source": None}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.0
+
+
+def test_score_entity_structural_playwright():
+    entity = {"type": "edge", "label": "filter by category", "primary": True}
+    grounding = {"trigger_element_label": "Category filter", "match_source": "playwright"}
+    e, extra = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 1.0
+    assert extra["edge_kind"] == "structural"
+
+
+def test_score_entity_structural_route_elements():
+    entity = {"type": "edge", "label": "search products", "primary": True}
+    grounding = {"trigger_element_label": "Search box", "match_source": "route_elements"}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.5
+
+
+def test_score_entity_structural_not_found():
+    entity = {"type": "edge", "label": "sort items", "primary": True}
+    grounding = {"trigger_element_label": None, "match_source": None}
+    e, _ = _score_entity(entity, grounding, _PAGE_INV)
+    assert e == 0.0
+
+
+# ---------------------------------------------------------------------------
+# _aggregate
+# ---------------------------------------------------------------------------
+
+def test_aggregate_all_primary():
+    scores = [
+        {"primary": True, "e": 1.0},
+        {"primary": True, "e": 0.5},
+    ]
+    result = _aggregate(scores)
+    assert result == 0.75
+
+
+def test_aggregate_primary_and_secondary():
+    # 0.7 * 1.0 + 0.3 * 0.0 = 0.7
+    scores = [
+        {"primary": True, "e": 1.0},
+        {"primary": False, "e": 0.0},
+    ]
+    result = _aggregate(scores)
+    assert abs(result - 0.7) < 1e-9
+
+
+def test_aggregate_all_secondary():
+    scores = [{"primary": False, "e": 0.5}]
+    assert _aggregate(scores) == 0.5
+
+
+def test_aggregate_empty():
+    assert _aggregate([]) == 0.0
+
+
+def test_aggregate_none_e_skipped():
+    scores = [
+        {"primary": True, "e": None},
+        {"primary": True, "e": 1.0},
+    ]
+    result = _aggregate(scores)
+    assert result == 1.0
+
+
+def test_aggregate_formula_exact():
+    # primary: [1.0, 0.5] avg=0.75; secondary: [0.0] avg=0.0
+    # 0.7*0.75 + 0.3*0.0 = 0.525
+    scores = [
+        {"primary": True, "e": 1.0},
+        {"primary": True, "e": 0.5},
+        {"primary": False, "e": 0.0},
+    ]
+    result = _aggregate(scores)
+    assert abs(result - 0.525) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# _compute_unlinked
+# ---------------------------------------------------------------------------
+
+def test_compute_unlinked_l2_accessible_not_matched():
+    l1a_reqs = [{"req_id": "REQ-001"}]
+    mapped = [{
+        "req_id": "REQ-001",
+        "entity_scores": [
+            {"type": "node", "primary": True, "e": 1.0, "matched_route": "/login"},
+        ],
+    }]
+    step5_pages = [
+        {"route": "/login", "accessible": True, "title": "Login"},
+        {"route": "/admin", "accessible": True, "title": "Admin"},
+    ]
+    impl_units = []
+    unlinked_l2, unlinked_l3 = _compute_unlinked(l1a_reqs, mapped, step5_pages, impl_units)
+    assert len(unlinked_l2) == 1
+    assert unlinked_l2[0]["route"] == "/admin"
+
+
+def test_compute_unlinked_l2_inaccessible_excluded():
+    l1a_reqs = []
+    mapped = []
+    step5_pages = [{"route": "/secret", "accessible": False, "title": None}]
+    unlinked_l2, _ = _compute_unlinked(l1a_reqs, mapped, step5_pages, [])
+    assert unlinked_l2 == []
+
+
+def test_compute_unlinked_l3_endpoint_not_matched():
+    l1a_reqs = [{"req_id": "REQ-001"}]
+    mapped = [{
+        "req_id": "REQ-001",
+        "entity_scores": [
+            {"type": "edge", "edge_kind": "data", "matched_endpoint": "POST /api/login"},
+        ],
+    }]
+    impl_units = [
+        {"kind": "api_endpoint", "method": "POST", "path": "/api/login", "handler": "login", "file": "auth.py"},
+        {"kind": "api_endpoint", "method": "DELETE", "path": "/api/users/1", "handler": "delete_user", "file": "users.py"},
+    ]
+    _, unlinked_l3 = _compute_unlinked(l1a_reqs, mapped, [], impl_units)
+    assert len(unlinked_l3) == 1
+    assert unlinked_l3[0]["path"] == "/api/users/1"
+
+
+def test_compute_unlinked_l3_form_handlers_excluded():
+    l1a_reqs = []
+    mapped = []
+    impl_units = [
+        {"kind": "form_handler", "method": "POST", "path": "/submit", "handler": None, "file": "index.html"},
+    ]
+    _, unlinked_l3 = _compute_unlinked(l1a_reqs, mapped, [], impl_units)
+    assert unlinked_l3 == []
+
+
+def test_compute_unlinked_l1b_not_in_unlinked():
+    """L1b requirements are not counted as L1a, so their matched routes don't prevent L2 unlinked."""
+    l1a_reqs = []
+    l1b_mapped = [{
+        "req_id": "GEN-001",  # L1b req
+        "entity_scores": [
+            {"type": "node", "primary": True, "e": 1.0, "matched_route": "/admin"},
+        ],
+    }]
+    step5_pages = [{"route": "/admin", "accessible": True, "title": "Admin"}]
+    unlinked_l2, _ = _compute_unlinked(l1a_reqs, l1b_mapped, step5_pages, [])
+    assert any(u["route"] == "/admin" for u in unlinked_l2)

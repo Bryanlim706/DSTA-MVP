@@ -184,9 +184,48 @@ total_pages, error
 ```
 **Element schema:** `{type, subtype, label, selector, visible}` — `selector` and `visible` are always populated for Playwright pages; `elements: []` for `discovered_by: "static_fallback"` pages (L3 fallback via Step 4 `route_elements`).
 
+### Step 6 — Entity Mapper (COMPLETE)
+- Triggered automatically after Step 5 completes (chained in `_run_step5`)
+- LLM (claude-haiku) — one call per requirement (L1a + L1b), concurrent via `asyncio.gather`
+- **Step 6a (grounding):** For each requirement, builds a scoped inventory (candidate routes from node entity labels, elements from page_inventory for those routes, implementation_units, nav_inventory) and calls LLM to match each path entity to a concrete inventory item. LLM returns one grounding object per entity indexed by position.
+- **Step 6b (scoring):** Reads grounding objects and applies deterministic piecewise E() by entity type: node (route_found+accessible=1.0, static_fallback=0.5, none=0.0), element (playwright=1.0, route_elements=0.5, none=0.0), data_edge (endpoint+trigger=1.0, endpoint_only=0.5, trigger_only=0.4, none=0.0), navigation_edge (playwright_element=1.0, navigation_graph=0.5, none=0.0), structural_edge (same as element).
+- **Edge classification:** `_classify_edge_kind(label)` — data keywords (submit/add/create/delete/update/save/…), structural keywords (filter/search/sort/drag/reorder), navigation default.
+- **Aggregation:** `E(req) = 0.7×[primary_avg] + 0.3×[secondary_avg]` (if no secondary, α=1.0).
+- **Unlinked detection:** unlinked_l2 = Step 5 accessible routes not matched by any L1a node entity; unlinked_l3 = Step 4 api_endpoints not matched as data edge L3 signal by any L1a requirement.
+- `page_inventory` built from Step 5: playwright-accessible pages use live DOM elements (source=playwright); static_fallback/auth-gated pages fall back to Step 4 route_elements (source=route_elements).
+- Tests: `backend/tests/test_step6_entity_mapper.py` — 59 tests, all passing.
+- Frontend: `MappingResult.tsx` — per-requirement expandable rows with E() bars, entity score table, unlinked L2/L3 advisory sections.
+
+**Step 6 output fields** (stored in `step_results.step_6`):
+```
+mapped (req_id, description, e_score, entity_scores[]),
+unlinked_l2 (route, title, note),
+unlinked_l3 (method, path, handler, file, note),
+llm_model, error
+```
+
+### Step 7 — FCom/FA Scorer (COMPLETE)
+- Triggered automatically after Step 6 completes (chained in `_run_step6`)
+- No LLM — pure Python formula
+- **FCom:** `∑(E×weight) / ∑weight` over all L1a confirmed requirements (weight from user priority)
+- **FA:** same formula over all L1b advisory requirements (weight from strength-derived value)
+- **Advisories:** missing_l1a (E<0.5 confirmed requirements, sorted by e_score asc), missing_l1b (E<0.5 advisory), unlinked_routes/endpoints passed through from Step 6
+- Tests: `backend/tests/test_step7_scorer.py` — 15 tests, all passing.
+- Frontend: `ScoringResult.tsx` — two score panels (FCom, FA) with large percentage display, progress bars, collapsible advisories.
+
+**Step 7 output fields** (stored in `step_results.step_7`):
+```
+fcom, fa,
+fcom_detail (numerator, denominator, requirement_count),
+fa_detail,
+fcom_advisory (missing_l1a[], unlinked_routes[], unlinked_endpoints[]),
+fa_advisory (missing_l1b[]),
+error
+```
+
 ## What has NOT been built yet
 
-- Steps 6–17 (see PLAN.md for full pipeline)
+- Steps 7.5–17 (see PLAN.md for full pipeline)
 - Docker sandbox (Step 11)
 
 ---
@@ -317,6 +356,11 @@ Or copy `package-lock.json` from another machine where install succeeded — npm
 - **Unlinked detection (Steps 5/6)** — unlinked L2 = Step 5 routes visited by Playwright where no L1a path[] node entity matched them; unlinked L3 = `implementation_units` items with `kind == "api_endpoint"` not matched as the L3 signal for any L1a requirement. Route-level and endpoint-level, not named-function-level. Step 7 advisory reports both lists.
 - **Step 4/5 known limitations (by framework)** — Laravel: no PHP/web.php route parser or Eloquent model extractor; `frontend_routes=[]`, Step 5 returns "No frontend routes" non-fatal error. React SPA / Electron (no router, single-page): `frontend_routes=['/']`, `route_elements['/']` includes App component elements via shallow import expansion, but misses elements in deeper child components not reachable without full import resolution; Step 5 Playwright provides the full L2 picture if the app can boot. Flask SSR `route_to_files['/']`: only contains `app.py` when the root template is named anything other than `index.html`; `route_elements['/']` extracts from Python source (no HTML elements found). None of these are bugs — they are the limit of static analysis without running the app.
 - **Step 0 open issues (not fixed in Steps 4/5)** — (1) Laravel `frontend_fw=None`: Blade-rendered apps have no JS frontend framework; Step 4 produces no routes. (2) Electron/React SPA with no router: Step 0 correctly classifies but Step 5 gets 0 elements since the full component tree is not traversed. (3) Monorepos containing Android sub-apps (e.g. AttendanceMS): Java is counted in `languages` from Android source, which is correct but may mislead — it is not Spring Boot Java.
+- **Step 6 concurrent LLM calls** — `asyncio.gather` fires one Haiku call per requirement (L1a + L1b) simultaneously. Per-call `try/except` ensures one failure returns `[{}] * len(path)` (empty grounding, all E()=0) without aborting the other requirements. Unlike Steps 1–3 which make one large LLM call, Step 6 makes N small calls — typically 20–50 for a real project.
+- **Step 6 `_candidate_routes` heuristic** — Before building the scoped inventory for a requirement's LLM call, node entity labels are matched against route paths by substring/word similarity (e.g. "Login Page" → "/login"). This limits the element inventory passed to the LLM to the most relevant routes. Root "/" is always included. For requirements with no node entities, the first 10 routes are used. The LLM still does the final resolution — `_candidate_routes` only determines which routes' element inventories are passed in the prompt.
+- **Step 6 `page_inventory` source field** — `"playwright"` = live DOM from Step 5 (page accessible, E()=1.0 for matched elements); `"route_elements"` = Step 4 static parse (auth-gated, boot-failed, or static_fallback routes, E()=0.5); `"none"` = no evidence at all (E()=0.0). The source is propagated through grounding objects as `match_source` for deterministic scoring in Step 6b.
+- **Step 7 advisory threshold** — `missing_l1a` and `missing_l1b` include requirements with `e_score < 0.5` (not `== 0.0`). This captures both fully missing (0.0) and partially found but weak (e.g. 0.4) requirements. Results sorted by e_score ascending so the worst gaps appear first.
+- **`step_5_complete` is no longer a terminal polling status** — After Steps 6/7 were added, `App.tsx` terminal statuses updated to `step_7_complete`, `step_7_error`, `step_6_error` (plus existing `step_5_error`, `step_4_error`). `step_5_complete` is now a transient status — the pipeline immediately chains into Step 6.
 
 ---
 
@@ -340,9 +384,7 @@ Both files must be in the same commit as the code — not a follow-up commit. Th
 
 ## Next steps
 
-1. Build Step 6 — E() Scorer (per-entity piecewise E() functions by entity type; function-level grounding: Step 6a resolves all path entities per function against route-scoped inventory via one LLM call, Step 6b applies piecewise deterministically; aggregated via α=0.7/0.3 formula; produces `entity_scores[]` per requirement and unlinked lists)
-2. Build Step 7 — FCom/FA Scorer (pure Python formula; runs once after Step 6; scores locked; no LLM)
-3. Build Step 7.5 — FA Advisor (positive-grounded; runs in parallel with Step 6; reads 3.5+4+5 directly)
+1. Build Step 7.5 — FA Advisor (positive-grounded; runs after Step 7; reads 3.5+4+5 directly; LLM generates Type B advisory from actual codebase structure)
 
 ---
 
