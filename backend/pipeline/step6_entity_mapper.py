@@ -55,6 +55,91 @@ def _classify_edge_kind(label: str) -> str:
     return "navigation"
 
 
+# --- Deterministic node-to-route fallback (used when LLM returns null for a node) ---
+
+_SPLIT_CAMEL_RE = re.compile(r"([a-z])([A-Z])|([A-Z]+)([A-Z][a-z])")
+_NODE_STOP = re.compile(r"\b(page|screen|view|panel|section|tab)\b")
+_DETAIL_HINTS = frozenset(["detail", "edit", "update", "single", "profile", "form"])
+_LIST_HINTS = frozenset(["list", "search", "all", "index", "overview", "browse", "table", "grid"])
+_HOME_HINTS = frozenset(["home", "landing", "main", "root", "dashboard"])
+
+# Route path words that signal a list/search page (strong is_list bonus)
+_ROUTE_LIST_PATHS = frozenset([
+    "search", "list", "all", "browse", "results", "table", "grid",
+    "employees", "users", "items", "products", "orders", "tasks",
+    "records", "entries", "reports", "overview",
+])
+# Route path words that signal a detail/edit page (strong is_detail bonus)
+_ROUTE_DETAIL_PATHS = frozenset(["edit", "update", "detail", "show", "profile", "modify", "create", "add", "new"])
+# Route path words that are clearly auth pages (suppress list/detail bonuses)
+_ROUTE_AUTH_PATHS = frozenset(["login", "signin", "register", "signup", "auth", "logout", "password", "forgot"])
+
+
+def _normalise_label(label: str) -> str:
+    spaced = _SPLIT_CAMEL_RE.sub(lambda m: (m.group(1) or m.group(3)) + " " + (m.group(2) or m.group(4)), label)
+    return spaced.lower()
+
+
+def _match_node_to_route(label: str, route_paths: list, page_inventory: dict) -> str | None:
+    """Deterministic word-overlap fallback for node entities the LLM could not match."""
+    label_norm = _normalise_label(label)
+    # Strip state-variant parenthetical suffixes like "(updated)", "(filtered)"
+    label_norm = re.sub(r"\s*\([^)]*\)", "", label_norm).strip()
+    label_clean = _NODE_STOP.sub("", label_norm).strip()
+    label_words = set(re.findall(r"\b\w{3,}\b", label_clean))
+    if not label_words:
+        return None
+
+    is_detail = bool(label_words & _DETAIL_HINTS)
+    is_list = bool(label_words & _LIST_HINTS)
+    is_home = bool(label_words & _HOME_HINTS)
+
+    best_route: str | None = None
+    best_score = 0
+
+    for route in route_paths:
+        if not route:
+            continue
+        route_norm = (
+            route.lstrip("/")
+            .replace("-", " ").replace("_", " ").replace(":", " ").replace("/", " ")
+            .lower()
+        )
+        route_words = set(re.findall(r"\b\w{3,}\b", route_norm))
+        overlap = label_words & route_words
+        score = len(overlap) * 4  # Direct label-to-route-path word match (strongest signal)
+
+        # Element content overlap (secondary signal; capped at 3 to prevent shared-element inflation)
+        inv = page_inventory.get(route, {})
+        elem_words: set = set()
+        for e in inv.get("elements", [])[:20]:
+            lbl = e.get("label", "")
+            if lbl:
+                elem_words.update(re.findall(r"\b\w{3,}\b", _normalise_label(lbl)))
+        score += min(len(label_words & elem_words), 3)
+
+        is_dynamic = any(seg.startswith(":") for seg in route.split("/"))
+        is_auth_route = bool(route_words & _ROUTE_AUTH_PATHS)
+
+        # is_detail: strongly prefer dynamic routes (e.g. /edit/:id, /users/:id)
+        if is_detail and is_dynamic:
+            score += 4
+        # is_list: strongly prefer routes whose path contains list-type words; skip auth routes
+        if is_list and not is_dynamic and not is_auth_route:
+            if route_words & _ROUTE_LIST_PATHS:
+                score += 4  # route path confirms it's a list/search page
+            elif route != "/":
+                score += 1  # generic non-dynamic non-root route (weak signal)
+        if route == "/" and is_home:
+            score += 3
+
+        if score > best_score:
+            best_score = score
+            best_route = route
+
+    return best_route if best_score >= 3 else None
+
+
 def _build_page_inventory(step5_pages: list, route_elements: dict) -> dict:
     """Return {route: {elements: [...], source: playwright|route_elements|none}}."""
     inventory: dict = {}
@@ -299,6 +384,7 @@ async def _ground_requirement(
     user_msg = _build_grounding_user_message(
         req, frontend_routes, page_inventory, nav_inventory, impl_units
     )
+    grounding: list = [{}] * len(path)
     last_exc: Exception | None = None
 
     for attempt in range(3):
@@ -313,7 +399,8 @@ async def _ground_requirement(
                 }],
                 messages=[{"role": "user", "content": user_msg}],
             )
-            return _parse_grounding_response(response.content[0].text, len(path))
+            grounding = _parse_grounding_response(response.content[0].text, len(path))
+            break  # LLM succeeded — stop retrying
         except anthropic.APIStatusError as exc:
             last_exc = exc
             if exc.status_code == 529 and attempt < 2:
@@ -324,7 +411,26 @@ async def _ground_requirement(
             last_exc = exc
             break
 
-    return [{}] * len(path)
+    # Python deterministic fallback: always runs regardless of LLM success/failure.
+    # Fills null node matches that the LLM missed or that SSL errors prevented.
+    route_paths_list = [
+        r.get("path", "") if isinstance(r, dict) else str(r)
+        for r in frontend_routes
+    ]
+    for i, (entity, g) in enumerate(zip(path, grounding)):
+        if entity.get("type") == "node" and not (g or {}).get("matched_route"):
+            matched = _match_node_to_route(
+                entity.get("label", ""), route_paths_list, page_inventory
+            )
+            if matched:
+                grounding[i] = {
+                    **(g or {}),
+                    "entity_index": i,
+                    "type": "node",
+                    "matched_route": matched,
+                }
+
+    return grounding
 
 
 def _lookup_selector(matched_label: str | None, page_inventory: dict) -> str | None:

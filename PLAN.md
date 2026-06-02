@@ -365,7 +365,7 @@ Step 0 reads the file tree and config file contents directly from disk — it do
 **Output consumed by:**
 | Field(s) | Consumed by |
 |---|---|
-| `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` | Step 3 (project context in LLM prompt + root node detection) |
+| `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` | Step 3 (project context in LLM prompt + root node detection) | 
 | `discovered_pages` | Step 2 (node inventory + root detection) |
 | `test_strategy` | Step 9 (test type selection — not yet built) |
 | Full result → `step_3_5.project_context` passthrough | Steps 4, 5 (framework dispatch + bootstrap strategy) |
