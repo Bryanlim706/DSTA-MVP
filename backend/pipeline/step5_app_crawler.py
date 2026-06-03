@@ -173,7 +173,7 @@ async def _npm_install_if_needed(cwd: Path) -> None:
     if (cwd / "node_modules").exists():
         return
     npm = shutil.which("npm") or "npm"
-    cmd = _wrap_npm_cmd([npm, "install", "--prefer-offline", "--no-audit", "--loglevel=error"])
+    cmd = _wrap_npm_cmd([npm, "install", "--prefer-offline", "--no-audit", "--loglevel=error", "--strict-ssl=false"])
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
