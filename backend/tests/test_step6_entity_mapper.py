@@ -495,3 +495,41 @@ def test_compute_unlinked_l1b_not_in_unlinked():
     step5_pages = [{"route": "/admin", "accessible": True, "title": "Admin"}]
     unlinked_l2, _ = _compute_unlinked(l1a_reqs, l1b_mapped, step5_pages, [])
     assert any(u["route"] == "/admin" for u in unlinked_l2)
+
+
+# ---------------------------------------------------------------------------
+# Fix: dot-notation label filtering
+# ---------------------------------------------------------------------------
+
+def test_build_page_inventory_filters_dot_notation_from_extra():
+    """Dot-notation labels like 'product.name' must be excluded from merged extra elements."""
+    pages = [{
+        "route": "/add",
+        "accessible": True,
+        "discovered_by": "playwright",
+        "elements": [{"type": "input", "label": "Product Name", "selector": "input"}],
+        "outbound_links": [],
+        "api_calls_observed": [],
+    }]
+    route_elements = {"/add": [
+        {"type": "input", "label": "product.name", "subtype": "text"},
+        {"type": "button", "label": "Submit", "subtype": "submit"},
+    ]}
+    inv = _build_page_inventory(pages, route_elements)
+    labels = [e["label"] for e in inv["/add"]["elements"]]
+    assert "product.name" not in labels   # dot-notation filtered
+    assert "Submit" in labels             # real label kept
+    assert "Product Name" in labels       # playwright element kept
+
+
+def test_build_page_inventory_filters_dot_notation_from_route_elements_only():
+    """Dot-notation labels are also filtered from route_elements-only pages."""
+    pages = []
+    route_elements = {"/update": [
+        {"type": "input", "label": "updateProduct.name", "subtype": "text"},
+        {"type": "button", "label": "Update", "subtype": "submit"},
+    ]}
+    inv = _build_page_inventory(pages, route_elements)
+    labels = [e["label"] for e in inv["/update"]["elements"]]
+    assert "updateProduct.name" not in labels
+    assert "Update" in labels

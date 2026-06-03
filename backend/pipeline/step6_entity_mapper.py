@@ -62,6 +62,7 @@ _NODE_STOP = re.compile(r"\b(page|screen|view|panel|section|tab)\b")
 _DETAIL_HINTS = frozenset(["detail", "edit", "update", "single", "profile", "form"])
 _LIST_HINTS = frozenset(["list", "search", "all", "index", "overview", "browse", "table", "grid"])
 _HOME_HINTS = frozenset(["home", "landing", "main", "root", "dashboard"])
+_ADD_HINTS = frozenset(["add", "create", "new"])
 
 # Route path words that signal a list/search page (strong is_list bonus)
 _ROUTE_LIST_PATHS = frozenset([
@@ -132,6 +133,15 @@ def _match_node_to_route(label: str, route_paths: list, page_inventory: dict) ->
                 score += 1  # generic non-dynamic non-root route (weak signal)
         if route == "/" and is_home:
             score += 3
+        # Root "/" has no path words; compensate via element-content overlap when the
+        # label is about an add/create page (e.g. "AddEmployeePage" → "/").
+        if route == "/" and not route_words and label_words & _ADD_HINTS:
+            add_in_elements = any(
+                _ADD_HINTS & set(re.findall(r"\b\w{3,}\b", _normalise_label(e.get("label", ""))))
+                for e in inv.get("elements", [])[:10]
+            )
+            if add_in_elements:
+                score += 2  # Closes the gap left by zero path-word overlap
 
         if score > best_score:
             best_score = score
@@ -141,7 +151,13 @@ def _match_node_to_route(label: str, route_paths: list, page_inventory: dict) ->
 
 
 def _build_page_inventory(step5_pages: list, route_elements: dict) -> dict:
-    """Return {route: {elements: [...], source: playwright|route_elements|none}}."""
+    """Return {route: {elements: [...], source: playwright|route_elements|none, _playwright_labels: set}}.
+
+    For Playwright-accessible pages, also merges route_elements entries that Playwright
+    didn't capture (e.g. action buttons that only render when backend data is present).
+    These merged elements are tagged with _fallback_source="route_elements" so scoring
+    can assign them E=0.5 rather than E=1.0.
+    """
     inventory: dict = {}
 
     for page in step5_pages:
@@ -149,15 +165,38 @@ def _build_page_inventory(step5_pages: list, route_elements: dict) -> dict:
         if not route:
             continue
         if page.get("accessible") is True and page.get("discovered_by") == "playwright":
-            inventory[route] = {"elements": page.get("elements", []), "source": "playwright"}
+            pw_elements = page.get("elements", [])
+            pw_labels = {e.get("label", "") for e in pw_elements if e.get("label", "")}
+            # Merge route_elements not seen by Playwright (tagged for E=0.5 scoring).
+            # Skip dot-notation labels (e.g. "product.name") — these are React state
+            # variable references from JSX value={...}, not visible UI labels.
+            extra = [
+                {
+                    "label": e.get("label", ""),
+                    "type": e.get("type", ""),
+                    "subtype": e.get("subtype"),
+                    "_fallback_source": "route_elements",
+                }
+                for e in route_elements.get(route, [])
+                if e.get("label", "")
+                and e.get("label", "") not in pw_labels
+                and not _DOT_LABEL_RE.match(e.get("label", ""))
+            ]
+            inventory[route] = {
+                "elements": pw_elements + extra,
+                "source": "playwright",
+                "_playwright_labels": pw_labels,
+            }
         else:
             fallback = route_elements.get(route, [])
             inventory[route] = {
                 "elements": [
                     {"label": e.get("label", ""), "type": e.get("type", ""), "subtype": e.get("subtype")}
                     for e in fallback
+                    if e.get("label", "") and not _DOT_LABEL_RE.match(e.get("label", ""))
                 ],
                 "source": "route_elements" if fallback else "none",
+                "_playwright_labels": set(),
             }
 
     # Routes only in Step 4 route_elements (not visited by Step 5 at all)
@@ -167,8 +206,10 @@ def _build_page_inventory(step5_pages: list, route_elements: dict) -> dict:
                 "elements": [
                     {"label": e.get("label", ""), "type": e.get("type", ""), "subtype": e.get("subtype")}
                     for e in elems
+                    if e.get("label", "") and not _DOT_LABEL_RE.match(e.get("label", ""))
                 ],
                 "source": "route_elements",
+                "_playwright_labels": set(),
             }
 
     return inventory
@@ -375,7 +416,9 @@ async def _ground_requirement(
     page_inventory: dict,
     nav_inventory: dict,
     impl_units: list,
+    route_elements_raw: dict,
     client: anthropic.AsyncAnthropic,
+    playwright_exit_routes: frozenset = frozenset(),
 ) -> list:
     path = req.get("path", [])
     if not path:
@@ -411,12 +454,13 @@ async def _ground_requirement(
             last_exc = exc
             break
 
-    # Python deterministic fallback: always runs regardless of LLM success/failure.
-    # Fills null node matches that the LLM missed or that SSL errors prevented.
     route_paths_list = [
         r.get("path", "") if isinstance(r, dict) else str(r)
         for r in frontend_routes
     ]
+
+    # ── Pass 1: node deterministic fallback ──────────────────────────────────
+    # Fills null node matches regardless of LLM success/failure.
     for i, (entity, g) in enumerate(zip(path, grounding)):
         if entity.get("type") == "node" and not (g or {}).get("matched_route"):
             matched = _match_node_to_route(
@@ -430,6 +474,108 @@ async def _ground_requirement(
                     "matched_route": matched,
                 }
 
+    # ── Pass 2: element deterministic fallback ───────────────────────────────
+    # Walk path keeping track of the last resolved node route; use it to scope
+    # the element inventory search when the LLM returned null.
+    last_node_route: str | None = None
+    for i, (entity, g) in enumerate(zip(path, grounding)):
+        if entity.get("type") == "node":
+            r = (g or {}).get("matched_route")
+            if r:
+                last_node_route = r
+        elif entity.get("type") == "element" and not (g or {}).get("matched_element_label"):
+            if last_node_route:
+                matched_lbl, match_src = _match_element_in_inventory(
+                    entity.get("label", ""), last_node_route,
+                    page_inventory, route_elements_raw,
+                )
+                if matched_lbl:
+                    grounding[i] = {
+                        **(g or {}),
+                        "entity_index": i,
+                        "type": "element",
+                        "matched_element_label": matched_lbl,
+                        "match_source": match_src,
+                    }
+
+    # ── Pass 3: navigation edge auto-fallback from navigation_graph ───────────
+    # When a navigation edge is unmatched but we know the source and/or target
+    # node route from surrounding entities, look the connection up in nav_inventory.
+    for i, (entity, g) in enumerate(zip(path, grounding)):
+        if entity.get("type") != "edge":
+            continue
+        edge_kind = _classify_edge_kind(entity.get("label", ""))
+        if edge_kind != "navigation":
+            continue
+        if (g or {}).get("matched_nav_target"):
+            continue  # LLM already resolved it
+
+        # Find nearest preceding and following node routes in this path
+        prev_route: str | None = None
+        next_route: str | None = None
+        for j in range(i - 1, -1, -1):
+            if path[j].get("type") == "node":
+                prev_route = (grounding[j] or {}).get("matched_route")
+                break
+        for j in range(i + 1, len(path)):
+            if path[j].get("type") == "node":
+                next_route = (grounding[j] or {}).get("matched_route")
+                break
+
+        matched_target: str | None = None
+        nav_source = "navigation_graph"
+        if prev_route and next_route and prev_route != next_route:
+            # Direct prev→next edge: check nav_inventory
+            if next_route in nav_inventory.get(prev_route, []):
+                matched_target = next_route
+        elif not prev_route and next_route:
+            # Incoming edge (OBV "navigate to X"): any route that links to next_route
+            for src, targets in nav_inventory.items():
+                if next_route in targets:
+                    matched_target = next_route
+                    break
+        elif prev_route and not next_route:
+            # Outgoing edge (OBV "leave X"): any target from prev_route.
+            # If Playwright confirmed outbound links from this page, credit as
+            # playwright_element — the nav bar links are live DOM evidence.
+            targets = nav_inventory.get(prev_route, [])
+            if targets:
+                matched_target = targets[0]
+                if prev_route in playwright_exit_routes:
+                    nav_source = "playwright_element"
+
+        if matched_target:
+            grounding[i] = {
+                **(g or {}),
+                "entity_index": i,
+                "type": "edge",
+                "edge_kind": "navigation",
+                "matched_nav_target": matched_target,
+                "match_source": nav_source,
+            }
+
+    # ── Pass 4: data edge endpoint fallback ──────────────────────────────────
+    # When the LLM returned no matched_endpoint for a data edge, infer from
+    # verb keywords in the edge label.
+    for i, (entity, g) in enumerate(zip(path, grounding)):
+        if entity.get("type") != "edge":
+            continue
+        edge_kind = _classify_edge_kind(entity.get("label", ""))
+        if edge_kind != "data":
+            continue
+        if (g or {}).get("matched_endpoint"):
+            continue  # LLM already resolved it
+        matched_ep = _match_data_edge_endpoint(entity.get("label", ""), impl_units)
+        if matched_ep:
+            grounding[i] = {
+                **(g or {}),
+                "entity_index": i,
+                "type": "edge",
+                "edge_kind": "data",
+                "matched_endpoint": matched_ep,
+                "trigger_element_label": (g or {}).get("trigger_element_label"),
+            }
+
     return grounding
 
 
@@ -442,6 +588,142 @@ def _lookup_selector(matched_label: str | None, page_inventory: dict) -> str | N
                 sel = elem.get("selector")
                 if sel:
                     return sel
+    return None
+
+
+def _resolve_element_source(matched_label: str, page_inventory: dict) -> str | None:
+    """Return the authoritative source for a matched element label.
+
+    Searches all routes; if the label is in the Playwright DOM set → 'playwright';
+    if only in the route_elements merge fallback → 'route_elements'; else None.
+    """
+    for inv in page_inventory.values():
+        pw_labels: set = inv.get("_playwright_labels", set())
+        if matched_label in pw_labels:
+            return "playwright"
+        for elem in inv.get("elements", []):
+            if elem.get("label") == matched_label:
+                # Merged fallback element tagged by _build_page_inventory
+                if elem.get("_fallback_source") == "route_elements":
+                    return "route_elements"
+                # Element on a route_elements-only page
+                if inv.get("source") == "route_elements":
+                    return "route_elements"
+                # Genuine Playwright-DOM element (source=playwright, no fallback tag)
+                if inv.get("source") == "playwright":
+                    return "playwright"
+    return None
+
+
+_ELEM_NOISE_RE = re.compile(
+    r"\b(field|input|button|box|control|widget|element|click|action|area|the|for|a|an)\b"
+)
+
+# Labels that are React state-variable references like "product.name" or
+# "updateProduct.description" — JSX value={product.name} — not visible UI text.
+_DOT_LABEL_RE = re.compile(r"^\w+\.\w+")
+
+
+def _match_element_in_inventory(
+    label: str,
+    route: str,
+    page_inventory: dict,
+    route_elements_raw: dict,
+) -> tuple[str | None, str | None]:
+    """Fuzzy word-overlap fallback for element entities the LLM could not match.
+
+    Searches first the page_inventory for the given route (playwright elements, then
+    merged route_elements), then the raw route_elements dict as a final fallback.
+    Returns (matched_label, match_source) or (None, None).
+    """
+    label_norm = _normalise_label(label)
+    label_clean = _ELEM_NOISE_RE.sub("", label_norm).strip()
+    label_words = set(re.findall(r"\b\w{3,}\b", label_clean))
+    if not label_words:
+        return None, None
+
+    def _score_elem(elem_label: str) -> int:
+        e_norm = _normalise_label(elem_label)
+        e_clean = _ELEM_NOISE_RE.sub("", e_norm).strip()
+        e_words = set(re.findall(r"\b\w{3,}\b", e_clean))
+        return len(label_words & e_words)
+
+    best_label: str | None = None
+    best_score = 0
+
+    # Search page_inventory for this route
+    inv = page_inventory.get(route, {})
+    pw_labels: set = inv.get("_playwright_labels", set())
+    for elem in inv.get("elements", []):
+        lbl = elem.get("label", "")
+        if not lbl:
+            continue
+        sc = _score_elem(lbl)
+        if sc > best_score:
+            best_score = sc
+            best_label = lbl
+
+    if best_score >= 1 and best_label:
+        src = "playwright" if best_label in pw_labels else "route_elements"
+        return best_label, src
+
+    # Final fallback: raw route_elements (may have elements not in merged inventory).
+    # Skip dot-notation labels — they are state variable refs, not UI labels.
+    for elem in route_elements_raw.get(route, []):
+        lbl = elem.get("label", "")
+        if not lbl or _DOT_LABEL_RE.match(lbl):
+            continue
+        sc = _score_elem(lbl)
+        if sc > best_score:
+            best_score = sc
+            best_label = lbl
+
+    if best_score >= 1 and best_label:
+        return best_label, "route_elements"
+
+    return None, None
+
+
+_VERB_TO_METHOD: dict[str, str] = {
+    "delete": "DELETE", "remove": "DELETE",
+    "update": "PUT", "edit": "PUT", "save": "PUT", "modify": "PUT",
+    "create": "POST", "add": "POST", "submit": "POST", "upload": "POST", "register": "POST",
+    "download": "GET", "search": "GET", "filter": "GET", "fetch": "GET",
+}
+
+
+def _match_data_edge_endpoint(label: str, impl_units: list) -> str | None:
+    """Keyword-based fallback: infer HTTP verb + path from edge label, match impl_units."""
+    words = set(re.findall(r"\b\w+\b", label.lower()))
+    expected_method: str | None = None
+    for word, method in _VERB_TO_METHOD.items():
+        if word in words:
+            expected_method = method
+            break
+    if not expected_method:
+        return None
+
+    api_units = [u for u in impl_units if u.get("kind") == "api_endpoint" and u.get("method") == expected_method]
+    if not api_units:
+        return None
+
+    # Subject words from the label after removing verb/noise
+    noise = set(_VERB_TO_METHOD.keys()) | {"and", "the", "to", "from", "a", "an", "new", "updated"}
+    subject_words = {w for w in words if len(w) >= 3 and w not in noise}
+
+    best_ep: str | None = None
+    best_score = -1
+    for u in api_units:
+        upath = u.get("path", "")
+        path_words = set(re.findall(r"\b\w{3,}\b", upath.replace("/", " ").replace("{", "").replace("}", "").lower()))
+        sc = len(subject_words & path_words)
+        if sc > best_score:
+            best_score = sc
+            best_ep = f"{expected_method} {upath}"
+
+    # Accept even score=0 if there's exactly one candidate (unambiguous verb match)
+    if best_ep and (best_score >= 1 or len(api_units) == 1):
+        return best_ep
     return None
 
 
@@ -469,7 +751,12 @@ def _score_entity(entity: dict, grounding: dict, page_inventory: dict) -> tuple[
 
     elif etype == "element":
         matched_label = grounding.get("matched_element_label")
-        match_source = grounding.get("match_source")
+        # Resolve authoritative source: if matched_label is in the playwright DOM → 1.0,
+        # if only in route_elements merge → 0.5, regardless of what the LLM reported.
+        if matched_label:
+            match_source = _resolve_element_source(matched_label, page_inventory)
+        else:
+            match_source = None
         extra["matched_element_label"] = matched_label
         extra["match_source"] = match_source
         extra["matched_selector"] = _lookup_selector(matched_label, page_inventory)
@@ -616,10 +903,21 @@ async def run(
         page_inventory = _build_page_inventory(step5_pages, route_elements)
         nav_inventory = _build_nav_inventory(navigation_graph, step5_pages)
 
+        # Routes where Playwright confirmed live outbound navigation links —
+        # used to upgrade OBV exit-path edges from navigation_graph to playwright_element.
+        playwright_exit_routes: frozenset = frozenset(
+            page["route"]
+            for page in step5_pages
+            if page.get("accessible") is True
+            and page.get("discovered_by") == "playwright"
+            and page.get("outbound_links")
+        )
+
         grounding_lists = await asyncio.gather(
             *[
                 _ground_requirement(
-                    req, frontend_routes, page_inventory, nav_inventory, impl_units, client
+                    req, frontend_routes, page_inventory, nav_inventory,
+                    impl_units, route_elements, client, playwright_exit_routes,
                 )
                 for req in all_reqs
             ],
