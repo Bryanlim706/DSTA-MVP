@@ -402,6 +402,9 @@ def _full_static(routes: list[str], reason: str = "no_bootstrap") -> dict:
 
 async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dict:
     """Boot the app, crawl routes with Playwright, fall back to Tree-sitter for unvisitable routes."""
+    # Resolve to absolute so subprocess cwd works regardless of the server's working directory.
+    extract_to = Path(extract_to).resolve()
+
     ctx = step3_5_result.get("project_context", {})
     # frontend_routes is list[dict] ({path, dynamic, params[]}) — normalise to plain strings.
     raw_routes = step4_result.get("frontend_routes", [])

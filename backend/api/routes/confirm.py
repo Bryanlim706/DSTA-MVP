@@ -199,7 +199,7 @@ async def confirm_requirements(
     add_step_result(job_id, "step_3_5", result)
     update_job(job_id, {"status": "confirmed", "current_step": 4})
 
-    extract_to = Path(job.get("extracted_path", f"./uploads/{job_id}/extracted"))
+    extract_to = Path(job.get("extracted_path", f"./uploads/{job_id}/extracted")).resolve()
     background_tasks.add_task(_run_step4, job_id, extract_to)
 
     return {"status": "confirmed", "l1a_count": l1a_count}
