@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import subprocess as _subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -175,13 +176,17 @@ async def _npm_install_if_needed(cwd: Path) -> None:
     npm = shutil.which("npm") or "npm"
     cmd = _wrap_npm_cmd([npm, "install", "--prefer-offline", "--no-audit", "--loglevel=error", "--strict-ssl=false"])
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(cwd),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+        # asyncio.create_subprocess_exec is unreliable in some server event-loop contexts on
+        # Windows; subprocess.run via to_thread is simpler and always works.
+        await asyncio.wait_for(
+            asyncio.to_thread(
+                _subprocess.run, cmd,
+                cwd=str(cwd),
+                stdout=_subprocess.DEVNULL,
+                stderr=_subprocess.DEVNULL,
+            ),
+            timeout=180.0,
         )
-        await asyncio.wait_for(proc.wait(), timeout=180.0)
     except Exception:
         pass
 
@@ -281,10 +286,10 @@ _JS_OUTBOUND_LINKS = """
 """
 
 
-async def _crawl_routes(routes: list[str], port: int) -> tuple[list[dict], list[dict]]:
-    """Returns (pages, unvisitable_routes). Requires playwright to be installed."""
+def _crawl_routes_sync(routes: list[str], port: int) -> tuple[list[dict], list[dict]]:
+    """Sync Playwright crawl — run via asyncio.to_thread to avoid event-loop subprocess issues."""
     try:
-        from playwright.async_api import async_playwright
+        from playwright.sync_api import sync_playwright
     except ImportError:
         return [], [{"route": r, "reason": "playwright_not_installed"} for r in routes]
 
@@ -292,10 +297,10 @@ async def _crawl_routes(routes: list[str], port: int) -> tuple[list[dict], list[
     pages_out: list[dict] = []
     unvisitable: list[dict] = []
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
-        context = await browser.new_context(ignore_https_errors=True)
-        page = await context.new_page()
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        context = browser.new_context(ignore_https_errors=True)
+        page = context.new_page()
 
         for route in routes:
             url = base_url + route
@@ -313,8 +318,8 @@ async def _crawl_routes(routes: list[str], port: int) -> tuple[list[dict], list[
             reason: str | None = None
 
             try:
-                response = await page.goto(url, wait_until="load", timeout=10_000)
-                await page.wait_for_timeout(400)
+                response = page.goto(url, wait_until="load", timeout=10_000)
+                page.wait_for_timeout(400)
             except Exception as exc:
                 reason = "timeout" if "timeout" in str(exc).lower() else "error"
             finally:
@@ -339,9 +344,9 @@ async def _crawl_routes(routes: list[str], port: int) -> tuple[list[dict], list[
                 })
 
             try:
-                elements = await page.evaluate(_JS_EXTRACT_ELEMENTS)
-                outbound = await page.evaluate(_JS_OUTBOUND_LINKS)
-                title = await page.title()
+                elements = page.evaluate(_JS_EXTRACT_ELEMENTS)
+                outbound = page.evaluate(_JS_OUTBOUND_LINKS)
+                title = page.title()
             except Exception:
                 elements, outbound, title = [], [], ""
 
@@ -355,10 +360,15 @@ async def _crawl_routes(routes: list[str], port: int) -> tuple[list[dict], list[
                 "api_calls_observed": list(dict.fromkeys(api_calls)),
             })
 
-        await context.close()
-        await browser.close()
+        context.close()
+        browser.close()
 
     return pages_out, unvisitable
+
+
+async def _crawl_routes(routes: list[str], port: int) -> tuple[list[dict], list[dict]]:
+    """Run the sync Playwright crawl in a thread so it works in any event-loop context."""
+    return await asyncio.to_thread(_crawl_routes_sync, routes, port)
 
 
 def _empty_playwright_page(route: str) -> dict:
@@ -419,18 +429,20 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
     if not bootstrap:
         return _full_static(routes)
 
-    processes: list[asyncio.subprocess.Process] = []
+    processes: list[_subprocess.Popen] = []
     try:
         for cmd, _port, cwd in bootstrap:
             # Install npm deps if node_modules is absent (common when zip excludes them)
             if any("npm" in (c.lower() if isinstance(c, str) else "") for c in cmd):
                 await _npm_install_if_needed(cwd)
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
+                # Use subprocess.Popen (not asyncio.create_subprocess_exec) — more reliable
+                # across all event-loop configurations on Windows.
+                proc = _subprocess.Popen(
+                    cmd,
                     cwd=str(cwd),
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
+                    stdout=_subprocess.DEVNULL,
+                    stderr=_subprocess.DEVNULL,
                 )
                 processes.append(proc)
             except Exception:
@@ -470,7 +482,7 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
         for proc in processes:
             try:
                 proc.terminate()
-                await asyncio.wait_for(proc.wait(), timeout=5.0)
+                proc.wait(timeout=5.0)
             except Exception:
                 try:
                     proc.kill()
