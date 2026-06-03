@@ -62,6 +62,13 @@ def _bootstrap_commands(ctx: dict, root: Path) -> list[_BootSpec]:
             cmd, port = _npm_cmd(frontend_dir, tooling, frontend_fw)
             return [(cmd, port, frontend_dir)]
         else:
+            template_engine = ctx.get("template_engine")
+            if template_engine is None and frontend_fw:
+                # Non-SSR full-stack with SPA frontend: backend cannot be auto-started
+                # (needs DB/Java/env); crawl the frontend dev server instead.
+                frontend_dir = _find_frontend_dir(root) or root
+                cmd, port = _npm_cmd(frontend_dir, tooling, frontend_fw)
+                return [(cmd, port, frontend_dir)]
             # SSR: crawl via the backend renderer
             spec = _backend_spec(root, backend_fw)
             if spec:
@@ -228,7 +235,7 @@ _JS_EXTRACT_ELEMENTS = """
                         style.display !== 'none' && style.visibility !== 'hidden';
         const tag = el.tagName.toLowerCase();
         const type = el.getAttribute('type') || null;
-        const rawLabel = (
+        let rawLabel = (
             el.getAttribute('aria-label') ||
             el.getAttribute('placeholder') ||
             (tag !== 'input' && tag !== 'select' ? (el.textContent || '').trim() : '') ||
@@ -236,6 +243,18 @@ _JS_EXTRACT_ELEMENTS = """
             el.getAttribute('name') ||
             ''
         ).slice(0, 80).trim();
+        // File inputs rarely have aria-label/placeholder; fall back to sibling/parent <label>
+        if (!rawLabel && type === 'file') {
+            let labelEl = null;
+            const prev = el.previousElementSibling;
+            if (prev && prev.tagName.toLowerCase() === 'label') {
+                labelEl = prev;
+            } else {
+                const parent = el.parentElement;
+                if (parent) labelEl = parent.querySelector('label');
+            }
+            if (labelEl) rawLabel = (labelEl.textContent || '').trim().replace(/:$/, '').trim().slice(0, 80);
+        }
         if (!rawLabel && tag !== 'select') return;
         const key = tag + '|' + (type || '') + '|' + rawLabel;
         if (seen.has(key)) return;

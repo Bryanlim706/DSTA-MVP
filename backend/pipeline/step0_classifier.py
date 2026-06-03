@@ -181,14 +181,28 @@ def _detect_service_layout(
     template_engine: str | None,
     frontend_fw: str | None = None,
 ) -> str:
-    top_dirs = {p.split("/")[0] for p in file_tree if "/" in p}
+    paths_with_slash = [p for p in file_tree if "/" in p]
+    top_dirs: set[str] = {p.split("/")[0] for p in paths_with_slash}
+    # If all paths share a single root dir (zip wrapper pattern like
+    # "SpringBoot-Reactjs-Ecommerce-main/"), unwrap one level so the
+    # actual frontend/backend subdirs are visible.
+    if len(top_dirs) == 1:
+        prefix = next(iter(top_dirs)) + "/"
+        top_dirs = {
+            p[len(prefix):].split("/")[0]
+            for p in paths_with_slash
+            if p.startswith(prefix) and "/" in p[len(prefix):]
+        }
+
     frontend_kws = {"frontend", "client", "web", "ui"}
     backend_kws = {"backend", "server", "api", "service"}
 
     def _matches(d: str, kws: set[str]) -> bool:
         dl = d.lower()
         return any(
-            dl == kw or dl.startswith(kw + "-") or dl.startswith(kw + "_") or dl.startswith(kw + " ")
+            dl == kw
+            or dl.startswith(kw + "-") or dl.startswith(kw + "_") or dl.startswith(kw + " ")
+            or dl.endswith("-" + kw) or dl.endswith("_" + kw) or dl.endswith(" " + kw)
             for kw in kws
         )
 
