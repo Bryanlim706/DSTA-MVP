@@ -182,10 +182,26 @@ def _build_page_inventory(step5_pages: list, route_elements: dict) -> dict:
                 and e.get("label", "") not in pw_labels
                 and not _DOT_LABEL_RE.match(e.get("label", ""))
             ]
+            # Form-confirmation promotion: if Playwright found genuine form inputs
+            # on this page (not just a search bar), route_elements form entries are
+            # the same physical fields — just described by placeholder rather than by
+            # HTML name attribute.  Controlled React inputs use value={state.x} with
+            # no placeholder, so Playwright extracts the name attribute ("name",
+            # "brand") while route_elements has the human label ("Product Name").
+            # Since the form is confirmed live, promote those extras to playwright
+            # source so they score E=1.0 rather than E=0.5.
+            pw_form_confirmed = any(_is_form_element(e) for e in pw_elements)
+            promoted_labels: set = set()
+            if pw_form_confirmed:
+                for e in extra:
+                    if _is_form_element(e):
+                        lbl = e.get("label", "")
+                        if lbl:
+                            promoted_labels.add(lbl)
             inventory[route] = {
                 "elements": pw_elements + extra,
                 "source": "playwright",
-                "_playwright_labels": pw_labels,
+                "_playwright_labels": pw_labels | promoted_labels,
             }
         else:
             fallback = route_elements.get(route, [])
@@ -639,6 +655,20 @@ _ELEM_NOISE_RE = re.compile(
 # Labels that are React state-variable references like "product.name" or
 # "updateProduct.description" — JSX value={product.name} — not visible UI text.
 _DOT_LABEL_RE = re.compile(r"^\w+\.\w+")
+
+# Input subtypes that are genuine form controls (not search boxes, not hidden).
+# Used by _build_page_inventory to detect pages where the form rendered live.
+_FORM_INPUT_SUBTYPES = frozenset(
+    ["text", "number", "email", "password", "date", "time", "datetime-local",
+     "file", "checkbox", "radio", "tel", "url", "color", "range"]
+)
+
+
+def _is_form_element(elem: dict) -> bool:
+    """True for genuine form controls (input/select/textarea, not search or button)."""
+    et = elem.get("type", "")
+    sub = elem.get("subtype")
+    return (et == "input" and sub in _FORM_INPUT_SUBTYPES) or et in ("select", "textarea")
 
 
 def _match_element_in_inventory(

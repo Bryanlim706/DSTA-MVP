@@ -533,3 +533,60 @@ def test_build_page_inventory_filters_dot_notation_from_route_elements_only():
     labels = [e["label"] for e in inv["/update"]["elements"]]
     assert "updateProduct.name" not in labels
     assert "Update" in labels
+
+
+# ---------------------------------------------------------------------------
+# Fix: form-confirmation promotion (controlled-input label mismatch)
+# ---------------------------------------------------------------------------
+
+def test_build_page_inventory_promotes_form_labels_when_playwright_confirmed_form():
+    """When Playwright found genuine form inputs, route_elements form entries are promoted
+    to playwright source — handles controlled React inputs (name attr vs placeholder)."""
+    pages = [{
+        "route": "/update",
+        "accessible": True,
+        "discovered_by": "playwright",
+        "elements": [
+            # Playwright found form inputs by name attribute
+            {"type": "input", "subtype": "text",   "label": "name",   "selector": "#name"},
+            {"type": "input", "subtype": "number", "label": "price",  "selector": "#price"},
+            {"type": "button", "subtype": "submit", "label": "Submit", "selector": "button"},
+        ],
+        "outbound_links": [],
+        "api_calls_observed": [],
+    }]
+    # route_elements has descriptive placeholder labels for the same fields
+    route_elements = {"/update": [
+        {"type": "input", "subtype": "text",   "label": "Product Name"},
+        {"type": "input", "subtype": "number", "label": "Price"},
+        {"type": "button", "subtype": "None",  "label": "Delete"},  # button — not promoted
+    ]}
+    inv = _build_page_inventory(pages, route_elements)
+    pw_labels = inv["/update"]["_playwright_labels"]
+    # Descriptive form labels promoted because Playwright confirmed form inputs exist
+    assert "Product Name" in pw_labels
+    assert "Price" in pw_labels
+    # Button extras are NOT promoted (only form controls promoted)
+    assert "Delete" not in pw_labels
+
+
+def test_build_page_inventory_does_not_promote_when_no_form_inputs():
+    """When Playwright found only nav/search (no form inputs), no promotion occurs."""
+    pages = [{
+        "route": "/products",
+        "accessible": True,
+        "discovered_by": "playwright",
+        "elements": [
+            {"type": "link",  "subtype": None,     "label": "Home",   "selector": "a"},
+            {"type": "input", "subtype": "search",  "label": "Search", "selector": "input"},
+        ],
+        "outbound_links": [],
+        "api_calls_observed": [],
+    }]
+    route_elements = {"/products": [
+        {"type": "input", "subtype": "text", "label": "Product Name"},
+    ]}
+    inv = _build_page_inventory(pages, route_elements)
+    pw_labels = inv["/products"]["_playwright_labels"]
+    # No promotion — only search input present, no genuine form confirmed
+    assert "Product Name" not in pw_labels
