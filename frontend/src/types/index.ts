@@ -261,6 +261,25 @@ export interface Step7Result {
   error: string | null
 }
 
+export interface FA75Suggestion {
+  suggestion_id: string
+  description: string
+  grounded_in: {
+    models: string[]
+    endpoints: string[]
+    rationale: string
+  }
+  l1a_connection: string | null
+  priority: 'high' | 'medium' | 'low'
+}
+
+export interface Step75Result {
+  suggestions: FA75Suggestion[]
+  total_count: number
+  llm_model: string | null
+  error: string | null
+}
+
 export interface StepResults {
   step_0?: Step0Result
   step_1?: Step1Result
@@ -271,6 +290,7 @@ export interface StepResults {
   step_5?: Step5Result
   step_6?: Step6Result
   step_7?: Step7Result
+  step_7_5?: Step75Result
 }
 
 export type JobStatus =
@@ -292,6 +312,9 @@ export type JobStatus =
   | 'step_7_running'
   | 'step_7_complete'
   | 'step_7_error'
+  | 'step_7_5_running'
+  | 'step_7_5_complete'
+  | 'step_7_5_error'
   | 'complete'
   | 'error'
 

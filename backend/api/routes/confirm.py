@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 import anthropic
 
-from pipeline import step4_repo_parser, step5_app_crawler, step6_entity_mapper, step7_scorer
+from pipeline import step4_repo_parser, step5_app_crawler, step6_entity_mapper, step7_scorer, step7_5_fa_advisor
 from storage.job_store import add_step_result, get_job, update_job
 
 router = APIRouter()
@@ -118,8 +118,26 @@ async def _run_step7(job_id: str) -> None:
         )
         add_step_result(job_id, "step_7", result)
         update_job(job_id, {"status": "step_7_complete", "current_step": 8})
+        await _run_step7_5(job_id)
     except Exception as exc:
         update_job(job_id, {"status": "step_7_error", "errors": [str(exc)]})
+
+
+async def _run_step7_5(job_id: str) -> None:
+    try:
+        update_job(job_id, {"status": "step_7_5_running"})
+        job = get_job(job_id)
+        client = anthropic.AsyncAnthropic()
+        result = await step7_5_fa_advisor.run(
+            job["step_results"]["step_3_5"],
+            job["step_results"]["step_4"],
+            job["step_results"]["step_5"],
+            client,
+        )
+        add_step_result(job_id, "step_7_5", result)
+        update_job(job_id, {"status": "step_7_5_complete", "current_step": 9})
+    except Exception as exc:
+        update_job(job_id, {"status": "step_7_5_error", "errors": [str(exc)]})
 
 
 @router.post("/jobs/{job_id}/confirm")

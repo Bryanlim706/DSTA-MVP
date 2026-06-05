@@ -206,6 +206,7 @@ llm_model, error
 ```
 
 ### Step 7 — FCom/FA Scorer (COMPLETE)
+
 - Triggered automatically after Step 6 completes (chained in `_run_step6`)
 - No LLM — pure Python formula
 - **FCom:** `∑(E×weight) / ∑weight` over all L1a confirmed requirements (weight from user priority)
@@ -224,9 +225,27 @@ fa_advisory (missing_l1b[]),
 error
 ```
 
+### Step 7.5 — Positive-Grounded FA Advisor (COMPLETE)
+- Triggered automatically after Step 7 completes (chained in `_run_step7`)
+- LLM (claude-haiku) — one call; reads Steps 3.5, 4, and 5 directly (does NOT depend on Step 6)
+- Generates Type B advisory: improvement suggestions grounded in the actual codebase structure (models, endpoints, UI) rather than domain-normative patterns (Type A from Step 7)
+- **Dedup against L1b:** user message includes all Step 3 advisory L1b items (capped at 25) so LLM avoids re-generating what Step 3 already suggested
+- **Positive inventory:** `database_models`, `implementation_units` (api_endpoints only), `frontend_routes`, and Step 5 live page elements (up to 15 pages × 6 labels) passed to LLM for grounding
+- **Output validation:** `_parse_response` validates each suggestion: description non-empty, `suggestion_id` matches `FA-POS-\d+`, `priority` in {high, medium, low}, `l1a_connection` "null"/"none" strings coerced to `None`, missing `grounded_in` defaults to empty lists. Truncation recovery: tries last `},` if full parse fails.
+- **Renumbering:** suggestion_ids are renumbered sequentially after parsing (FA-POS-001, FA-POS-002, …) regardless of what LLM generated
+- Job statuses: `step_7_complete` → `step_7_5_running` → `step_7_5_complete` (or `step_7_5_error`)
+- Tests: `backend/tests/test_step7_5_fa_advisor.py` — 23 tests, all passing
+- Frontend: `FA75AdvisorResult.tsx` — per-suggestion cards with priority badge (high=red, medium=amber, low=gray), rationale text, model/endpoint chips, l1a_connection note; loading skeleton; shown below `ScoringResult`
+
+**Step 7.5 output fields** (stored in `step_results.step_7_5`):
+```
+suggestions[] (suggestion_id, description, grounded_in{models[], endpoints[], rationale}, l1a_connection, priority),
+total_count, llm_model, error
+```
+
 ## What has NOT been built yet
 
-- Steps 7.5–17 (see PLAN.md for full pipeline)
+- Steps 8–17 (see PLAN.md for full pipeline)
 - Docker sandbox (Step 11)
 
 ---
@@ -399,7 +418,7 @@ Both files must be in the same commit as the code — not a follow-up commit. Th
 
 ## Next steps
 
-1. Build Step 7.5 — FA Advisor (positive-grounded; runs after Step 7; reads 3.5+4+5 directly; LLM generates Type B advisory from actual codebase structure)
+1. Build Step 8 — Acceptance Criteria Generator (for each L1a requirement with E()≥0.5, LLM generates Given/When/Then ACs that sum to the requirement's weight)
 
 ---
 

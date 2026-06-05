@@ -5,6 +5,7 @@ import ConfirmationTable from './components/ConfirmationTable'
 import GeneratedRequirementsResult from './components/GeneratedRequirementsResult'
 import ObviousRequirementsResult from './components/ObviousRequirementsResult'
 import AppCrawlerResult from './components/AppCrawlerResult'
+import FA75AdvisorResult from './components/FA75AdvisorResult'
 import MappingResult from './components/MappingResult'
 import RepoParserResult from './components/RepoParserResult'
 import ScoringResult from './components/ScoringResult'
@@ -70,6 +71,7 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
   const step5Loading = job.status === 'step_5_running' || job.status === 'step_4_complete'
   const step6Loading = job.status === 'step_6_running' || job.status === 'step_5_complete'
   const step7Loading = job.status === 'step_7_running' || job.status === 'step_6_complete'
+  const step75Loading = job.status === 'step_7_5_running' || job.status === 'step_7_complete'
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-12">
@@ -78,7 +80,8 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
           <div>
             <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
             <p className="text-xs text-gray-400 mt-0.5">
-              {job.status === 'step_7_complete' ? 'Steps 0–7 complete'
+              {job.status === 'step_7_5_complete' ? 'Steps 0–7.5 complete'
+            : job.status === 'step_7_complete' || job.status === 'step_7_5_running' ? 'Steps 0–7 complete'
             : job.status === 'step_6_complete' || job.status === 'step_7_running' ? 'Steps 0–6 complete'
             : job.status === 'step_5_complete' || job.status === 'step_6_running' ? 'Steps 0–5 complete'
             : job.status === 'step_4_complete' || job.status === 'step_5_running' ? 'Steps 0–4 complete'
@@ -151,6 +154,10 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
         <div className="mt-6">
           <ScoringResult result={job.step_results.step_7 ?? null} loading={step7Loading} />
         </div>
+
+        <div className="mt-6">
+          <FA75AdvisorResult result={job.step_results.step_7_5 ?? null} loading={step75Loading} />
+        </div>
       </div>
     </div>
   )
@@ -165,7 +172,7 @@ export default function App() {
   // Poll for step_4_complete after entering result view
   useEffect(() => {
     if (stage !== 'step_3_complete' || !job || pollingStep4.current) return
-    const terminalStatuses = ['step_7_complete', 'step_7_error', 'step_6_error', 'step_5_error', 'step_4_error', 'error', 'complete']
+    const terminalStatuses = ['step_7_5_complete', 'step_7_5_error', 'step_7_error', 'step_6_error', 'step_5_error', 'step_4_error', 'error', 'complete']
     if (terminalStatuses.includes(job.status)) return
 
     pollingStep4.current = true

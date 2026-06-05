@@ -1254,7 +1254,7 @@ const terminalStatuses = [
 
 ### Step 7.5: Positive-Grounded FA Advisor
 **Phase: FA advisory — post-codebase improvement suggestions**
-**Status: NOT YET DESIGNED**
+**Status: COMPLETE**
 **Tools:** Python, LLM (AsyncAnthropic)
 **Input:**
 - Step 4 result: `implementation_units`, `database_models`, `frontend_routes`, `languages` — what the codebase actually contains
@@ -1517,6 +1517,6 @@ Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCor — thei
 | 1 — Scaffold + Upload + Step 0 | Steps −1, 0, upload endpoint, job store, frontend | ✓ DONE |
 | 2 — Requirements Pipeline | Steps 1, 2, 3, 3.5 | ✓ DONE |
 | 3 — Repo Parser | Step 4 | ✓ DONE |
-| 4 — Inventory + Mapping + Completeness | Steps 5, 6, 7 | Not started |
+| 4 — Inventory + Mapping + Completeness | Steps 5, 6, 7, 7.5 | ✓ DONE |
 | 5 — AC Generation + Test Execution | Steps 8, 9, 10, 11, 12 | Not started |
 | 6 — Scoring + Dashboard | Steps 13, 14, 15, 16, 17 | Not started |
