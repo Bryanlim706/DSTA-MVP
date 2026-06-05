@@ -591,6 +591,23 @@ def _lookup_selector(matched_label: str | None, page_inventory: dict) -> str | N
     return None
 
 
+def _lookup_element_full(matched_label: str | None, page_inventory: dict) -> dict | None:
+    """Return the raw Step 5 element record {type, subtype, label, selector, visible} for a matched label."""
+    if not matched_label:
+        return None
+    for inv in page_inventory.values():
+        for elem in inv.get("elements", []):
+            if elem.get("label") == matched_label:
+                return {
+                    "type": elem.get("type"),
+                    "subtype": elem.get("subtype"),
+                    "label": elem.get("label"),
+                    "selector": elem.get("selector"),
+                    "visible": elem.get("visible"),
+                }
+    return None
+
+
 def _resolve_element_source(matched_label: str, page_inventory: dict) -> str | None:
     """Return the authoritative source for a matched element label.
 
@@ -760,6 +777,7 @@ def _score_entity(entity: dict, grounding: dict, page_inventory: dict) -> tuple[
         extra["matched_element_label"] = matched_label
         extra["match_source"] = match_source
         extra["matched_selector"] = _lookup_selector(matched_label, page_inventory)
+        extra["step5_element"] = _lookup_element_full(matched_label, page_inventory)
         if match_source == "playwright":
             e = 1.0
         elif match_source == "route_elements":

@@ -207,6 +207,14 @@ export interface Step5Result {
   error: string | null
 }
 
+export interface Step5ElementDetail {
+  type: string | null
+  subtype: string | null
+  label: string | null
+  selector: string | null
+  visible: boolean | null
+}
+
 export interface EntityScore {
   label: string
   type: 'node' | 'element' | 'edge'
@@ -217,6 +225,7 @@ export interface EntityScore {
   matched_element_label?: string | null
   matched_selector?: string | null
   match_source?: string | null
+  step5_element?: Step5ElementDetail | null
   edge_kind?: 'data' | 'navigation' | 'structural'
   matched_endpoint?: string | null
   trigger_element_label?: string | null

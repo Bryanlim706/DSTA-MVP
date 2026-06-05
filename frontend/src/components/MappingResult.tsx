@@ -71,6 +71,7 @@ function EntityRow({ es }: { es: EntityScore }) {
 
 function RequirementRow({ req }: { req: MappedRequirement }) {
   const [open, setOpen] = useState(false)
+  const [showJson, setShowJson] = useState(false)
   const e = req.e_score
 
   return (
@@ -98,12 +99,29 @@ function RequirementRow({ req }: { req: MappedRequirement }) {
       </button>
 
       {open && (
-        <div className="border-t border-gray-100 bg-gray-50 px-4 py-3">
-          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Entity scores</p>
-          <div className="space-y-0.5">
-            {req.entity_scores.map((es, i) => (
-              <EntityRow key={i} es={es} />
-            ))}
+        <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-3">
+          <div>
+            <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Entity scores</p>
+            <div className="space-y-0.5">
+              {req.entity_scores.map((es, i) => (
+                <EntityRow key={i} es={es} />
+              ))}
+            </div>
+          </div>
+
+          <div className="border border-gray-200 rounded overflow-hidden">
+            <button
+              onClick={() => setShowJson(o => !o)}
+              className="w-full flex items-center justify-between px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-left"
+            >
+              <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Raw JSON</span>
+              <span className="text-[10px] text-gray-400">{showJson ? '▲' : '▼'}</span>
+            </button>
+            {showJson && (
+              <pre className="text-[11px] font-mono text-gray-700 bg-white px-3 py-2 overflow-x-auto leading-relaxed">
+                {JSON.stringify(req, null, 2)}
+              </pre>
+            )}
           </div>
         </div>
       )}
