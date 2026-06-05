@@ -912,6 +912,26 @@ async def run(
         l1b_reqs = step3_5.get("advisory_requirements", [])
         all_reqs = l1a_reqs + l1b_reqs
 
+        # Build a lookup for weight/priority/tag/placement so we can attach them to mapped output
+        l1a_ids = {r.get("req_id") for r in l1a_reqs}
+        req_meta: dict = {}
+        for r in l1a_reqs:
+            rid = r.get("req_id", "")
+            req_meta[rid] = {
+                "weight": float(r.get("weight", 2.0)),
+                "priority": r.get("priority", "medium"),
+                "tag": r.get("tag", "stated"),
+                "placement": "l1a",
+            }
+        for r in l1b_reqs:
+            rid = r.get("req_id", "")
+            req_meta[rid] = {
+                "weight": float(r.get("weight", 2.0)),
+                "priority": r.get("priority", "medium"),
+                "tag": r.get("tag", "generated"),
+                "placement": "l1b",
+            }
+
         frontend_routes = step4.get("frontend_routes", [])
         impl_units = step4.get("implementation_units", [])
         route_elements = step4.get("route_elements", {})
@@ -962,10 +982,18 @@ async def run(
                     **extra,
                 })
 
+            rid = req.get("req_id", "")
+            e_score = round(_aggregate(entity_scores), 4)
+            meta = req_meta.get(rid, {"weight": 2.0, "priority": "medium", "tag": "stated", "placement": "l1a"})
             mapped.append({
-                "req_id": req.get("req_id", ""),
+                "req_id": rid,
                 "description": req.get("description", ""),
-                "e_score": round(_aggregate(entity_scores), 4),
+                "placement": meta["placement"],
+                "tag": meta["tag"],
+                "priority": meta["priority"],
+                "weight": meta["weight"],
+                "e_score": e_score,
+                "weighted_e": round(e_score * meta["weight"], 4),
                 "entity_scores": entity_scores,
             })
 

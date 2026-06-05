@@ -236,7 +236,12 @@ export interface EntityScore {
 export interface MappedRequirement {
   req_id: string
   description: string
+  placement: 'l1a' | 'l1b'
+  tag: string
+  priority: string
+  weight: number
   e_score: number
+  weighted_e: number
   entity_scores: EntityScore[]
 }
 
