@@ -39,8 +39,9 @@ Per-entity E() values:
 | E(entity) | Condition |
 |---|---|
 | 1.0 | entity ∈ L2 AND entity ∈ L3 — accessible and implemented |
-| 0.5 | entity ∈ L3 only — implemented but not UI-accessible |
-| 0.4 | entity ∈ L2 only — UI visible, backend missing/broken |
+| 0.75 | entity ∈ L3 only (element / nav edge / data edge / structural edge) — in source but not live-confirmed; gap typically caused by backend-data rendering (empty list = no rows/buttons rendered) |
+| 0.5 | entity ∈ L3 only (node) — route defined in router but not confirmed accessible by Playwright |
+| 0.4 | entity ∈ L2 only — UI visible, backend missing/broken (data edge: trigger seen but no matching endpoint) |
 | 0.25 | Partial or unclear evidence in either layer |
 | 0.0 | Not found anywhere |
 
@@ -94,7 +95,8 @@ CP  = ∑_blocked_L1Cx / ∑_all_L1Cx
 | E() | In S? | Test type |
 |---|---|---|
 | 1.0 (L2 ∧ L3) | Yes | E2E — Playwright + API |
-| 0.5 (L3 only) | Yes | API only — no Playwright |
+| 0.75 (L3 only, elements/edges) | Yes | API only — no Playwright (backend-data rendering gap) |
+| 0.5 (L3 only, node) | Yes | API only — route inaccessible to Playwright |
 | 0.4 (L2 only) | No | Excluded — FCom already penalises |
 | 0.25 / 0.0 | No | Excluded |
 
@@ -174,7 +176,8 @@ The X axis encodes distance from the software's core purpose — how clearly a f
 | E() | Condition |
 |---|---|
 | 1.0 | L2 (UI accessible) AND L3 (backend implemented) |
-| 0.5 | L3 only — implemented but not UI-accessible |
+| 0.75 | L3 only (element/edge) — in source but not live-confirmed (typically: backend not running during crawl) |
+| 0.5 | L3 only (node) — route in router but Playwright could not confirm accessibility |
 | 0.4 | L2 only — UI visible, backend missing or broken |
 | 0.25 | Partial / unclear evidence in either layer |
 | 0.0 | Not found |
@@ -771,8 +774,8 @@ Linkage (is the trigger element wired to that endpoint?) → FCor (Step 11), not
 | Domain | Layer | Purpose in scoring |
 |---|---|---|
 | `frontend_routes` | L3 → L2 seed | **Node entity L3 check.** If a route isn't here, node E() ≤ 0.5. Also the Playwright crawl seed list for Step 5. Each entry is `{path, dynamic, params[]}`. |
-| `route_elements` | L3 (element signal) | **Element entity L3 check.** Per-route inventory of interactive elements (`{type, subtype, label}`) parsed from source files. Step 6 uses this for E()=0.5 when Playwright couldn't reach a page. |
-| `navigation_graph` | L3 (navigation signal) | **Navigation edge L3 check.** Per-route list of target routes found in navigation triggers (`<Link to>`, `<a href>`, `navigate()`, `router.push()`). Step 6 checks this to score whether a navigation trigger exists in source. |
+| `route_elements` | L3 (element signal) | **Element entity L3 check.** Per-route inventory of interactive elements (`{type, subtype, label}`) parsed from source files. Step 6 uses this for E()=0.75 when Playwright couldn't confirm the element (gap typically caused by backend-data rendering). |
+| `navigation_graph` | L3 (navigation signal) | **Navigation edge L3 check.** Per-route list of target routes found in navigation triggers (`<Link to>`, `<a href>`, `navigate()`, `router.push()`). Step 6 uses this for E()=0.75 when Playwright didn't see the nav trigger live. |
 | `implementation_units` | L3 (action signal) | **Data edge L3 check.** Backend handler existence — `kind: "api_endpoint"` for REST handlers, `kind: "form_handler"` for SSR HTML forms. Covers both REST APIs and traditional form-submission apps. |
 | `route_to_files` | Infrastructure | Route → source file(s) mapping. Used internally by Step 4 to determine which files to parse for `route_elements` and `navigation_graph`. Each route's list includes 1-level-deep local imports so child components are included. |
 | `important_files` | Infrastructure | Wider file inventory (capped at 100) for Step 7.5 advisor context and evidence pack. |
@@ -859,8 +862,8 @@ Step 5 is the runtime observation pass. It boots the actual app and records what
 
 | Domain | Layer | Purpose in scoring |
 |---|---|---|
-| `pages[].route` + `accessible` | L2 (node signal) | **Node entity L2 check.** `accessible: true` → node E()=1.0 (L2 ∧ L3). Route in `unvisitable_routes` → Step 6 falls back to Step 4 `route_elements` → E()=0.5. |
-| `pages[].elements` | L2 (element + nav signal) | **Element and navigation edge L2 check.** Interactive widgets (inputs, buttons, selects, links) found on each page at runtime. `discovered_by: "playwright"` → E()=1.0. For unvisitable routes, Step 6 uses Step 4 `route_elements` → E()=0.5. |
+| `pages[].route` + `accessible` | L2 (node signal) | **Node entity L2 check.** `accessible: true` → node E()=1.0 (L2 ∧ L3). Route in `unvisitable_routes` → Step 6 falls back to Step 4 `route_elements` → node E()=0.5. |
+| `pages[].elements` | L2 (element + nav signal) | **Element and navigation edge L2 check.** Interactive widgets (inputs, buttons, selects, links, ARIA role-based components) found on each page at runtime. `discovered_by: "playwright"` → E()=1.0. For unvisitable routes, Step 6 uses Step 4 `route_elements` → E()=0.75 (element/nav/structural/data edges). |
 | `pages[].outbound_links` | Context | Supplementary; not used in E() scoring. Step 15 reporting only. |
 | `pages[].api_calls_observed` | Context | Passive page-load GETs only — POST/PUT/DELETE never observed. Cross-check against Step 4 endpoints in Step 15 evidence pack. Not used for E() scoring. |
 | `unvisitable_routes` | Scoring signal | Tells Step 6 which routes Playwright couldn't reach. Step 6 treats those routes as L3-only (E()=0.5) using Step 4 `route_elements`. |
@@ -883,11 +886,12 @@ Step 5 is pure extraction — no judgment. Step 6 does the matching of L1a path 
 **Playwright crawl:**
 Boot the app. Visit each route from Step 4 `frontend_routes`. For each page, record:
 - Page title (`document.title`)
-- All interactive elements with non-empty labels: inputs, buttons, selects, textareas, links (`a[href]`). Label priority: `aria-label` → `placeholder` → `textContent` (skipped for input/select) → `title` → `name`. Elements without a resolvable label are dropped. `visible` flag records DOM visibility but non-visible elements are not filtered out.
-- CSS selectors from running DOM
+- All interactive elements with non-empty labels: native elements (inputs, buttons, selects, textareas, links `a[href]`) **plus ARIA role-based custom components** (`role=button/link/checkbox/radio/switch/tab/combobox/searchbox/menuitem` — covers Tailwind/MUI/shadcn). Label priority: `aria-label` → `placeholder` → `textContent` (skipped for input/select/combobox) → `title` → `name`. Elements without a resolvable label are dropped. `visible` flag records DOM visibility.
+- CSS selectors from running DOM (priority: `#id` → `[data-testid]` → `[name]` → `[type]` → `[role][aria-label]` → tag)
 - Outbound navigation links
 - Network requests during page load (XHR/fetch, passive — `api_calls_observed`)
 - Accessibility: `accessible: true/false` (final URL matches requested route)
+- **Wait strategy:** `page.goto(wait_until="load")` then `wait_for_load_state("networkidle", timeout=5s)` best-effort — allows async React data-fetches to complete before DOM snapshot; apps with continuous polling fall through to 500ms settle
 
 Routes Playwright cannot visit (auth-gated, 404, timeout) → `unvisitable_routes` + shell page with `elements: []`. Step 6 fills element evidence from Step 4 `route_elements`.
 
@@ -946,7 +950,7 @@ Routes Playwright cannot visit (auth-gated, 404, timeout) → `unvisitable_route
   "error": null
 }
 ```
-*`discovered_by: "static_fallback"` means Playwright could not reach the route — `elements` is empty. Step 6 uses Step 4 `route_elements` for those routes (E()=0.5).*
+*`discovered_by: "static_fallback"` means Playwright could not reach the route — `elements` is empty. Step 6 uses Step 4 `route_elements` for those routes (element/edge E()=0.75, node E()=0.5).*
 
 **Key value:**
 - Playwright gives ground-truth of what is rendered at runtime — conditional rendering, dynamic state, hidden elements are all correctly captured.
@@ -1017,8 +1021,10 @@ The Conceptual Model formula `E(L1x) = α × [∑ E(primary_i) / P] + (1−α) �
 | Element in Step 5 Playwright DOM | Element in Step 4 `route_elements` (L3) | E(element) |
 |---|---|---|
 | ✓ | — | 1.0 |
-| ✗ | ✓ | 0.5 |
+| ✗ | ✓ | 0.75 |
 | ✗ | ✗ | 0.0 |
+
+*0.75 (not 0.5) because the element is confirmed present in source; the L2 gap is typically caused by the backend not running during the crawl (data-driven pages render empty without API data), not by the element being absent.*
 
 Matching resolved in Step 6a grounding pass: element entities are matched against the scoped inventory for the resolved route — Step 5 `elements[]` if the page was visitable; Step 4 `route_elements[route]` if not. The `match_source` field records which inventory was used.
 
@@ -1027,9 +1033,11 @@ Matching resolved in Step 6a grounding pass: element entities are matched agains
 | Endpoint in Step 4 `implementation_units` | Triggering element on matched page in Step 5 | E(data_edge) |
 |---|---|---|
 | ✓ | found | 1.0 |
-| ✓ | not found | 0.5 |
+| ✓ | not found | 0.75 |
 | ✗ | found | 0.4 |
 | ✗ | not found | 0.0 |
+
+*endpoint_only 0.75 (not 0.5): the backend handler definitely exists in source; the trigger element not being live-confirmed is typically caused by the backend not running (delete/edit buttons only render in populated data lists).*
 
 HTTP verb heuristic on edge label: submit/add/create → POST; remove/delete → DELETE; update/edit/save/mark → PATCH or PUT. Endpoint matching resolved in Step 6a grounding pass: edge label + full requirement description + `implementation_units` list → `matched_endpoint` or null.
 
@@ -1038,7 +1046,7 @@ HTTP verb heuristic on edge label: submit/add/create → POST; remove/delete →
 | Nav trigger in Step 5 Playwright DOM | In Step 4 `navigation_graph` (L3) | E(navigation_edge) |
 |---|---|---|
 | ✓ | — | 1.0 |
-| ✗ | ✓ | 0.5 |
+| ✗ | ✓ | 0.75 |
 | ✗ | ✗ | 0.0 |
 
 Navigation triggers are scored via the same Playwright element presence mechanism as `element` entities — links and navigation-triggering buttons appear in `pages[].elements`. Step 4 `navigation_graph` captures static `<Link to>`, `<a href>`, `navigate()`, `router.push()` targets per route and serves as the L3 fallback signal. `outbound_links` is NOT used for E() scoring (unreliable for programmatic navigation — use `pages[].elements` which includes rendered link elements).
@@ -1050,7 +1058,7 @@ No `implementation_units` lookup. Check only for a triggering element on the pag
 | Triggering element in Step 5 Playwright DOM | Triggering element in Step 4 `route_elements` (L3) | E(structural_edge) |
 |---|---|---|
 | ✓ | — | 1.0 |
-| ✗ | ✓ | 0.5 |
+| ✗ | ✓ | 0.75 |
 | ✗ | ✗ | 0.0 |
 
 The triggering element match result is reused from the element-matching pass for the same page anchor — no additional LLM call needed. This category exists because filter/search/sort edges in GEN/OBV requirements would be misclassified as `navigation` (scored too strictly) or `data` (incorrectly requiring a backend handler) without it.
@@ -1334,8 +1342,8 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 ### Step 9: Test Case Generator
 **Phase: FCor setup**
 **Tools:** Python, LLM (AsyncAnthropic)
-**Input:** Step 8 acceptance criteria + **Step 5 L2 selectors (required)**
-**Critical dependency:** Step 9 **explicitly depends on Step 5's selector-level L2 output**. Tests use real selectors (`[data-testid='login-button']`) from Step 5 — not invented guesses.
+**Input:** Step 8 acceptance criteria + Step 3.5 confirmed requirements (path entity labels)
+**Locator strategy:** Step 9 generates semantic Playwright locators (`getByRole`, `getByText`, `getByPlaceholder`) from path entity labels via LLM — **not** CSS selectors captured from Step 5. Semantic locators are resilient to CSS-in-JS class name changes and component library updates; Step 5 CSS selectors are DOM snapshots from one render state and are not guaranteed stable. Step 5 `elements[].selector` may be used as an optional debugging hint but is not the primary locator source.
 **Test type by E() score:**
 - E()=1.0: Playwright E2E + API tests
 - E()=0.5: API tests only (no UI to drive)
