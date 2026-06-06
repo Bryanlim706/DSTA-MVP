@@ -39,11 +39,10 @@ Per-entity E() values:
 | E(entity) | Condition |
 |---|---|
 | 1.0 | entity ∈ L2 AND entity ∈ L3 — accessible and implemented |
-| 0.75 | entity ∈ L3 only (element / nav edge / data edge / structural edge) — in source but not live-confirmed; gap typically caused by backend-data rendering (empty list = no rows/buttons rendered) |
-| 0.5 | entity ∈ L3 only (node) — route defined in router but not confirmed accessible by Playwright |
-| 0.4 | entity ∈ L2 only — UI visible, backend missing/broken (data edge: trigger seen but no matching endpoint) |
-| 0.25 | Partial or unclear evidence in either layer |
-| 0.0 | Not found anywhere |
+| 0.75 | entity ∈ L3 only (element / nav edge / data edge / structural edge) — confirmed in source; not live-confirmed (typically: backend not running during crawl, data-driven pages render empty) |
+| 0.5 | entity ∈ L3 only (node) — route defined in router but Playwright could not confirm accessibility |
+| 0.4 | Data edge only — trigger element found in Playwright DOM but no matching backend handler in `implementation_units` |
+| 0.0 | Not found in L2 or L3 |
 
 `L1Cx` = `weight` on each requirement. Derives from two separate sources depending on layer:
 
@@ -97,8 +96,8 @@ CP  = ∑_blocked_L1Cx / ∑_all_L1Cx
 | 1.0 (L2 ∧ L3) | Yes | E2E — Playwright + API |
 | 0.75 (L3 only, elements/edges) | Yes | API only — no Playwright (backend-data rendering gap) |
 | 0.5 (L3 only, node) | Yes | API only — route inaccessible to Playwright |
-| 0.4 (L2 only) | No | Excluded — FCom already penalises |
-| 0.25 / 0.0 | No | Excluded |
+| 0.4 (data edge trigger-only) | No | Excluded — FCom already penalises |
+| 0.0 | No | Excluded |
 
 | pass_i | Condition |
 |---|---|
@@ -176,11 +175,10 @@ The X axis encodes distance from the software's core purpose — how clearly a f
 | E() | Condition |
 |---|---|
 | 1.0 | L2 (UI accessible) AND L3 (backend implemented) |
-| 0.75 | L3 only (element/edge) — in source but not live-confirmed (typically: backend not running during crawl) |
-| 0.5 | L3 only (node) — route in router but Playwright could not confirm accessibility |
-| 0.4 | L2 only — UI visible, backend missing or broken |
-| 0.25 | Partial / unclear evidence in either layer |
-| 0.0 | Not found |
+| 0.75 | L3 only (element / nav edge / data edge / structural edge) — confirmed in source; not live-confirmed (typically: backend not running during crawl, data-driven pages render empty) |
+| 0.5 | L3 only (node) — route defined in router but Playwright could not confirm accessibility |
+| 0.4 | Data edge only — trigger element found in Playwright DOM but no matching backend handler in `implementation_units` |
+| 0.0 | Not found in L2 or L3 |
 
 **Phase 2 — Correctness** (FCor): For requirements above the presence threshold (L3 exists), does the implementation behave correctly? Requires running the app and executing tests.
 
