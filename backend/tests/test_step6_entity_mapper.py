@@ -285,7 +285,7 @@ def test_score_entity_element_route_elements():
     entity = {"type": "element", "label": "add task button", "primary": True}
     grounding = {"matched_element_label": "Add Task", "match_source": "route_elements"}
     e, extra = _score_entity(entity, grounding, _PAGE_INV)
-    assert e == 0.5
+    assert e == 0.75
     assert extra["match_source"] == "route_elements"
 
 
@@ -312,7 +312,7 @@ def test_score_entity_data_edge_endpoint_only():
     entity = {"type": "edge", "label": "submit login", "primary": True}
     grounding = {"matched_endpoint": "POST /api/auth/login", "trigger_element_label": None}
     e, _ = _score_entity(entity, grounding, _PAGE_INV)
-    assert e == 0.5
+    assert e == 0.75
 
 
 def test_score_entity_data_edge_trigger_only():
@@ -341,7 +341,7 @@ def test_score_entity_navigation_graph():
     entity = {"type": "edge", "label": "go to home", "primary": True}
     grounding = {"matched_nav_target": "/", "match_source": "navigation_graph"}
     e, _ = _score_entity(entity, grounding, _PAGE_INV)
-    assert e == 0.5
+    assert e == 0.75
 
 
 def test_score_entity_navigation_not_found():
@@ -363,7 +363,7 @@ def test_score_entity_structural_route_elements():
     entity = {"type": "edge", "label": "search products", "primary": True}
     grounding = {"trigger_element_label": "Search box", "match_source": "route_elements"}
     e, _ = _score_entity(entity, grounding, _PAGE_INV)
-    assert e == 0.5
+    assert e == 0.75
 
 
 def test_score_entity_structural_not_found():

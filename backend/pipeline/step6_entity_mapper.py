@@ -811,7 +811,7 @@ def _score_entity(entity: dict, grounding: dict, page_inventory: dict) -> tuple[
         if match_source == "playwright":
             e = 1.0
         elif match_source == "route_elements":
-            e = 0.5
+            e = 0.75  # L3 confirmed in source; L2 gap often caused by backend-data rendering
         else:
             e = 0.0
 
@@ -827,7 +827,7 @@ def _score_entity(entity: dict, grounding: dict, page_inventory: dict) -> tuple[
             if matched_ep and trigger:
                 e = 1.0
             elif matched_ep:
-                e = 0.5
+                e = 0.75  # endpoint confirmed in source; trigger not live-confirmed (backend-data gap)
             elif trigger:
                 e = 0.4
             else:
@@ -841,7 +841,7 @@ def _score_entity(entity: dict, grounding: dict, page_inventory: dict) -> tuple[
             if match_source == "playwright_element":
                 e = 1.0
             elif match_source == "navigation_graph":
-                e = 0.5
+                e = 0.75  # L3 nav link confirmed in source; not live-confirmed (backend-data gap)
             else:
                 e = 0.0
 
@@ -853,7 +853,7 @@ def _score_entity(entity: dict, grounding: dict, page_inventory: dict) -> tuple[
             if match_source == "playwright":
                 e = 1.0
             elif match_source == "route_elements":
-                e = 0.5
+                e = 0.75  # L3 confirmed in source; L2 gap often caused by backend-data rendering
             else:
                 e = 0.0
 
