@@ -228,23 +228,32 @@ _JS_EXTRACT_ELEMENTS = """
 () => {
     const items = [];
     const seen = new Set();
-    document.querySelectorAll('input, button, select, textarea, a[href]').forEach(el => {
+    // Tags whose textContent should not be used as labels (value-bearing or option-bearing)
+    const NO_TEXT_TYPES = new Set(['input', 'select']);
+    // Native tags captured by the first querySelector — skip them in the ARIA pass
+    const NATIVE_TAGS = new Set(['input', 'button', 'select', 'textarea', 'a']);
+
+    function addEl(el, elemType, subtype) {
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
         const visible = rect.width > 0 && rect.height > 0 &&
                         style.display !== 'none' && style.visibility !== 'hidden';
         const tag = el.tagName.toLowerCase();
-        const type = el.getAttribute('type') || null;
+        const rawType = el.getAttribute('type') || null;
+        // subtypeOverride=undefined → use DOM type attr; null → no subtype; string → use it
+        const resolvedSubtype = (subtype !== undefined) ? subtype : rawType;
+
         let rawLabel = (
             el.getAttribute('aria-label') ||
             el.getAttribute('placeholder') ||
-            (tag !== 'input' && tag !== 'select' ? (el.textContent || '').trim() : '') ||
+            (!NO_TEXT_TYPES.has(elemType) ? (el.textContent || '').trim() : '') ||
             el.getAttribute('title') ||
             el.getAttribute('name') ||
             ''
         ).slice(0, 80).trim();
-        // File inputs rarely have aria-label/placeholder; fall back to sibling/parent <label>
-        if (!rawLabel && type === 'file') {
+
+        // File inputs: fall back to sibling/parent <label>
+        if (!rawLabel && rawType === 'file') {
             let labelEl = null;
             const prev = el.previousElementSibling;
             if (prev && prev.tagName.toLowerCase() === 'label') {
@@ -255,10 +264,13 @@ _JS_EXTRACT_ELEMENTS = """
             }
             if (labelEl) rawLabel = (labelEl.textContent || '').trim().replace(/:$/, '').trim().slice(0, 80);
         }
-        if (!rawLabel && tag !== 'select') return;
-        const key = tag + '|' + (type || '') + '|' + rawLabel;
+
+        if (!rawLabel && elemType !== 'select') return;
+
+        const key = elemType + '|' + (resolvedSubtype || '') + '|' + rawLabel;
         if (seen.has(key)) return;
         seen.add(key);
+
         let selector = tag;
         const id = el.id;
         if (id && /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(id)) {
@@ -267,17 +279,44 @@ _JS_EXTRACT_ELEMENTS = """
             selector = '[data-testid="' + el.getAttribute('data-testid') + '"]';
         } else if (el.getAttribute('name')) {
             selector = tag + '[name="' + el.getAttribute('name') + '"]';
-        } else if (type) {
-            selector = tag + '[type="' + type + '"]';
+        } else if (rawType) {
+            selector = tag + '[type="' + rawType + '"]';
+        } else if (el.getAttribute('role')) {
+            const r = el.getAttribute('role').replace(/"/g, '\\"');
+            const lbl = rawLabel.replace(/"/g, '\\"');
+            selector = lbl
+                ? '[role="' + r + '"][aria-label="' + lbl + '"]'
+                : '[role="' + r + '"]';
         }
-        items.push({
-            type: tag === 'a' ? 'link' : tag,
-            subtype: type,
-            label: rawLabel || null,
-            selector: selector,
-            visible: visible
+
+        items.push({ type: elemType, subtype: resolvedSubtype, label: rawLabel || null,
+                     selector: selector, visible: visible });
+    }
+
+    // Pass 1 — native interactive elements
+    document.querySelectorAll('input, button, select, textarea, a[href]').forEach(el => {
+        const tag = el.tagName.toLowerCase();
+        addEl(el, tag === 'a' ? 'link' : tag, undefined);
+    });
+
+    // Pass 2 — ARIA role-based custom components (skip native tags already captured)
+    [
+        ['button',    'button', null],
+        ['link',      'link',   null],
+        ['checkbox',  'input',  'checkbox'],
+        ['radio',     'input',  'radio'],
+        ['switch',    'input',  'checkbox'],
+        ['tab',       'button', null],
+        ['combobox',  'select', null],
+        ['searchbox', 'input',  'search'],
+        ['menuitem',  'button', null],
+    ].forEach(([role, t, st]) => {
+        document.querySelectorAll('[role="' + role + '"]').forEach(el => {
+            if (NATIVE_TAGS.has(el.tagName.toLowerCase())) return;
+            addEl(el, t, st);
         });
     });
+
     return items;
 }
 """
@@ -337,8 +376,14 @@ def _crawl_routes_sync(routes: list[str], port: int) -> tuple[list[dict], list[d
             reason: str | None = None
 
             try:
-                response = page.goto(url, wait_until="load", timeout=10_000)
-                page.wait_for_timeout(400)
+                response = page.goto(url, wait_until="load", timeout=15_000)
+                # Best-effort: wait for async data fetches to complete before snapshot.
+                # networkidle may not fire for apps with continuous polling/websockets —
+                # the inner timeout is intentionally short; we proceed with whatever rendered.
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5_000)
+                except Exception:
+                    page.wait_for_timeout(500)
             except Exception as exc:
                 reason = "timeout" if "timeout" in str(exc).lower() else "error"
             finally:
