@@ -51,7 +51,7 @@ Per-entity E() values:
 
 **Both FCom and FA output 0–1.** Both are weighted averages (∑(E×w)/∑w) — dividing by ∑weight normalises to 0–1 regardless of the maximum weight value (4 for L1a, 3 for L1b). The max weight only controls how much a single requirement pulls the average relative to others. Step 17 multiplies the final Functional Suitability score by 5 for display → 0–5 scale.
 
-State-variant nodes (labels with parentheticals like "(filtered)", "(sorted)", "(updated)") always have `primary: false` — Step 6 skips L2 route matching for them; they serve as Step 9 AC hints only.
+State-variant nodes (labels with parentheticals like "(filtered)", "(sorted)", "(updated)") must be omitted from path arrays entirely — they are UI state, not navigable routes, and are never scored. `_validate_path` strips any that slip through post-LLM.
 
 ### Functional Appropriateness (FA) — L1b vs (L2 ∪ L3)
 
@@ -339,7 +339,25 @@ Steps 6 and 7.5 execute **in parallel** after Step 5 completes. Step 7.5 reads d
 
 Step 0 reads the file tree and config file contents directly from disk — it does not receive any prior step result.
 
-**Logic:** Rule-based first — scans config files (package.json, requirements.txt, pyproject.toml, etc.), counts file extensions. LLM only called when file inspection is inconclusive.
+**Logic:** Rule-based first — scans config files (package.json, requirements.txt, pyproject.toml, etc.), counts file extensions. LLM only called when file inspection is inconclusive (`confidence == "medium"` or no rule matched).
+
+**LLM fallback — what is sent:**
+
+The zip is never forwarded. `_scan_project` walks the extracted directory (skipping `IGNORE_DIRS`: `node_modules`, `dist`, `build`, `venv`, `.git`, `target`, `vendor`, etc.) and builds three text artefacts that form the user message:
+
+| Artefact | Content | Cap |
+|---|---|---|
+| File tree | Every relative file path in the project | 600 paths |
+| Extension distribution | Top 20 file extensions by count (JSON) | 20 entries |
+| Config file contents | Raw text of any file whose name is in `CONFIG_FILES` | 5 000 chars each |
+
+`CONFIG_FILES` includes: `package.json`, `requirements.txt`, `pyproject.toml`, `setup.py`, `Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`, `build.gradle.kts`, `composer.json`, `angular.json`, `next.config.*`, `vite.config.*`, `nuxt.config.*`, `svelte.config.*`, `electron-builder.*`, `expo.json`, `app.json`, `pubspec.yaml`, `Dockerfile`, `docker-compose.yml`, `README.md`.
+
+No source code (`.tsx`, `.java`, `.py`, etc.) is ever sent. The parsed `js_deps` dict is used by the rule-based classifier only and never forwarded to the LLM.
+
+**LLM output — tool use, not free-form JSON:**
+
+`CLASSIFICATION_TOOL` defines a JSON Schema with enum-constrained fields. `tool_choice` forces the model to always call the tool. The model picks one value per field from the allowed enum; the API rejects any response that doesn't match the schema before Python sees it. Python plucks exactly 5 LLM-owned fields by name (`project_type`, `frontend_framework`, `backend_framework`, `confidence`, `reasoning`) and computes all remaining fields deterministically (`frontend_tooling`, `template_engine`, `service_layout`, `server_routes_detected`, `test_strategy`).
 
 **Output — stored at `job["step_results"]["step_0"]`:**
 ```json
@@ -847,6 +865,7 @@ Linkage (is the trigger element wired to that endpoint?) → FCor (Step 11), not
 ---
 
 ### Step 5: App Crawler — L2 Element Inventory
+**Status: COMPLETE**
 **Phase: FCom — builds L2 element inventory**
 **Tools:** Playwright, Python
 **Input:**
@@ -1120,141 +1139,34 @@ l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys_by_
 5. **FA advisory — missing L1b:** L1b items with E()=0.0, weighted by strength
 6. **FA advisory — unlinked functions:** same L2/L3 unlinked list (functions with no stated purpose, per ISO 3.1.3 "unnecessary steps")
 
-**Output:**
+**Output — stored at `job["step_results"]["step_7"]`:**
 ```json
 {
-  "functional_completeness": {
-    "score": 0.84,
-    "per_requirement": [
-      { "req_id": "REQ-001", "description": "User can log in", "e_score": 1.0, "weight": 3.0, "contribution": 3.0 }
+  "fcom": 0.84,
+  "fa": 0.71,
+  "fcom_detail": { "numerator": 8.4, "denominator": 10.0, "requirement_count": 5 },
+  "fa_detail":   { "numerator": 4.97, "denominator": 7.0,  "requirement_count": 4 },
+  "fcom_advisory": {
+    "missing_l1a": [
+      { "req_id": "OBV-003", "description": "User can edit a task", "e_score": 0.0, "weight": 3.0 }
     ],
-    "advisory": {
-      "missing_l1a": [
-        { "req_id": "OBV-003", "description": "User can edit a task", "e_score": 0.0, "gap": "Not found in L2 or L3" }
-      ],
-      "unlinked_routes": [
-        { "route": "/", "title": "Home", "note": "No L1a requirement's path[] visits this route" }
-      ],
-      "unlinked_endpoints": [
-        { "method": "GET", "path": "/api/users/{id}", "note": "No L1a requirement implies this endpoint" }
-      ]
-    }
+    "unlinked_routes": [
+      { "route": "/", "title": "Home", "note": "No L1a requirement's path[] visits this route" }
+    ],
+    "unlinked_endpoints": [
+      { "method": "GET", "path": "/api/users/{id}", "handler": "getUser", "file": "...", "note": "No L1a requirement matched this endpoint" }
+    ]
   },
-  "functional_appropriateness": {
-    "score": 0.71,
-    "per_implied": [
-      { "req_id": "GEN-008", "description": "User can filter tasks", "e_score": 1.0, "weight": 3.0, "contribution": 3.0 },
-      { "req_id": "GEN-009", "description": "User can bulk-delete tasks", "e_score": 0.0, "weight": 1.0, "contribution": 0.0 }
-    ],
-    "advisory": {
-      "missing_l1b": [
-        {
-          "req_id": "GEN-009",
-          "description": "User can bulk-delete tasks",
-          "e_score": 0.0,
-          "strength": "weak",
-          "advisory_type": "normative_gap",
-          "note": "Type A — implied by domain pattern (Step 3), not found in positive inventory"
-        }
-      ]
-    }
-  }
+  "fa_advisory": {
+    "missing_l1b": [
+      { "req_id": "GEN-009", "description": "User can bulk-delete tasks", "e_score": 0.0, "weight": 1.0, "strength": "weak" }
+    ]
+  },
+  "error": null
 }
-```
-
-`advisory_type: "normative_gap"` marks Type A advisories (L1b gaps from Step 7). Step 7.5 produces `advisory_type: "positive_grounded"` (Type B). Both are displayed together in the dashboard under FA advisory, clearly labelled by type.
 ```
 
 **Dashboard checkpoint:** FCom numeric + FA numeric + all advisories displayed together in the coverage view. First deliverable milestone — no test execution required.
-
----
-
-### Frontend Types — Steps 5–7
-
-**`types/index.ts` additions when Steps 6 and 7 are built:**
-
-**`JobStatus` union — add:**
-```typescript
-| 'step_6_running' | 'step_6_complete' | 'step_6_error'
-| 'step_7_running' | 'step_7_complete' | 'step_7_error'
-```
-
-**New interfaces:**
-```typescript
-export interface EntityScore {
-  label: string
-  type: 'node' | 'element' | 'edge'
-  primary: boolean
-  e: number | null
-  // node
-  matched_route?: string
-  evidence?: string
-  // element
-  matched_selector?: string | null
-  matched_page?: string
-  // edge (all kinds)
-  edge_kind?: 'data' | 'navigation' | 'structural'
-  skipped?: string
-  // data edge
-  matched_endpoint?: string | null
-  triggering_element_found?: boolean
-  // navigation edge
-  matched_nav_target?: string | null
-  // structural edge — no additional fields beyond triggering_element_found
-}
-
-export interface MappedRequirement {
-  req_id: string
-  description: string
-  e_score: number
-  entity_scores: EntityScore[]
-}
-
-export interface Step6Result {
-  mapped: MappedRequirement[]
-  unlinked_l2: { route: string; title: string | null; note: string }[]
-  unlinked_l3: { method?: string | null; path?: string | null; handler?: string | null; file?: string; note: string }[]
-}
-
-export interface Step7Detail {
-  numerator: number
-  denominator: number
-  requirement_count: number
-}
-
-export interface Step7Result {
-  fcom: number
-  fa: number
-  fcom_detail: Step7Detail
-  fa_detail: Step7Detail
-  unlinked_l2: Step6Result['unlinked_l2']
-  unlinked_l3: Step6Result['unlinked_l3']
-}
-```
-
-**`StepResults` — extend:**
-```typescript
-export interface StepResults {
-  // ... existing fields ...
-  step_6?: Step6Result
-  step_7?: Step7Result
-}
-```
-
-**App.tsx — terminal statuses to add:**
-```typescript
-const terminalStatuses = [
-  // ... existing ...
-  'step_6_complete', 'step_6_error',
-  'step_7_complete', 'step_7_error',
-]
-```
-
-**New components:**
-
-`MappingResult.tsx` (Step 6) — loading skeleton when `loading` prop is true; per-requirement row with `req_id` pill, description, E() score bar (≥0.8 green, 0.5–0.8 yellow, <0.5 red); expandable popdown showing `entity_scores[]` table with type badge (node/element/edge), edge_kind badge (data/navigation/structural), primary/secondary chip, E value, evidence note; collapsible unlinked L2 routes and L3 endpoints advisory sections.
-
-`ScoringResult.tsx` (Step 7) — loading skeleton when `loading` prop is true; two score panels (FCom, FA) each with large numeric score, labelled progress bar, detail line (`N requirements · X.XX / Y.YY weighted`); collapsible unlinked L2/L3 advisory lists.
 
 ---
 
@@ -1319,7 +1231,7 @@ Type B (Step 7.5, positive-grounded): "Your schema has `team_id` on the Task mod
 **Phase: FCor setup**
 **Tools:** Python, LLM (AsyncAnthropic)
 **Input:** L1a requirement list as finalised after Step 3.5 (or directly from Step 1+2 if Step 3.5 was skipped), including locked L1Cx per requirement
-**Scope:** Only generates ACs for requirements in S = { x ∈ L1a | x ∈ L3 }. Requirements with E()=0.4, 0.25, or 0.0 are skipped — their gaps are already captured in FCom advisory.
+**Scope:** Only generates ACs for requirements in S = { x ∈ L1a | x ∈ L3 }. Requirements with E()=0.4 or 0.0 are skipped — their gaps are already captured in FCom advisory.
 **Logic:** Converts each eligible L1a requirement into Given/When/Then ACs. LLM assigns sub-weights per AC that **sum to the requirement's L1Cx**. Persistence and edge cases are ACs of L1a requirements — not separate L1b items.
 **Output:**
 ```json
@@ -1416,7 +1328,7 @@ S*  = S \ { x | all ACs blocked }
 FCor = ∑(pass_i × ACw_i) / ∑ ACw_i      [i ∈ ACs of requirements in S*]
 CP  = ∑_blocked_L1Cx / ∑_all_L1Cx
 ```
-Requirements excluded from S (E()=0.4, 0.25, 0.0) do not appear in FCor — their gaps are captured in FCom.
+Requirements excluded from S (E()=0.4 or 0.0) do not appear in FCor — their gaps are captured in FCom.
 **Output:** FCor ratio + per-requirement AC breakdown + CP confidence penalty
 
 ---

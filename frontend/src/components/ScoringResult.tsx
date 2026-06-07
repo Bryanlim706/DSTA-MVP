@@ -166,7 +166,6 @@ export default function ScoringResult({ result, loading }: Props) {
       {/* Score panels */}
       <div className="flex gap-4">
         <ScorePanel label="Functional Completeness" score={result.fcom} detail={result.fcom_detail} />
-        <ScorePanel label="Functional Appropriateness" score={result.fa} detail={result.fa_detail} />
       </div>
 
       {/* FCom advisory */}
@@ -191,23 +190,39 @@ export default function ScoringResult({ result, loading }: Props) {
         </div>
       )}
 
-      {/* FA advisory */}
-      {hasFaAdvisory && (
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setShowFaAdvisory(o => !o)}
-            className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
-          >
-            <span className="text-xs font-semibold text-gray-700">FA advisory</span>
-            <span className="text-xs text-gray-400">{showFaAdvisory ? '▲' : '▼'}</span>
-          </button>
-          {showFaAdvisory && (
-            <div className="px-4 py-4">
-              <AdvisoryTable items={result.fa_advisory.missing_l1b} label="Missing L1b implied functions (E < 50%)" />
+      {/* FA advisory — contains the FA score */}
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <button
+          onClick={() => setShowFaAdvisory(o => !o)}
+          className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+        >
+          <span className="text-xs font-semibold text-gray-700">Functional Appropriateness</span>
+          <span className="text-xs text-gray-400">{showFaAdvisory ? '▲' : '▼'}</span>
+        </button>
+        {showFaAdvisory && (
+          <div className="px-4 py-4 space-y-4">
+            {/* FA score inline */}
+            <div className="bg-gray-50 rounded-lg p-4">
+              <p className={`text-3xl font-bold tabular-nums ${scoreColor(result.fa)}`}>
+                {(result.fa * 100).toFixed(0)}%
+              </p>
+              <div className="mt-2 h-2 rounded-full bg-gray-200 overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${barColor(result.fa)}`}
+                  style={{ width: `${Math.round(result.fa * 100)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">
+                {result.fa_detail.requirement_count} requirement{result.fa_detail.requirement_count !== 1 ? 's' : ''} ·{' '}
+                {result.fa_detail.numerator.toFixed(2)} / {result.fa_detail.denominator.toFixed(2)} weighted
+              </p>
             </div>
-          )}
-        </div>
-      )}
+            {hasFaAdvisory && (
+              <AdvisoryTable items={result.fa_advisory.missing_l1b} label="Missing L1b implied functions (E < 50%)" />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

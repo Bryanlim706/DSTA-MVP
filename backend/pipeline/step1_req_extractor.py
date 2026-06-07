@@ -75,7 +75,7 @@ PRIMARY ENTITY RULES:
 - New page access (first function to assert a page exists): page node + entry edge are both primary.
 - Feature functions (add, filter, edit, delete on an existing page): the element(s) and submit edge are primary; the containing page node is primary: false if the page is stated by another function.
 - Navigation cross-links: the edge is primary; surrounding nodes are primary: false.
-- State-variant destination nodes ("Task List Page (filtered)", "Task List Page (updated)"): ALWAYS primary: false — they are UI state, not navigable routes.
+- State-variant destination nodes ("Task List Page (filtered)", "Task List Page (updated)"): OMIT them entirely — they are not scored. End the path at the last interaction (submit edge or element). Never append a result-state or updated-state node.
 
 VAGUE REQUIREMENTS:
 If the text is too broad to construct a specific path (e.g. "users can manage their tasks"), set vague: true and use a minimal path with one node only. Step 3 will decompose it.
@@ -95,12 +95,11 @@ path: [
   {"type": "node",    "label": "Dashboard",          "primary": true}
 ]
 
-"The add-task button opens a form to create a new task" — element + edge primary; page context:
+"The add-task button opens a form to create a new task" — element + edge primary; page context (no trailing state-variant node):
 path: [
-  {"type": "node",    "label": "Task List Page",           "primary": false},
-  {"type": "element", "label": "add task form",            "primary": true, "ui_node": "Task List Page"},
-  {"type": "edge",    "label": "submit new task",          "primary": true, "from": "Task List Page", "to": "Task List Page"},
-  {"type": "node",    "label": "Task List Page (updated)", "primary": false}
+  {"type": "node",    "label": "Task List Page", "primary": false},
+  {"type": "element", "label": "add task form",  "primary": true, "ui_node": "Task List Page"},
+  {"type": "edge",    "label": "submit new task", "primary": true, "from": "Task List Page", "to": "Task List Page"}
 ]
 
 "Users can manage their tasks" — vague, minimal path:

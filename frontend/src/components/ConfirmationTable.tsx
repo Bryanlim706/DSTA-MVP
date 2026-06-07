@@ -39,6 +39,7 @@ function toConfirmed(
     testable?: boolean
     source?: string
     unpacks?: string | null
+    source_quote?: string | null
   },
   promoted = false,
 ): ConfirmedRequirement {
@@ -56,6 +57,8 @@ function toConfirmed(
     source: req.source ?? req.tag,
     promoted,
     unpacks: req.unpacks ?? null,
+    depends_on: [],
+    source_quote: req.source_quote ?? null,
   }
 }
 
@@ -126,11 +129,23 @@ function IncludedRow({
         </td>
         <td className="px-4 py-2 text-xs text-gray-400 text-right">{expanded ? '▲' : '▼'}</td>
       </tr>
-      {expanded && req.path.length > 0 && (
+      {expanded && (req.path.length > 0 || req.source_quote) && (
         <tr className="bg-gray-50 border-t border-gray-100">
-          <td colSpan={7} className="px-4 pb-3 pt-1">
-            <p className="text-xs text-gray-500 font-medium mb-1">Traversal path</p>
-            <PathDisplay path={req.path} />
+          <td colSpan={7} className="px-4 pb-3 pt-1 space-y-2">
+            {req.path.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-500 font-medium mb-1">Traversal path</p>
+                <PathDisplay path={req.path} />
+              </div>
+            )}
+            {req.source_quote && (
+              <div>
+                <p className="text-xs text-gray-500 font-medium mb-0.5">Source quote</p>
+                <blockquote className="text-xs text-gray-600 italic border-l-2 border-gray-300 pl-2 leading-relaxed">
+                  "{req.source_quote}"
+                </blockquote>
+              </div>
+            )}
           </td>
         </tr>
       )}
@@ -276,6 +291,8 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
       functional_area: newArea.trim() || undefined,
       testable: true,
       source: 'user_added',
+      depends_on: [],
+      source_quote: null,
     }
     setIncluded(prev => new Map(prev).set(id, req))
     setNewDesc('')

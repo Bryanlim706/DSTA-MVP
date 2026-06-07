@@ -51,4 +51,10 @@ def _validate_path(path) -> list | None:
             continue
         entity.setdefault("primary", True)
         clean.append(entity)
+    # Strip trailing state-variant nodes (e.g. "Task List Page (updated)") —
+    # they are UI state, not navigable routes, and are never scored.
+    while clean and clean[-1].get("type") == "node" and _is_state_variant(
+        str(clean[-1].get("label", ""))
+    ):
+        clean.pop()
     return clean if clean else None

@@ -103,7 +103,7 @@ PATH CONSTRUCTION RULES (both passes):
    - SOP element + submit edge: both element and edge are primary
    - New page introductions: entry edge + destination page = both primary; exit edge = primary: false
    - Multi-hop flows: all entities primary
-   - State-variant destination nodes ("Task List Page (filtered)"): ALWAYS primary: false
+   - State-variant or result-state trailing entities: OMIT entirely. Do NOT append a node like "Filtered Employee List" or "Employee List Page (updated)", and do NOT append a trailing element like "filtered employee list", "search results", or "reordered employee list". For same-page interactions (filter, search, sort, edit, delete), the path terminates at the last interaction element or submit edge — never at a post-interaction result state.
 
 ---
 
@@ -303,9 +303,6 @@ def _validate_and_normalise(
             item["strength"] = "weak"
             item["weight"] = 1.0
             item.pop("priority", None)
-
-        # Remove old field if LLM still emits it
-        item.pop("l1_recommendation", None)
 
         item["tag"] = "generated"
         item["source"] = "generated"

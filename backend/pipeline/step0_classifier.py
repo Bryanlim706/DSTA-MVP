@@ -369,24 +369,57 @@ def _get_test_strategy(project_type: str, backend_framework: str | None) -> dict
 
 # --- LLM fallback prompt ---
 
-LLM_SYSTEM_PROMPT = """You are a software project classifier. Given a project file tree and key config file contents, classify the project.
-
-Return ONLY a valid JSON object — no markdown fences, no explanation, just raw JSON.
-
-Use exactly this structure:
-{
-  "project_type": "<full_stack_web_app | full_stack_js | frontend_only | backend_api_only | cli_tool | library | static_site | monorepo | electron_app | mobile_app | unknown>",
-  "frontend_framework": "<React | Vue | Angular | Svelte | Next.js | Nuxt | SvelteKit | Remix | Gatsby | Astro | Preact | SolidJS | Qwik | HTMX | Alpine.js | Ember | Lit | React Native | Expo | null>",
-  "backend_framework": "<FastAPI | Flask | Django | Litestar | Starlette | aiohttp | Tornado | Express | NestJS | Fastify | Koa | Hapi | Spring Boot | Laravel | Rails | Phoenix | ASP.NET | Gin | Fiber | Echo | Actix | Electron | null>",
-  "confidence": "<high | medium | low>",
-  "reasoning": "<1-2 sentences: which specific signals led to this classification>"
-}
+LLM_SYSTEM_PROMPT = """You are a software project classifier. Given a project file tree and key config file contents, classify the project using the classify_project tool.
 
 Rules:
 - electron_app: electron in dependencies or main/preload/renderer process structure. Set backend_framework to "Electron".
 - mobile_app: React Native, Expo, or Flutter project.
-- full_stack_web_app: frontend framework + Python/Go/Java/Ruby backend.
+- full_stack_web_app: frontend framework + non-JS backend, including Python, Go, Java, Ruby, PHP, C#, Elixir, or Rust backend frameworks.
 - full_stack_js: frontend framework + Node.js backend framework."""
+
+CLASSIFICATION_TOOL: dict = {
+    "name": "classify_project",
+    "description": "Return the classification for the software project.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "project_type": {
+                "type": "string",
+                "enum": [
+                    "full_stack_web_app", "full_stack_js", "frontend_only",
+                    "backend_api_only", "cli_tool", "library", "static_site",
+                    "monorepo", "electron_app", "mobile_app", "unknown",
+                ],
+            },
+            "frontend_framework": {
+                "type": ["string", "null"],
+                "enum": [
+                    "React", "Vue", "Angular", "Svelte", "Next.js", "Nuxt", "SvelteKit",
+                    "Remix", "Gatsby", "Astro", "Preact", "SolidJS", "Qwik", "HTMX",
+                    "Alpine.js", "Ember", "Lit", "React Native", "Expo", None,
+                ],
+            },
+            "backend_framework": {
+                "type": ["string", "null"],
+                "enum": [
+                    "FastAPI", "Flask", "Django", "Litestar", "Starlette", "aiohttp",
+                    "Tornado", "Express", "NestJS", "Fastify", "Koa", "Hapi",
+                    "Spring Boot", "Laravel", "Rails", "Phoenix", "ASP.NET",
+                    "Gin", "Fiber", "Echo", "Actix", "Electron", None,
+                ],
+            },
+            "confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+            },
+            "reasoning": {
+                "type": "string",
+                "description": "1-2 sentences: which specific signals led to this classification",
+            },
+        },
+        "required": ["project_type", "frontend_framework", "backend_framework", "confidence", "reasoning"],
+    },
+}
 
 
 # --- Helpers ---
@@ -579,7 +612,7 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
     is_electron = "electron" in js_deps
     frontend_fw = _detect_frontend(js_deps)
     js_deps_prod = scan.get("js_deps_prod", js_deps)
-    backend_fw_js = _detect_backend_js(js_deps_prod)
+    D_detect_backend_js(js_deps_prod)
 
     py_config_files = [
         p for pattern in ("requirements*.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile")
@@ -832,15 +865,6 @@ def _build_llm_message(scan: dict) -> str:
     )
 
 
-def _parse_llm_response(raw: str) -> dict:
-    text = raw.strip()
-    if "```json" in text:
-        text = text.split("```json", 1)[1].split("```", 1)[0].strip()
-    elif "```" in text:
-        text = text.split("```", 1)[1].split("```", 1)[0].strip()
-    return json.loads(text)
-
-
 _LLM_FALLBACK = {
     "project_type": "unknown",
     "frontend_framework": None,
@@ -860,41 +884,55 @@ async def _classify_by_llm(scan: dict, client: anthropic.AsyncAnthropic) -> dict
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,
         system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+        tools=[CLASSIFICATION_TOOL],
+        tool_choice={"type": "tool", "name": "classify_project"},
         messages=[{"role": "user", "content": _build_llm_message(scan)}],
     )
     try:
-        parsed = _parse_llm_response(response.content[0].text)
-        if not isinstance(parsed, dict):
-            raise ValueError("LLM returned non-object JSON")
-        parsed.setdefault("project_type", "unknown")
-        parsed.setdefault("frontend_framework", None)
-        parsed.setdefault("backend_framework", None)
-        for field in ("frontend_framework", "backend_framework"):
-            if parsed.get(field) == "null":
-                parsed[field] = None
-        parsed.setdefault("confidence", "low")
-        parsed.setdefault("reasoning", "No reasoning provided.")
-        parsed["test_strategy"] = _get_test_strategy(parsed["project_type"], parsed.get("backend_framework"))
+        tool_block = response.content[0]
+        if tool_block.type != "tool_use":
+            raise ValueError("Expected tool_use block")
+        raw = tool_block.input
+        if not isinstance(raw, dict):
+            raise ValueError("Tool input is not a dict")
+
+        # Pluck only the LLM-owned fields by name into a controlled dict
+        project_type = raw["project_type"]
+        frontend_fw = raw.get("frontend_framework")
+        backend_framework = raw.get("backend_framework")
+        confidence = raw.get("confidence", "low")
+        reasoning = raw.get("reasoning", "No reasoning provided.")
+
+        # Compute all remaining fields deterministically in Python
         jbc = _java_build_content(scan.get("config_files", {}))
-        parsed["frontend_tooling"] = _detect_frontend_tooling(scan["js_deps"], scan.get("file_tree", []))
-        parsed["template_engine"] = _detect_template_engine(scan.get("file_tree", []), jbc)
-        if parsed.get("frontend_framework") in _SPA_FRAMEWORKS:
-            parsed["template_engine"] = None
+        frontend_tooling = _detect_frontend_tooling(scan["js_deps"], scan.get("file_tree", []))
+        template_engine = _detect_template_engine(scan.get("file_tree", []), jbc)
+        if frontend_fw in _SPA_FRAMEWORKS:
+            template_engine = None
         elif (
-            parsed["template_engine"] is None
-            and parsed.get("project_type") == "full_stack_web_app"
-            and parsed.get("backend_framework") in _PYTHON_JINJA2_BACKENDS
+            template_engine is None
+            and project_type == "full_stack_web_app"
+            and backend_framework in _PYTHON_JINJA2_BACKENDS
             and _has_html_views(scan.get("file_tree", []))
         ):
-            parsed["template_engine"] = "Jinja2"
-        parsed["service_layout"] = _detect_service_layout(
-            scan.get("file_tree", []), parsed["project_type"], parsed["template_engine"],
-            parsed.get("frontend_framework"),
+            template_engine = "Jinja2"
+        service_layout = _detect_service_layout(
+            scan.get("file_tree", []), project_type, template_engine, frontend_fw,
         )
-        parsed["server_routes_detected"] = _detect_server_routes(
-            parsed.get("frontend_framework"), scan.get("file_tree", [])
-        )
-        return parsed
+        server_routes = _detect_server_routes(frontend_fw, scan.get("file_tree", []))
+
+        return {
+            "project_type": project_type,
+            "frontend_framework": frontend_fw,
+            "frontend_tooling": frontend_tooling,
+            "backend_framework": backend_framework,
+            "template_engine": template_engine,
+            "service_layout": service_layout,
+            "server_routes_detected": server_routes,
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "test_strategy": _get_test_strategy(project_type, backend_framework),
+        }
     except Exception:
         return dict(_LLM_FALLBACK)
 

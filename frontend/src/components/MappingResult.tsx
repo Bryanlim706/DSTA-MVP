@@ -91,8 +91,8 @@ function RequirementRow({ req }: { req: MappedRequirement }) {
               style={{ width: `${Math.round(e * 100)}%` }}
             />
           </div>
-          <span className={`text-xs font-semibold tabular-nums w-8 text-right ${eColor(e)}`}>
-            {(e * 100).toFixed(0)}%
+          <span className={`text-sm font-semibold w-6 text-center ${e >= 0.8 ? 'text-green-700' : 'text-red-600'}`}>
+            {e >= 0.8 ? '✓' : '✗'}
           </span>
         </div>
         <span className="text-xs text-gray-400">{open ? '▲' : '▼'}</span>
@@ -100,6 +100,11 @@ function RequirementRow({ req }: { req: MappedRequirement }) {
 
       {open && (
         <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-3">
+          {e < 0.8 && (
+            <p className="text-xs font-semibold tabular-nums text-red-600">
+              E-score: {(e * 100).toFixed(0)}%
+            </p>
+          )}
           <div>
             <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Entity scores</p>
             <div className="space-y-0.5">

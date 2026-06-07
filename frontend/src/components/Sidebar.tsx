@@ -19,6 +19,7 @@ const GROUPS: { id: string; label: string; steps: Step[] }[] = [
       { id: 5,   label: 'UI/API Inventory' },
       { id: 6,   label: 'Mapper' },
       { id: 7,   label: 'Completeness + Appropriateness' },
+      { id: 7.5, label: 'FA Advisor', sub: true },
     ],
   },
   {
@@ -39,7 +40,7 @@ const GROUPS: { id: string; label: string; steps: Step[] }[] = [
   },
 ]
 
-const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4, 5, 6, 7])
+const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4, 5, 6, 7, 7.5])
 
 // Ordered pipeline statuses — a step is "complete" when the job status is at or past it
 const STATUS_ORDER = [
@@ -48,6 +49,7 @@ const STATUS_ORDER = [
   'step_5_running', 'step_5_complete', 'step_5_error',
   'step_6_running', 'step_6_complete', 'step_6_error',
   'step_7_running', 'step_7_complete', 'step_7_error',
+  'step_7_5_running', 'step_7_5_complete', 'step_7_5_error',
 ]
 
 function statusIndex(s?: string): number {
@@ -63,6 +65,7 @@ function activeStepId(stage: Stage, currentStep?: number, jobStatus?: string): n
   if (jobStatus === 'step_5_running') return 5
   if (jobStatus === 'step_6_running') return 6
   if (jobStatus === 'step_7_running') return 7
+  if (jobStatus === 'step_7_5_running') return 7.5
   return -99
 }
 
@@ -75,10 +78,11 @@ function isComplete(id: number, stage: Stage, currentStep?: number, jobStatus?: 
   if (id === -1 || id === 0 || id === 1 || id === 2 || id === 3 || id === 3.5) return true
 
   const si = statusIndex(jobStatus)
-  if (id === 4) return si >= statusIndex('step_4_complete')
-  if (id === 5) return si >= statusIndex('step_5_complete')
-  if (id === 6) return si >= statusIndex('step_6_complete')
-  if (id === 7) return si >= statusIndex('step_7_complete')
+  if (id === 4)   return si >= statusIndex('step_4_complete')
+  if (id === 5)   return si >= statusIndex('step_5_complete')
+  if (id === 6)   return si >= statusIndex('step_6_complete')
+  if (id === 7)   return si >= statusIndex('step_7_complete')
+  if (id === 7.5) return si >= statusIndex('step_7_5_complete')
   return false
 }
 
