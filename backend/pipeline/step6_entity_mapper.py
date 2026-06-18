@@ -37,13 +37,14 @@ edge with edge_kind "structural":
   {"entity_index": N, "type": "edge", "edge_kind": "structural", "trigger_element_label": "label" | null, "match_source": "playwright" | "route_elements" | null}
 
 Matching rules:
-1. Match items present in the inventory. Set null only when no reasonable match exists anywhere in the inventory.
+1. Default to null. Match only when you are confident the inventory item represents the same UI element as the path entity. A single shared generic noun (product, user, item, task, order, name) is NOT sufficient — require meaningful semantic equivalence: same type of UI control AND same purpose.
 2. node: Match the label to a route path using BOTH the route path AND its element content listed under "Available routes". Route paths are technical names; requirement labels are human-facing names that often differ significantly. Use element content as the primary evidence when route names are ambiguous. Examples: "Employee List Page" → "/search" if that route has employee-filter inputs; "Product Detail" → "/products/:id" (dynamic); "Home" → "/"; "Login Page" → "/login". Prefer the route whose element content best matches the expected page over a literal name match.
-3. element: after resolving a nearby node entity, search that route's element inventory for the best label match. Copy the inventory source label ("playwright" or "route_elements") into match_source.
+3. element: after resolving a nearby node entity, find that route's element in the inventory. Match only when the entity label and the inventory label describe the same UI control — same type (input, button, select) and same purpose. A search input is not a submit button. A navigation link is not a form field.
 4. edge/data: match to implementation_units using the edge label to infer HTTP verb (submit/add/create → POST, delete/remove → DELETE, update/edit/save → PATCH or PUT). Return "METHOD /path" format.
 5. edge/navigation: check if a rendered link or button in the element inventory navigates to a matching target route → "playwright_element"; otherwise check the static navigation_graph → "navigation_graph".
 6. edge/structural: find a triggering element (filter input, search box, sort button, etc.) in the element inventory. Copy the inventory source into match_source.
-7. Always output exactly N objects, one per entity, maintaining index order."""
+7. Always output exactly N objects, one per entity, maintaining index order.
+8. Display-only entities — statistics panels, count badges, summary info, read-only text, charts, progress indicators, data tables showing fetched content — have no interactive counterpart in the element inventory. Return null for these. Never match a display entity to a navigation link, button, or form input just because they share a word."""
 
 
 def _classify_edge_kind(label: str) -> str:
@@ -799,7 +800,7 @@ def _score_entity(entity: dict, grounding: dict, page_inventory: dict) -> tuple[
     elif etype == "element":
         matched_label = grounding.get("matched_element_label")
         # Resolve authoritative source: if matched_label is in the playwright DOM → 1.0,
-        # if only in route_elements merge → 0.5, regardless of what the LLM reported.
+        # if only in route_elements merge → 0.75, regardless of what the LLM reported.
         if matched_label:
             match_source = _resolve_element_source(matched_label, page_inventory)
         else:

@@ -873,13 +873,25 @@ def _shallow_component_imports(component_rel: str, root: Path) -> list[str]:
 
 def _expand_with_shallow_imports(route_files: dict[str, list[str]], root: Path) -> None:
     """Expand each route's file list with 1-level-deep local imports.
-    Ensures Step 5 static fallback sees child components (forms, modals, layout) not just the page root."""
-    for files in route_files.values():
+    Ensures Step 5 static fallback sees child components (forms, modals, layout) not just the page root.
+    Route-specific component files (already assigned to another route) are never injected into this route —
+    prevents hub files like App.jsx from spreading UpdateProduct.jsx into /add_product's element inventory."""
+    # Build map: file → set of routes that already own it (pre-expansion snapshot)
+    route_assigned: dict[str, set[str]] = {}
+    for route, files in route_files.items():
+        for f in files:
+            route_assigned.setdefault(f, set()).add(route)
+
+    for route, files in route_files.items():
         existing = set(files)
         additions: list[str] = []
         for rel in list(files):
             for child in _shallow_component_imports(rel, root):
                 if child not in existing:
+                    # Skip if this child is already a primary component of a *different* route
+                    other_routes = route_assigned.get(child, set()) - {route}
+                    if other_routes:
+                        continue
                     existing.add(child)
                     additions.append(child)
         files.extend(additions)
@@ -1156,6 +1168,9 @@ def _build_implementation_units(
 
 _STATIC_EXTS = {".tsx", ".jsx", ".ts", ".js", ".html", ".jinja2", ".j2", ".erb", ".ejs"}
 
+# React controlled-input labels like "product.name" from value={product.name} — not visible UI text.
+_DOT_LABEL_RE = re.compile(r"^\w+\.\w+")
+
 _JSX_INPUT_RE = re.compile(
     r"""<(input|textarea|select)\b((?:[^>{}]|\{(?:[^{}]|\{[^{}]*\})*\})*?)(?:/>|>)""",
     re.IGNORECASE | re.DOTALL,
@@ -1250,6 +1265,8 @@ def _extract_route_elements(
             except Exception:
                 continue
             for el in _elements_from_text(text):
+                if _DOT_LABEL_RE.match(el.get("label", "")):
+                    continue  # Skip React state-variable labels like product.name
                 key = (el["label"], el["subtype"])
                 if key not in seen:
                     seen.add(key)
