@@ -294,6 +294,31 @@ export interface Step75Result {
   error: string | null
 }
 
+export interface Step11TestResult {
+  req_id: string
+  ac_id: string
+  result: 'pass' | 'fail' | 'blocked' | 'untestable' | 'flaky'
+  reason: string | null
+  duration_ms: number | null
+}
+
+export interface Step11Result {
+  boot_status: 'success' | 'partial' | 'boot_failed'
+  backend_url: string | null
+  frontend_url: string | null
+  backend_accessible: boolean
+  frontend_accessible: boolean
+  spring_profile_used: string | null
+  h2_dep_found: boolean
+  db_type: 'mysql' | 'postgresql' | 'mariadb' | null
+  build_tool: 'maven' | 'gradle' | null
+  frontend_type: 'vite' | 'cra' | 'angular' | 'nextjs' | 'generic' | null
+  build_time_s: number | null
+  boot_time_s: number | null
+  test_results: Step11TestResult[]
+  error: string | null
+}
+
 export interface StepResults {
   step_0?: Step0Result
   step_1?: Step1Result
@@ -305,6 +330,7 @@ export interface StepResults {
   step_6?: Step6Result
   step_7?: Step7Result
   step_7_5?: Step75Result
+  step_11?: Step11Result
 }
 
 export type JobStatus =
@@ -329,6 +355,9 @@ export type JobStatus =
   | 'step_7_5_running'
   | 'step_7_5_complete'
   | 'step_7_5_error'
+  | 'step_11_running'
+  | 'step_11_complete'
+  | 'step_11_error'
   | 'complete'
   | 'error'
 
