@@ -19,12 +19,15 @@ async def upload_project(
     request: Request,
     background_tasks: BackgroundTasks,
     project_zip: UploadFile = File(...),
-    requirements: str = Form(...),
+    requirements: str = Form(""),
+    use_requirements_box: bool = Form(True),
+    use_readme: bool = Form(True),
+    use_spec_files: bool = Form(False),
 ):
     if not project_zip.filename or not project_zip.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="File must be a .zip archive")
-    if not requirements.strip():
-        raise HTTPException(status_code=400, detail="Requirements text is required")
+    if not use_requirements_box and not use_readme and not use_spec_files:
+        raise HTTPException(status_code=400, detail="At least one input source must be selected")
 
     job_id = str(uuid.uuid4())
     job_dir = UPLOAD_DIR / job_id
@@ -40,6 +43,9 @@ async def upload_project(
             "zip_path": str(zip_path),
             "requirements_text": requirements.strip(),
             "extracted_path": str(job_dir / "extracted"),
+            "use_requirements_box": use_requirements_box,
+            "use_readme": use_readme,
+            "use_spec_files": use_spec_files,
         },
     )
 
@@ -65,7 +71,10 @@ async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
 
         job = get_job(job_id)
         step1_result = await step1_req_extractor.run(
-            job["requirements_text"], extract_to, client
+            job["requirements_text"], extract_to, client,
+            use_requirements_box=job.get("use_requirements_box", True),
+            use_readme=job.get("use_readme", True),
+            use_spec_files=job.get("use_spec_files", False),
         )
         add_step_result(job_id, "step_1", step1_result)
         update_job(job_id, {"status": "running", "current_step": 2})

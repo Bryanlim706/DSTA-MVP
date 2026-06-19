@@ -43,7 +43,7 @@ Before extracting any item, ask: "Does this text describe a goal a user can dire
 YES → extract as a function.
 NO → skip entirely.
 
-Rejects: backend subjects (app.py, database, server), quality attributes (responsive, secure, accessible, performant), automatic behaviors the user cannot directly invoke, system reactions ("X happens when Y" or "system must X when Y"). If an item cannot be described without a conditional, skip it.
+Rejects: backend subjects (app.py, database, server), quality attributes (responsive, secure, accessible, performant), automatic behaviors the user cannot directly invoke, pure system reactions with no user-facing trigger ("X happens automatically when Y"). Role conditions ("Admins can edit products") and trigger phrasings ("click edit to modify") are still user goals — extract them.
 
 ---
 
@@ -210,7 +210,9 @@ def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str], int]:
 
 
 def _build_user_message(requirements_text: str, spec_docs: dict[str, str]) -> str:
-    parts = [f"=== USER REQUIREMENTS ===\n{requirements_text}"]
+    parts = []
+    if requirements_text:
+        parts.append(f"=== USER REQUIREMENTS ===\n{requirements_text}")
     for label, content in spec_docs.items():
         parts.append(f"=== {label} ===\n{content}")
     parts.append("Extract all explicitly stated functional requirements as functions with paths.")
@@ -272,8 +274,11 @@ def _validate_and_normalise(
 
         path = _validate_path(item.get("path"))
         if path is None:
-            dropped += 1
-            continue
+            # Don't drop — fall back to a single vague node so the requirement survives
+            desc = str(item.get("description", "")).strip()
+            label = desc.removeprefix("User can ").removeprefix("System must ").strip() or "Unknown"
+            path = [{"type": "node", "label": label, "primary": True}]
+            item["vague"] = True
         item["path"] = path
 
         item["vague"] = bool(item.get("vague", False))
@@ -301,17 +306,30 @@ async def run(
     requirements_text: str,
     extract_to: Path,
     client: anthropic.AsyncAnthropic,
+    use_requirements_box: bool = True,
+    use_readme: bool = True,
+    use_spec_files: bool = False,
 ) -> dict:
     model = "claude-haiku-4-5-20251001"
     spec_docs: dict[str, str] = {}
     truncated_docs: list[str] = []
     excluded_docs_count: int = 0
 
-    try:
-        root = _find_project_root(extract_to)
-        spec_docs, truncated_docs, excluded_docs_count = _find_spec_docs(root)
-    except Exception:
-        pass
+    if use_readme or use_spec_files:
+        try:
+            root = _find_project_root(extract_to)
+            all_docs, truncated_docs, excluded_docs_count = _find_spec_docs(root)
+            for key, content in all_docs.items():
+                name_lower = Path(key).name.lower()
+                is_readme = name_lower in README_NAMES
+                if is_readme and use_readme:
+                    spec_docs[key] = content
+                elif not is_readme and use_spec_files:
+                    spec_docs[key] = content
+        except Exception:
+            pass
+
+    req_text = requirements_text if use_requirements_box else ""
 
     last_exc = None
     project_summary = ""
@@ -321,12 +339,12 @@ async def run(
         try:
             response = await client.messages.create(
                 model=model,
-                max_tokens=8000,
+                max_tokens=16000,
                 system=[{"type": "text", "text": LLM_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": _build_user_message(requirements_text, spec_docs)}],
+                messages=[{"role": "user", "content": _build_user_message(req_text, spec_docs)}],
             )
             raw_items, project_summary = _parse_llm_response(response.content[0].text)
-            requirements, dropped = _validate_and_normalise(raw_items, requirements_text, spec_docs)
+            requirements, dropped = _validate_and_normalise(raw_items, req_text, spec_docs)
             break
         except anthropic.APIStatusError as exc:
             last_exc = exc

@@ -13,6 +13,17 @@ export default function UploadPage({ onUploadComplete }: Props) {
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const [useRequirementsBox, setUseRequirementsBox] = useState(false)
+  const [useReadme, setUseReadme] = useState(true)
+  const [useSpecFiles, setUseSpecFiles] = useState(false)
+
+  function handleRequirementsChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const val = e.target.value
+    setRequirements(val)
+    if (val.trim().length > 0) setUseRequirementsBox(true)
+    else setUseRequirementsBox(false)
+  }
+
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setDragOver(false)
@@ -36,12 +47,15 @@ export default function UploadPage({ onUploadComplete }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!zipFile) return setError('Please select a zip file')
-    if (!requirements.trim()) return setError('Please enter the requirements')
 
     setUploading(true)
     setError(null)
     try {
-      const jobId = await uploadProject(zipFile, requirements)
+      const jobId = await uploadProject(zipFile, requirements, {
+        useRequirementsBox,
+        useReadme,
+        useSpecFiles,
+      })
       onUploadComplete(jobId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
@@ -104,18 +118,42 @@ export default function UploadPage({ onUploadComplete }: Props) {
 
           {/* Requirements */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Requirements
-              <span className="ml-2 text-xs font-normal text-gray-400">
-                README, REQUIREMENTS.md and spec docs in your zip are read automatically
-              </span>
+            <p className="text-sm font-medium text-gray-700 mb-2">
+              Project requirements are found in
+            </p>
+            <div className="mb-3 flex gap-5">
+              {([
+                { id: 'src-readme', label: 'README.md',        value: useReadme,    setter: setUseReadme },
+                { id: 'src-spec',   label: 'Other spec files', value: useSpecFiles, setter: setUseSpecFiles },
+              ] as const).map(({ id, label, value, setter }) => (
+                <label key={id} className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={value}
+                    onChange={(e) => setter(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-500">{label}</span>
+                </label>
+              ))}
+            </div>
+            <label className="mt-5 mb-2 flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={useRequirementsBox}
+                onChange={(e) => setUseRequirementsBox(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-500">Requirements box</span>
             </label>
             <textarea
               value={requirements}
-              onChange={(e) => setRequirements(e.target.value)}
-              placeholder="Add any requirements not already covered in your zip (e.g. user stories, acceptance criteria, or a plain description of intended functionality). Leave blank if your zip already contains a complete requirements document."
+              onChange={handleRequirementsChange}
+              placeholder="Paste requirements, user stories, or a plain description of intended functionality. Leave blank to rely on docs in the zip."
               rows={8}
-              className="w-full border border-gray-300 rounded-lg px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              className={`w-full border border-gray-300 rounded-lg px-4 py-3 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-opacity ${
+                useRequirementsBox ? 'text-gray-900 opacity-100' : 'text-gray-400 opacity-40'
+              }`}
             />
           </div>
 

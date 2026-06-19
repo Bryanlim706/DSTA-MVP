@@ -2,10 +2,21 @@ import type { ConfirmedRequirement, Job } from '../types'
 
 const API_BASE = 'http://localhost:8000/api'
 
-export async function uploadProject(zipFile: File, requirements: string): Promise<string> {
+export async function uploadProject(
+  zipFile: File,
+  requirements: string,
+  sources: { useRequirementsBox: boolean; useReadme: boolean; useSpecFiles: boolean } = {
+    useRequirementsBox: true,
+    useReadme: true,
+    useSpecFiles: false,
+  },
+): Promise<string> {
   const form = new FormData()
   form.append('project_zip', zipFile)
   form.append('requirements', requirements)
+  form.append('use_requirements_box', String(sources.useRequirementsBox))
+  form.append('use_readme', String(sources.useReadme))
+  form.append('use_spec_files', String(sources.useSpecFiles))
 
   const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: form })
   if (!res.ok) {
@@ -51,6 +62,22 @@ export async function pollJob(
   }
 
   throw new Error('Timed out waiting for analysis to complete')
+}
+
+export async function triggerSandbox(jobId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/sandbox`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Sandbox trigger failed')
+  }
+}
+
+export async function stopSandbox(jobId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/sandbox/stop`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Sandbox stop failed')
+  }
 }
 
 export async function confirmRequirements(
