@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import type { Step11Result } from '../types'
+import { stopSandbox } from '../api/client'
 
 const BOOT_STATUS_CONFIG = {
   success:    { label: 'Booted successfully', cls: 'bg-green-100 text-green-700 border-green-200' },
@@ -43,10 +45,27 @@ function ServiceRow({ name, url, accessible }: { name: string; url: string | nul
 export default function SandboxResult({
   result,
   loading,
+  jobId,
 }: {
   result: Step11Result | null
   loading: boolean
+  jobId: string
 }) {
+  const [tearingDown, setTearingDown] = useState(false)
+  const [tornDown, setTornDown] = useState(false)
+
+  const handleTearDown = async () => {
+    setTearingDown(true)
+    try {
+      await stopSandbox(jobId)
+      setTornDown(true)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Tear down failed')
+    } finally {
+      setTearingDown(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-5">
@@ -73,7 +92,18 @@ export default function SandboxResult({
           <h3 className="text-sm font-semibold text-gray-900">Step 11 — Test Sandbox</h3>
           <p className="text-xs text-gray-400 mt-0.5">Docker boot · Spring Boot + React (Vite / CRA / Angular / Next.js)</p>
         </div>
-        <Chip label={statusCfg.label} color={statusCfg.cls} />
+        <div className="flex items-center gap-2">
+          <Chip label={statusCfg.label} color={statusCfg.cls} />
+          {result.boot_status !== 'boot_failed' && (
+            <button
+              onClick={handleTearDown}
+              disabled={tearingDown || tornDown}
+              className="px-3 py-1 text-xs font-medium rounded border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {tearingDown ? 'Stopping…' : tornDown ? 'Torn down' : 'Tear Down'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="px-5 py-4 space-y-4">

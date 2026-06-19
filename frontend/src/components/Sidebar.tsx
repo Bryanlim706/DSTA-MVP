@@ -40,7 +40,7 @@ const GROUPS: { id: string; label: string; steps: Step[] }[] = [
   },
 ]
 
-const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4, 5, 6, 7, 7.5])
+const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4, 5, 6, 7, 7.5, 11])
 
 // Ordered pipeline statuses — a step is "complete" when the job status is at or past it
 const STATUS_ORDER = [
@@ -50,6 +50,7 @@ const STATUS_ORDER = [
   'step_6_running', 'step_6_complete', 'step_6_error',
   'step_7_running', 'step_7_complete', 'step_7_error',
   'step_7_5_running', 'step_7_5_complete', 'step_7_5_error',
+  'step_11_running', 'step_11_complete', 'step_11_error',
 ]
 
 function statusIndex(s?: string): number {
@@ -66,6 +67,7 @@ function activeStepId(stage: Stage, currentStep?: number, jobStatus?: string): n
   if (jobStatus === 'step_6_running') return 6
   if (jobStatus === 'step_7_running') return 7
   if (jobStatus === 'step_7_5_running') return 7.5
+  if (jobStatus === 'step_11_running')  return 11
   return -99
 }
 
@@ -83,6 +85,7 @@ function isComplete(id: number, stage: Stage, currentStep?: number, jobStatus?: 
   if (id === 6)   return si >= statusIndex('step_6_complete')
   if (id === 7)   return si >= statusIndex('step_7_complete')
   if (id === 7.5) return si >= statusIndex('step_7_5_complete')
+  if (id === 11)  return si >= statusIndex('step_11_complete')
   return false
 }
 

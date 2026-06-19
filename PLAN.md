@@ -1278,14 +1278,46 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 ---
 
 ### Step 11: Test Execution Sandbox
+**Status: PARTIAL — Docker boot complete; test execution pending Steps 8–10**
 **Phase: FCor — produces L4**
 **Tools:** Docker, Python subprocess, Playwright, Pytest, Jest/Vitest
+
+**Primary stack: Spring Boot (Maven/Gradle) + React Vite**
+
 **Docker boot sequence:**
-1. Detect package manager (npm/pip/poetry/cargo)
-2. Install dependencies
-3. Start app
-4. Health-check until ready
-5. Pass base URL to Playwright/Pytest
+1. Detect backend dir (pom.xml / build.gradle) and frontend dir (vite.config*)
+2. Detect Spring test profile (`application-test.properties` / `application-dev.properties` etc.) → `SPRING_PROFILES_ACTIVE`
+3. Fallback: H2 dep in pom.xml but no profile file → inject H2 datasource env vars directly
+4. Copy source into `jobs/{job_id}/sandbox/{backend,frontend}/` (strips node_modules, target, .git)
+5. Write generated Dockerfile for each service; write docker-compose.yml
+6. `docker compose build --no-cache` (Maven build timeout: 360s)
+7. `docker compose up -d`
+8. Poll host ports 8081 (backend) / 5181 (frontend) until healthy or timeout
+9. Execute test scripts from Step 9 (empty list until Steps 8–10 are built)
+10. `docker compose down --remove-orphans -v` in finally block
+
+**Output schema:**
+```json
+{
+  "boot_status": "success" | "partial" | "boot_failed",
+  "backend_url": "http://localhost:8081",
+  "frontend_url": "http://localhost:5181",
+  "backend_accessible": true,
+  "frontend_accessible": true,
+  "spring_profile_used": "test",
+  "h2_dep_found": true,
+  "build_tool": "maven" | "gradle",
+  "build_time_s": 87.4,
+  "boot_time_s": 23.1,
+  "test_results": [],
+  "error": null
+}
+```
+
+**Test result schema (Step 9 will populate):**
+```json
+{ "req_id": "REQ-001", "ac_id": "AC-001-1", "result": "pass"|"fail"|"blocked"|"untestable"|"flaky", "reason": null, "duration_ms": 1234 }
+```
 
 | Result | Meaning |
 |---|---|
@@ -1296,6 +1328,8 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 | Flaky | Inconsistent across runs (run 3×, pass_i = passes/3) |
 
 **Blocked ≠ Failed.** Blocked lowers CP but does not prove incorrect behaviour.
+
+**Trigger:** Manual — `POST /api/jobs/{job_id}/sandbox` after Step 7.5 completes. Frontend shows "Run Sandbox" button. Job status: `step_7_5_complete` → `step_11_running` → `step_11_complete` | `step_11_error`.
 
 ---
 

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { confirmRequirements, getJob, pollJob } from './api/client'
+import { confirmRequirements, getJob, pollJob, triggerSandbox } from './api/client'
 import ClassificationResult from './components/ClassificationResult'
 import ConfirmationTable from './components/ConfirmationTable'
 import GeneratedRequirementsResult from './components/GeneratedRequirementsResult'
 import ObviousRequirementsResult from './components/ObviousRequirementsResult'
 import AppCrawlerResult from './components/AppCrawlerResult'
 import FA75AdvisorResult from './components/FA75AdvisorResult'
+import SandboxResult from './components/SandboxResult'
 import MappingResult from './components/MappingResult'
 import RepoParserResult from './components/RepoParserResult'
 import ScoringResult from './components/ScoringResult'
@@ -58,7 +59,7 @@ function ErrorView({ error, onRetry }: { error: string | null; onRetry: () => vo
   )
 }
 
-function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
+function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () => void; onTriggerSandbox: () => void }) {
   const step0 = job.step_results.step_0!
   const step1 = job.step_results.step_1!
   const step2 = job.step_results.step_2!
@@ -67,11 +68,15 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
   const step4 = job.step_results.step_4
   const step5 = job.step_results.step_5
 
-  const step4Loading = job.status === 'step_4_running' || job.status === 'confirmed'
-  const step5Loading = job.status === 'step_5_running' || job.status === 'step_4_complete'
-  const step6Loading = job.status === 'step_6_running' || job.status === 'step_5_complete'
-  const step7Loading = job.status === 'step_7_running' || job.status === 'step_6_complete'
+  const step4Loading  = job.status === 'step_4_running' || job.status === 'confirmed'
+  const step5Loading  = job.status === 'step_5_running' || job.status === 'step_4_complete'
+  const step6Loading  = job.status === 'step_6_running' || job.status === 'step_5_complete'
+  const step7Loading  = job.status === 'step_7_running' || job.status === 'step_6_complete'
   const step75Loading = job.status === 'step_7_5_running' || job.status === 'step_7_complete'
+  const step11Loading = job.status === 'step_11_running'
+
+  const showSandboxButton = job.status === 'step_7_5_complete' && !job.step_results.step_11
+  const showSandbox = job.status === 'step_11_running' || !!job.step_results.step_11
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-12">
@@ -158,9 +163,32 @@ function ResultPage({ job, onReset }: { job: Job; onReset: () => void }) {
         <div className="mt-6">
           <FA75AdvisorResult result={job.step_results.step_7_5 ?? null} loading={step75Loading} />
         </div>
+
+        {showSandboxButton && (
+          <div className="mt-6 flex justify-center">
+            <button
+              onClick={onTriggerSandbox}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
+            >
+              Run Sandbox (Step 11)
+            </button>
+          </div>
+        )}
+
+        {showSandbox && (
+          <div className="mt-6">
+            <SandboxResult result={job.step_results.step_11 ?? null} loading={step11Loading} jobId={job.job_id} />
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+function stageFromStatus(status: string): Stage {
+  if (status === 'waiting_for_confirmation') return 'confirming'
+  if (['running', 'step_0_complete', 'step_1_complete', 'step_2_complete', 'step_3_running'].includes(status)) return 'loading'
+  return 'step_3_complete'
 }
 
 export default function App() {
@@ -169,10 +197,24 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const pollingStep4 = useRef(false)
 
-  // Poll for step_4_complete after entering result view
+  // On mount: restore job from URL hash if present
+  useEffect(() => {
+    const jobId = window.location.hash.slice(1)
+    if (!jobId) return
+    getJob(jobId)
+      .then((j) => {
+        setJob(j)
+        setStage(stageFromStatus(j.status))
+      })
+      .catch(() => {
+        window.location.hash = ''
+      })
+  }, [])
+
+  // Poll whenever stage is step_3_complete and status is non-terminal
   useEffect(() => {
     if (stage !== 'step_3_complete' || !job || pollingStep4.current) return
-    const terminalStatuses = ['step_7_5_complete', 'step_7_5_error', 'step_7_error', 'step_6_error', 'step_5_error', 'step_4_error', 'error', 'complete']
+    const terminalStatuses = ['step_7_5_complete', 'step_7_5_error', 'step_7_error', 'step_6_error', 'step_5_error', 'step_4_error', 'step_11_complete', 'step_11_error', 'error', 'complete']
     if (terminalStatuses.includes(job.status)) return
 
     pollingStep4.current = true
@@ -195,9 +237,10 @@ export default function App() {
     }
     poll()
     return () => { cancelled = true; pollingStep4.current = false }
-  }, [stage])
+  }, [stage, job?.status])
 
   async function handleUploadComplete(jobId: string) {
+    window.location.hash = jobId
     setStage('loading')
     try {
       const completed = await pollJob(jobId, (j) => setJob(j))
@@ -226,7 +269,20 @@ export default function App() {
     }
   }
 
+  async function handleTriggerSandbox() {
+    if (!job) return
+    try {
+      await triggerSandbox(job.job_id)
+      const updated = await getJob(job.job_id)
+      setJob(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sandbox trigger failed')
+      setStage('error')
+    }
+  }
+
   function reset() {
+    window.location.hash = ''
     setStage('upload')
     setJob(null)
     setError(null)
@@ -239,7 +295,7 @@ export default function App() {
         {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
         {stage === 'loading' && <LoadingView job={job} />}
         {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
-        {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} />}
+        {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />}
         {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
       </main>
     </div>

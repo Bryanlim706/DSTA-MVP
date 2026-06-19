@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pathlib import Path
 
@@ -37,6 +38,20 @@ async def _run_step11(job_id: str) -> None:
             job["step_results"]["step_11"] = {"boot_status": "boot_failed", "error": str(exc)}
             job["status"] = "step_11_error"
             update_job(job_id, job)
+
+
+@router.post("/jobs/{job_id}/sandbox/stop")
+async def stop_sandbox(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    await asyncio.to_thread(step11_sandbox.teardown, job_id)
+    job = get_job(job_id)
+    if job:
+        if "step_11" in job.get("step_results", {}):
+            job["step_results"]["step_11"]["sandbox_alive"] = False
+        update_job(job_id, job)
+    return {"status": "torn_down"}
 
 
 @router.post("/jobs/{job_id}/sandbox")

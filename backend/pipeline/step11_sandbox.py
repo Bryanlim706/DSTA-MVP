@@ -594,6 +594,24 @@ def _poll_url(url: str, timeout_s: int) -> bool:
 # Main sync entry point (wrapped in asyncio.to_thread by run())
 # ---------------------------------------------------------------------------
 
+def _teardown(compose_base: list, compose_file: Path, sandbox_dir: Path) -> None:
+    if compose_file.exists():
+        subprocess.run(
+            compose_base + ["down", "--remove-orphans", "-v"],
+            capture_output=True, timeout=TEARDOWN_TIMEOUT_S,
+            cwd=str(sandbox_dir),
+        )
+
+
+def teardown(job_id: str) -> None:
+    """Stop and remove containers for a given job. Called by the /sandbox/stop endpoint."""
+    sandbox_dir  = (Path(__file__).parent.parent / "jobs" / job_id / "sandbox").resolve()
+    compose_file = sandbox_dir / "docker-compose.yml"
+    project_name = f"dsta-{job_id.replace('-', '')[:12]}"
+    compose_base = ["docker", "compose", "-f", str(compose_file), "--project-name", project_name]
+    _teardown(compose_base, compose_file, sandbox_dir)
+
+
 def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> dict:
     # Pre-checks
     docker_err = _check_docker_available()
@@ -728,6 +746,7 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
         }
 
     except subprocess.TimeoutExpired:
+        _teardown(compose_base, compose_file, sandbox_dir)
         return {
             "boot_status":   "boot_failed",
             "error":         f"Docker build timed out after {BUILD_TIMEOUT_S}s — Maven dependency download may need a longer timeout",
@@ -735,14 +754,8 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
             "frontend_type": frontend_type,
         }
     except Exception as exc:
+        _teardown(compose_base, compose_file, sandbox_dir)
         return {"boot_status": "boot_failed", "error": str(exc)}
-    finally:
-        if compose_file.exists():
-            subprocess.run(
-                compose_base + ["down", "--remove-orphans", "-v"],
-                capture_output=True, timeout=TEARDOWN_TIMEOUT_S,
-                cwd=str(sandbox_dir),
-            )
 
 
 async def run(job_id: str, extract_to: Path, project_context: dict) -> dict:

@@ -612,7 +612,7 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
     is_electron = "electron" in js_deps
     frontend_fw = _detect_frontend(js_deps)
     js_deps_prod = scan.get("js_deps_prod", js_deps)
-    D_detect_backend_js(js_deps_prod)
+    backend_fw_js = _detect_backend_js(js_deps_prod)
 
     py_config_files = [
         p for pattern in ("requirements*.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile")
