@@ -404,26 +404,154 @@ def _detect_spring_extra_env(backend_dir: Path) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# Port and API call style detection
+# ---------------------------------------------------------------------------
+
+def _detect_spring_port(backend_dir: Path) -> int:
+    """Read server.port from application.properties or application.yml; default 8080."""
+    props = backend_dir / "src/main/resources/application.properties"
+    if props.exists():
+        for line in props.read_text(errors="ignore").splitlines():
+            m = re.match(r"\s*server\.port\s*=\s*(\d+)", line)
+            if m:
+                return int(m.group(1))
+    yml = backend_dir / "src/main/resources/application.yml"
+    if yml.exists():
+        in_server = False
+        for line in yml.read_text(errors="ignore").splitlines():
+            stripped = line.strip()
+            if re.match(r"server\s*:", stripped):
+                in_server = True
+                continue
+            if in_server:
+                if stripped and not line[0].isspace():
+                    in_server = False
+                m = re.match(r"\s+port\s*:\s*(\d+)", line)
+                if m:
+                    return int(m.group(1))
+    return 8080
+
+
+def _detect_frontend_port(frontend_dir: Path, frontend_type: str) -> int:
+    """Detect the port the frontend dev server will listen on; used for compose port mapping."""
+    for name in ("vite.config.js", "vite.config.ts", "vite.config.mjs", "vite.config.cjs"):
+        cfg = frontend_dir / name
+        if cfg.exists():
+            text = cfg.read_text(errors="ignore")
+            m = re.search(r"server\s*:\s*\{[^}]*?port\s*:\s*(\d+)", text, re.DOTALL)
+            if m:
+                return int(m.group(1))
+            break
+    pkg = frontend_dir / "package.json"
+    if pkg.exists():
+        try:
+            data = json.loads(pkg.read_text(errors="ignore"))
+            for script in data.get("scripts", {}).values():
+                m = re.search(r"--port[=\s]+(\d+)", str(script))
+                if m:
+                    return int(m.group(1))
+        except Exception:
+            pass
+    return {"vite": 5173, "cra": 3000, "angular": 4200, "nextjs": 3000}.get(frontend_type, 3000)
+
+
+_SCAN_EXTS       = {".js", ".ts", ".tsx", ".jsx"}
+_SCAN_IGNORE     = {"node_modules", "dist", "build", ".next", "__pycache__"}
+_ENV_BASED_RE    = re.compile(r"import\.meta\.env\.VITE_|process\.env\.REACT_APP_|process\.env\.NEXT_PUBLIC_")
+_RELATIVE_API_RE = re.compile(r"""(?:fetch|axios\.(?:get|post|put|delete|patch))\s*\(\s*["']/(?!/)""")
+_HARDCODED_RE    = re.compile(r"https?://localhost:(\d+)")
+
+
+def _detect_api_call_style(frontend_dir: Path) -> tuple[str, int | None]:
+    """
+    Scan frontend source files to determine how the app calls the backend API.
+    Returns one of:
+      ("env_based", None)   — uses VITE_API_URL / REACT_APP_API_URL / NEXT_PUBLIC_API_URL
+      ("relative", None)    — fetch('/api/...') or axios.get('/...')
+      ("hardcoded", port)   — http://localhost:PORT hardcoded in source
+      ("unknown", None)     — no API calls detected
+    Priority: env_based > relative > hardcoded.
+    """
+    found_env       = False
+    found_rel       = False
+    hardcoded_port: int | None = None
+
+    for path in frontend_dir.rglob("*"):
+        if path.suffix not in _SCAN_EXTS:
+            continue
+        if _SCAN_IGNORE.intersection(path.parts):
+            continue
+        try:
+            text = path.read_text(errors="ignore")
+        except Exception:
+            continue
+        if _ENV_BASED_RE.search(text):
+            found_env = True
+        if _RELATIVE_API_RE.search(text):
+            found_rel = True
+        if hardcoded_port is None:
+            m = _HARDCODED_RE.search(text)
+            if m:
+                port = int(m.group(1))
+                if port not in {8000, 5173}:  # ignore DSTA's own service ports
+                    hardcoded_port = port
+
+    if found_env:
+        return ("env_based", None)
+    if found_rel:
+        return ("relative", None)
+    if hardcoded_port is not None:
+        return ("hardcoded", hardcoded_port)
+    return ("unknown", None)
+
+
+# ---------------------------------------------------------------------------
 # Vite proxy patching
 # ---------------------------------------------------------------------------
 
-# Matches backend-like localhost URLs in vite.config (ports 8xxx / 9xxx).
-# Rewrites them to the Docker service hostname so proxy calls work inside
-# the frontend container.
-_PROXY_URL_RE = re.compile(r"http://localhost:([89]\d{3})")
+# Matches backend-like localhost URLs (ports 8xxx / 9xxx) in vite.config.
+_PROXY_URL_RE    = re.compile(r"http://localhost:[89]\d{3}")
+_DEFINECONFIG_RE = re.compile(r"(defineConfig\s*\(\s*\{)")
 
 
-def _patch_vite_config(sb_frontend: Path) -> None:
-    """Replace localhost backend URLs in vite.config proxy with Docker service name."""
+def _patch_vite_config(sb_frontend: Path, spring_port: int = 8080, inject_proxy: bool = False) -> None:
+    """
+    1. Rewrite existing localhost backend URLs in vite.config proxy to Docker service name.
+    2. When inject_proxy=True and no proxy block exists, inject a catch-all proxy for
+       relative-URL API calls (fetch('/api/...'), axios.get('/...')).
+    """
     for name in ("vite.config.js", "vite.config.ts", "vite.config.mjs", "vite.config.cjs"):
         cfg = sb_frontend / name
         if not cfg.exists():
             continue
-        text = cfg.read_text(errors="ignore")
-        patched = _PROXY_URL_RE.sub("http://backend:8080", text)
+        text   = cfg.read_text(errors="ignore")
+        target = f"http://backend:{spring_port}"
+        patched = _PROXY_URL_RE.sub(target, text)
+
+        if inject_proxy and "proxy" not in patched:
+            proxy_block = (
+                f"\n  server: {{\n"
+                f"    proxy: {{\n"
+                f"      '/': {{\n"
+                f"        target: '{target}',\n"
+                f"        changeOrigin: true,\n"
+                f"        bypass: function(req) {{\n"
+                f"          if (req.headers.accept && req.headers.accept.includes('text/html')) {{\n"
+                f"            return '/index.html';\n"
+                f"          }}\n"
+                f"        }}\n"
+                f"      }}\n"
+                f"    }}\n"
+                f"  }},\n"
+            )
+            m = _DEFINECONFIG_RE.search(patched)
+            if m:
+                insert_pos = m.end()
+                patched = patched[:insert_pos] + proxy_block + patched[insert_pos:]
+
         if patched != text:
             cfg.write_text(patched, encoding="utf-8")
-        break  # only one vite config file expected
+        break
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +668,9 @@ def _compose_yaml(
     has_h2: bool,
     db_type: str | None,
     extra_env: dict[str, str],
+    spring_port: int = 8080,
+    api_style: str = "unknown",
+    hardcoded_api_port: int | None = None,
 ) -> str:
     db_block      = _db_service_block(db_type) if db_type else ""
     env_block     = _backend_env_block(profile, has_h2, db_type, extra_env)
@@ -549,6 +680,15 @@ def _compose_yaml(
         "        condition: service_healthy\n"
     ) if db_type else ""
 
+    # Always expose BACKEND_HOST_PORT for health polling.
+    # For hardcoded-URL style, also expose the port the browser actually calls.
+    port_lines = [f'      - "{BACKEND_HOST_PORT}:{spring_port}"']
+    if api_style == "hardcoded" and hardcoded_api_port and hardcoded_api_port != BACKEND_HOST_PORT:
+        port_lines.append(f'      - "{hardcoded_api_port}:{spring_port}"')
+    backend_ports = "\n".join(port_lines)
+
+    api_url = f"http://localhost:{BACKEND_HOST_PORT}"
+
     return (
         f"services:\n"
         f"{db_block}"
@@ -556,7 +696,7 @@ def _compose_yaml(
         f"    build:\n"
         f"      context: ./backend\n"
         f"    ports:\n"
-        f"      - \"{BACKEND_HOST_PORT}:8080\"\n"
+        f"{backend_ports}\n"
         f"{depends_block}"
         f"    environment:\n"
         f"{env_block}\n"
@@ -564,9 +704,9 @@ def _compose_yaml(
         f"    build:\n"
         f"      context: ./frontend\n"
         f"      args:\n"
-        f"        - VITE_API_URL=http://localhost:{BACKEND_HOST_PORT}\n"
-        f"        - REACT_APP_API_URL=http://localhost:{BACKEND_HOST_PORT}\n"
-        f"        - NEXT_PUBLIC_API_URL=http://localhost:{BACKEND_HOST_PORT}\n"
+        f"        - VITE_API_URL={api_url}\n"
+        f"        - REACT_APP_API_URL={api_url}\n"
+        f"        - NEXT_PUBLIC_API_URL={api_url}\n"
         f"    ports:\n"
         f"      - \"{FRONTEND_HOST_PORT}:5174\"\n"
     )
@@ -613,12 +753,29 @@ def teardown(job_id: str) -> None:
 
 
 def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> dict:
-    # Pre-checks
+    # Pre-check Docker before doing anything else
     docker_err = _check_docker_available()
     if docker_err:
         return {"boot_status": "boot_failed", "error": docker_err}
 
-    busy_ports = [p for p in (BACKEND_HOST_PORT, FRONTEND_HOST_PORT) if _port_in_use(p)]
+    root = _unwrap_root(extract_to.resolve())
+    backend_src, frontend_src, frontend_type = _find_dirs(root)
+
+    if not backend_src:
+        return {"boot_status": "boot_failed", "error": "Could not locate Spring Boot backend directory (no pom.xml or build.gradle found)"}
+    if not frontend_src:
+        return {"boot_status": "boot_failed", "error": "Could not locate frontend directory (no package.json with dev/start script found)"}
+
+    # Detect ports and API call style from the original source (before copy)
+    spring_port            = _detect_spring_port(backend_src)
+    detected_frontend_port = _detect_frontend_port(frontend_src, frontend_type)  # informational
+    api_style, hardcoded_api_port = _detect_api_call_style(frontend_src)
+
+    # Port pre-checks with detected values
+    ports_to_check = [BACKEND_HOST_PORT, FRONTEND_HOST_PORT]
+    if api_style == "hardcoded" and hardcoded_api_port and hardcoded_api_port != BACKEND_HOST_PORT:
+        ports_to_check.append(hardcoded_api_port)
+    busy_ports = [p for p in ports_to_check if _port_in_use(p)]
     if busy_ports:
         return {
             "boot_status": "boot_failed",
@@ -628,14 +785,6 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
     # Absolute path anchored to this file's parent (backend/)
     sandbox_dir = (Path(__file__).parent.parent / "jobs" / job_id / "sandbox").resolve()
     sandbox_dir.mkdir(parents=True, exist_ok=True)
-
-    root = _unwrap_root(extract_to.resolve())
-    backend_src, frontend_src, frontend_type = _find_dirs(root)
-
-    if not backend_src:
-        return {"boot_status": "boot_failed", "error": "Could not locate Spring Boot backend directory (no pom.xml or build.gradle found)"}
-    if not frontend_src:
-        return {"boot_status": "boot_failed", "error": "Could not locate frontend directory (no package.json with dev/start script found)"}
 
     profile    = _detect_spring_profile(backend_src)
     has_h2     = _has_h2_dep(backend_src)
@@ -652,8 +801,8 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
     shutil.copytree(backend_src,  sb_backend,  ignore=_COPY_IGNORE)
     shutil.copytree(frontend_src, sb_frontend, ignore=_COPY_IGNORE)
 
-    # Patch vite proxy targets so they resolve inside Docker
-    _patch_vite_config(sb_frontend)
+    # Patch vite proxy: rewrite existing URLs + inject proxy block for relative-URL apps
+    _patch_vite_config(sb_frontend, spring_port=spring_port, inject_proxy=(api_style == "relative"))
 
     (sb_backend  / "Dockerfile").write_text(
         _BACKEND_DOCKERFILE_MAVEN if build_tool == "maven" else _BACKEND_DOCKERFILE_GRADLE
@@ -661,7 +810,12 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
     (sb_frontend / "Dockerfile").write_text(_frontend_dockerfile(frontend_type))
 
     compose_file = sandbox_dir / "docker-compose.yml"
-    compose_file.write_text(_compose_yaml(profile, has_h2, db_type, extra_env))
+    compose_file.write_text(_compose_yaml(
+        profile, has_h2, db_type, extra_env,
+        spring_port=spring_port,
+        api_style=api_style,
+        hardcoded_api_port=hardcoded_api_port,
+    ))
 
     # Unique project name per job — prevents cross-job container collisions
     project_name = f"dsta-{job_id.replace('-', '')[:12]}"
@@ -694,6 +848,8 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
                 "db_type":             db_type,
                 "build_tool":          build_tool,
                 "frontend_type":       frontend_type,
+                "spring_port":         spring_port,
+                "api_style":           api_style,
                 "build_time_s":        build_time_s,
             }
 
@@ -711,6 +867,8 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
                 "error":         f"docker compose up failed:\n{up.stderr[-2000:]}",
                 "build_tool":    build_tool,
                 "frontend_type": frontend_type,
+                "spring_port":   spring_port,
+                "api_style":     api_style,
                 "build_time_s":  build_time_s,
             }
 
@@ -739,6 +897,8 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
             "db_type":             db_type,
             "build_tool":          build_tool,
             "frontend_type":       frontend_type,
+            "spring_port":         spring_port,
+            "api_style":           api_style,
             "build_time_s":        build_time_s,
             "boot_time_s":         boot_time_s,
             "test_results":        [],
@@ -752,6 +912,8 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
             "error":         f"Docker build timed out after {BUILD_TIMEOUT_S}s — Maven dependency download may need a longer timeout",
             "build_tool":    build_tool,
             "frontend_type": frontend_type,
+            "spring_port":   spring_port,
+            "api_style":     api_style,
         }
     except Exception as exc:
         _teardown(compose_base, compose_file, sandbox_dir)
