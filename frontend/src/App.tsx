@@ -177,7 +177,7 @@ function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () 
 
         {showSandbox && (
           <div className="mt-6">
-            <SandboxResult result={job.step_results.step_11 ?? null} loading={step11Loading} jobId={job.job_id} />
+            <SandboxResult result={job.step_results.step_11 ?? null} loading={step11Loading} jobId={job.job_id} onRetry={onTriggerSandbox} />
           </div>
         )}
       </div>

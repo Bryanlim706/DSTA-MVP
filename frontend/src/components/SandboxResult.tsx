@@ -46,13 +46,27 @@ export default function SandboxResult({
   result,
   loading,
   jobId,
+  onRetry,
 }: {
   result: Step11Result | null
   loading: boolean
   jobId: string
+  onRetry?: () => void
 }) {
   const [tearingDown, setTearingDown] = useState(false)
   const [tornDown, setTornDown] = useState(false)
+  const [retrying, setRetrying] = useState(false)
+
+  const handleRetry = async () => {
+    if (!onRetry) return
+    setRetrying(true)
+    setTornDown(false)
+    try {
+      await onRetry()
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   const handleTearDown = async () => {
     setTearingDown(true)
@@ -94,13 +108,31 @@ export default function SandboxResult({
         </div>
         <div className="flex items-center gap-2">
           <Chip label={statusCfg.label} color={statusCfg.cls} />
-          {result.boot_status !== 'boot_failed' && (
+          {result.boot_status === 'boot_failed' && onRetry && (
+            <button
+              onClick={handleRetry}
+              disabled={retrying}
+              className="px-3 py-1 text-xs font-medium rounded border border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {retrying ? 'Starting…' : 'Try Again'}
+            </button>
+          )}
+          {result.boot_status !== 'boot_failed' && !tornDown && (
             <button
               onClick={handleTearDown}
-              disabled={tearingDown || tornDown}
+              disabled={tearingDown}
               className="px-3 py-1 text-xs font-medium rounded border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {tearingDown ? 'Stopping…' : tornDown ? 'Torn down' : 'Tear Down'}
+              {tearingDown ? 'Stopping…' : 'Tear Down'}
+            </button>
+          )}
+          {tornDown && onRetry && (
+            <button
+              onClick={handleRetry}
+              disabled={retrying}
+              className="px-3 py-1 text-xs font-medium rounded border border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {retrying ? 'Starting…' : 'Run Again'}
             </button>
           )}
         </div>
@@ -150,6 +182,26 @@ export default function SandboxResult({
           </div>
         )}
 
+        {/* Sandbox warnings — patches applied to make the app boot */}
+        {(result.sandbox_warnings ?? []).length > 0 && (
+          <div className="border border-amber-200 rounded-lg bg-amber-50 px-4 py-3 space-y-2">
+            <p className="text-xs font-semibold text-amber-700">Sandbox patches applied</p>
+            <p className="text-[11px] text-amber-600 leading-relaxed">
+              The sandbox automatically fixed the following issues to allow the app to boot.
+              These represent real defects in the submission that would cause failures in any
+              other environment.
+            </p>
+            <ul className="space-y-1">
+              {(result.sandbox_warnings ?? []).map((w, i) => (
+                <li key={i} className="text-[11px] text-amber-700 flex gap-2">
+                  <span className="mt-0.5 flex-shrink-0">⚠</span>
+                  <span>{w}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Error details */}
         {result.error && (
           <details className="group">
@@ -165,7 +217,7 @@ export default function SandboxResult({
         {/* Test results */}
         <div>
           <p className="text-xs font-medium text-gray-700 mb-2">Test Results</p>
-          {result.test_results.length === 0 ? (
+          {(result.test_results ?? []).length === 0 ? (
             <p className="text-xs text-gray-400 italic">
               No test scripts — Steps 8 (AC Generator) and 9 (Test Generator) not yet built.
             </p>
@@ -180,7 +232,7 @@ export default function SandboxResult({
                 </tr>
               </thead>
               <tbody>
-                {result.test_results.map((t, i) => (
+                {(result.test_results ?? []).map((t, i) => (
                   <tr key={i} className="border-b border-gray-100 last:border-0">
                     <td className="py-1.5 pr-3 font-mono text-gray-600">{t.req_id}</td>
                     <td className="py-1.5 pr-3 font-mono text-gray-600">{t.ac_id}</td>

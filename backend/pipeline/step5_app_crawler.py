@@ -376,7 +376,7 @@ def _crawl_routes_sync(routes: list[str], port: int) -> tuple[list[dict], list[d
             reason: str | None = None
 
             try:
-                response = page.goto(url, wait_until="load", timeout=15_000)
+                response = page.goto(url, wait_until="load", timeout=30_000)
                 # Best-effort: wait for async data fetches to complete before snapshot.
                 # networkidle may not fire for apps with continuous polling/websockets —
                 # the inner timeout is intentionally short; we proceed with whatever rendered.
@@ -386,6 +386,9 @@ def _crawl_routes_sync(routes: list[str], port: int) -> tuple[list[dict], list[d
                     page.wait_for_timeout(500)
             except Exception as exc:
                 reason = "timeout" if "timeout" in str(exc).lower() else "error"
+                if reason == "timeout":
+                    page.close()
+                    page = context.new_page()
             finally:
                 page.remove_listener("request", _on_request)
 

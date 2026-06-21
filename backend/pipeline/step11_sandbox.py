@@ -111,8 +111,9 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 # Frontend Dockerfile templates — all standardise on internal port 5174
 # ---------------------------------------------------------------------------
 
-# Vite — passes API URL as build arg (read by Vite dev server at runtime via
-# import.meta.env.VITE_API_URL).
+# Vite — production build + vite preview (avoids SWC native binary
+# incompatibility between Windows node_modules and Alpine Linux; preview
+# respects preview.proxy config patched by _patch_vite_config).
 _FRONTEND_DOCKERFILE_VITE = f"""\
 FROM node:20-alpine
 WORKDIR /app
@@ -121,8 +122,9 @@ RUN npm install --prefer-offline --strict-ssl=false
 COPY . .
 ARG VITE_API_URL=http://localhost:{BACKEND_HOST_PORT}
 ENV VITE_API_URL=$VITE_API_URL
+RUN npm run build
 EXPOSE 5174
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5174"]
+CMD ["./node_modules/.bin/vite", "preview", "--host", "0.0.0.0", "--port", "5174"]
 """
 
 # Create React App — PORT env var controls the CRA dev server port.
@@ -462,6 +464,62 @@ _RELATIVE_API_RE = re.compile(r"""(?:fetch|axios\.(?:get|post|put|delete|patch))
 _HARDCODED_RE    = re.compile(r"https?://localhost:(\d+)")
 
 
+def _scan_env_var_names(frontend_dir: Path) -> list[str]:
+    """
+    Scan frontend source for actual environment variable names used
+    (VITE_*, REACT_APP_*, NEXT_PUBLIC_*). Returns unique names found,
+    so we can inject the right build args rather than guessing fixed names.
+    """
+    env_name_re = re.compile(
+        r"(?:import\.meta\.env\.|process\.env\.)((VITE_|REACT_APP_|NEXT_PUBLIC_)\w+)"
+    )
+    names: set[str] = set()
+    for path in frontend_dir.rglob("*"):
+        if path.suffix not in _SCAN_EXTS:
+            continue
+        if _SCAN_IGNORE.intersection(path.parts):
+            continue
+        try:
+            for m in env_name_re.finditer(path.read_text(errors="ignore")):
+                names.add(m.group(1))
+        except Exception:
+            continue
+    return sorted(names)
+
+
+def _strip_hardcoded_origin(sb_frontend: Path, hardcoded_port: int) -> str | None:
+    """
+    Replace `http://localhost:{hardcoded_port}` with an empty string in all
+    frontend source files so absolute API URLs become relative paths.
+    e.g. `http://localhost:8080/api/login` → `/api/login`
+    This eliminates the cross-origin request entirely — the Vite preview
+    proxy then forwards the relative call to the backend container, so Spring
+    Boot's CORS config is never involved.
+    Returns a warning string if any files were patched, else None.
+    """
+    origin = f"http://localhost:{hardcoded_port}"
+    patched_files = []
+    for path in (sb_frontend / "src").rglob("*"):
+        if path.suffix not in _SCAN_EXTS:
+            continue
+        try:
+            text = path.read_text(errors="ignore")
+            if origin in text:
+                path.write_text(text.replace(origin, ""), encoding="utf-8")
+                patched_files.append(path.name)
+        except Exception:
+            continue
+    if patched_files:
+        return (
+            f"Hardcoded API origin '{origin}' stripped from "
+            f"{len(patched_files)} file(s) ({', '.join(patched_files[:5])}"
+            f"{'…' if len(patched_files) > 5 else ''}). "
+            f"The submission would fail CORS in any environment other than the "
+            f"developer's own machine on port {hardcoded_port}."
+        )
+    return None
+
+
 def _detect_api_call_style(frontend_dir: Path) -> tuple[str, int | None]:
     """
     Scan frontend source files to determine how the app calls the backend API.
@@ -498,11 +556,58 @@ def _detect_api_call_style(frontend_dir: Path) -> tuple[str, int | None]:
 
     if found_env:
         return ("env_based", None)
-    if found_rel:
-        return ("relative", None)
     if hardcoded_port is not None:
         return ("hardcoded", hardcoded_port)
+    if found_rel:
+        return ("relative", None)
     return ("unknown", None)
+
+
+# ---------------------------------------------------------------------------
+# Tailwind v4 CSS patching
+# ---------------------------------------------------------------------------
+
+_TW_V3_DIRECTIVES_RE = re.compile(
+    r"^[ \t]*@tailwind\s+(?:base|components|utilities)\s*;[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _patch_tailwind_css(sb_frontend: Path) -> str | None:
+    """
+    Detect Tailwind v4 (@tailwindcss/postcss in package.json) used with v3-style
+    CSS directives (@tailwind base/components/utilities). In v4 these directives
+    produce an empty CSS file. Replace the entire block with @import "tailwindcss"
+    so the v4 engine generates real output.
+    Returns a warning string if a patch was applied, else None.
+    """
+    pkg = sb_frontend / "package.json"
+    if not pkg.exists():
+        return None
+    try:
+        data = json.loads(pkg.read_text(errors="ignore"))
+    except Exception:
+        return None
+    all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+    if "@tailwindcss/postcss" not in all_deps and "@tailwindcss/vite" not in all_deps:
+        return None  # not Tailwind v4
+
+    patched_files = []
+    for css_file in (sb_frontend / "src").rglob("*.css"):
+        text = css_file.read_text(errors="ignore")
+        if not _TW_V3_DIRECTIVES_RE.search(text):
+            continue
+        stripped = _TW_V3_DIRECTIVES_RE.sub("", text).lstrip("\n")
+        css_file.write_text('@import "tailwindcss";\n' + stripped, encoding="utf-8")
+        patched_files.append(css_file.name)
+
+    if patched_files:
+        return (
+            f"Tailwind v4 + v3 directives detected — patched {', '.join(patched_files)} "
+            f"to use '@import \"tailwindcss\"'. The submission's CSS would produce an empty "
+            f"stylesheet in any clean build environment."
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -512,13 +617,38 @@ def _detect_api_call_style(frontend_dir: Path) -> tuple[str, int | None]:
 # Matches backend-like localhost URLs (ports 8xxx / 9xxx) in vite.config.
 _PROXY_URL_RE    = re.compile(r"http://localhost:[89]\d{3}")
 _DEFINECONFIG_RE = re.compile(r"(defineConfig\s*\(\s*\{)")
+# Matches `server: { ... }` block so we can duplicate it as `preview: { ... }`
+_SERVER_BLOCK_RE = re.compile(r"\bserver\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})", re.DOTALL)
+
+_PROXY_CATCH_ALL = """\
+
+  preview: {{
+    proxy: {{
+      '/': {{
+        target: '{target}',
+        changeOrigin: true,
+        bypass: function(req) {{
+          var url = req.url.split('?')[0];
+          if (url.startsWith('/@') || url.startsWith('/src/') || url.startsWith('/node_modules/') || /\\.\\w+$/.test(url)) {{
+            return url;
+          }}
+          if (req.headers.accept && req.headers.accept.includes('text/html')) {{
+            return '/index.html';
+          }}
+        }}
+      }}
+    }}
+  }},
+"""
 
 
-def _patch_vite_config(sb_frontend: Path, spring_port: int = 8080, inject_proxy: bool = False) -> None:
+def _patch_vite_config(sb_frontend: Path, spring_port: int = 8080, inject_proxy: bool = False) -> str | None:
     """
     1. Rewrite existing localhost backend URLs in vite.config proxy to Docker service name.
-    2. When inject_proxy=True and no proxy block exists, inject a catch-all proxy for
-       relative-URL API calls (fetch('/api/...'), axios.get('/...')).
+    2. Copy server.proxy → preview.proxy (vite preview ignores server.proxy).
+    3. When inject_proxy=True and no proxy block exists, inject a catch-all preview proxy
+       so relative-URL API calls (fetch('/api/...')) are forwarded to the backend container.
+    Returns a warning string if server.proxy was copied to preview.proxy, else None.
     """
     for name in ("vite.config.js", "vite.config.ts", "vite.config.mjs", "vite.config.cjs"):
         cfg = sb_frontend / name
@@ -526,32 +656,38 @@ def _patch_vite_config(sb_frontend: Path, spring_port: int = 8080, inject_proxy:
             continue
         text   = cfg.read_text(errors="ignore")
         target = f"http://backend:{spring_port}"
+
+        # Step 1: rewrite hardcoded localhost backend URLs
         patched = _PROXY_URL_RE.sub(target, text)
 
+        # Step 2: copy server.proxy → preview.proxy if preview block absent
+        has_preview = bool(re.search(r"\bpreview\s*:", patched))
+        server_proxy_copied = False
+        if not has_preview:
+            server_m = _SERVER_BLOCK_RE.search(patched)
+            if server_m and "proxy" in server_m.group(0):
+                preview_block = "preview: " + server_m.group(0) + ","
+                insert_at = server_m.end()
+                patched = patched[:insert_at] + "\n  " + preview_block + patched[insert_at:]
+                has_preview = True
+                server_proxy_copied = True
+
+        # Step 3: inject catch-all proxy when requested and still no proxy exists
         if inject_proxy and "proxy" not in patched:
-            proxy_block = (
-                f"\n  server: {{\n"
-                f"    proxy: {{\n"
-                f"      '/': {{\n"
-                f"        target: '{target}',\n"
-                f"        changeOrigin: true,\n"
-                f"        bypass: function(req) {{\n"
-                f"          if (req.headers.accept && req.headers.accept.includes('text/html')) {{\n"
-                f"            return '/index.html';\n"
-                f"          }}\n"
-                f"        }}\n"
-                f"      }}\n"
-                f"    }}\n"
-                f"  }},\n"
-            )
+            proxy_block = _PROXY_CATCH_ALL.format(target=target)
             m = _DEFINECONFIG_RE.search(patched)
             if m:
-                insert_pos = m.end()
-                patched = patched[:insert_pos] + proxy_block + patched[insert_pos:]
+                patched = patched[:m.end()] + proxy_block + patched[m.end():]
 
         if patched != text:
             cfg.write_text(patched, encoding="utf-8")
-        break
+
+        if server_proxy_copied:
+            return (
+                "vite.config server.proxy copied to preview.proxy — the submission's proxy "
+                "rules only applied to the dev server, not to production preview builds."
+            )
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +807,7 @@ def _compose_yaml(
     spring_port: int = 8080,
     api_style: str = "unknown",
     hardcoded_api_port: int | None = None,
+    env_var_names: list[str] | None = None,
 ) -> str:
     db_block      = _db_service_block(db_type) if db_type else ""
     env_block     = _backend_env_block(profile, has_h2, db_type, extra_env)
@@ -689,6 +826,13 @@ def _compose_yaml(
 
     api_url = f"http://localhost:{BACKEND_HOST_PORT}"
 
+    # Build args: inject every env var name the app actually uses, plus safe fallbacks.
+    # Hardcoded-style apps have had their origins stripped so they no longer need a URL
+    # env var, but we inject anyway in case any conditional code references them.
+    default_names = ["VITE_API_URL", "REACT_APP_API_URL", "NEXT_PUBLIC_API_URL"]
+    all_names = sorted(set(default_names) | set(env_var_names or []))
+    build_args = "\n".join(f"        - {n}={api_url}" for n in all_names)
+
     return (
         f"services:\n"
         f"{db_block}"
@@ -704,9 +848,7 @@ def _compose_yaml(
         f"    build:\n"
         f"      context: ./frontend\n"
         f"      args:\n"
-        f"        - VITE_API_URL={api_url}\n"
-        f"        - REACT_APP_API_URL={api_url}\n"
-        f"        - NEXT_PUBLIC_API_URL={api_url}\n"
+        f"{build_args}\n"
         f"    ports:\n"
         f"      - \"{FRONTEND_HOST_PORT}:5174\"\n"
     )
@@ -766,10 +908,11 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
     if not frontend_src:
         return {"boot_status": "boot_failed", "error": "Could not locate frontend directory (no package.json with dev/start script found)"}
 
-    # Detect ports and API call style from the original source (before copy)
+    # Detect ports, API call style, and env var names from the original source (before copy)
     spring_port            = _detect_spring_port(backend_src)
     detected_frontend_port = _detect_frontend_port(frontend_src, frontend_type)  # informational
     api_style, hardcoded_api_port = _detect_api_call_style(frontend_src)
+    env_var_names          = _scan_env_var_names(frontend_src)
 
     # Port pre-checks with detected values
     ports_to_check = [BACKEND_HOST_PORT, FRONTEND_HOST_PORT]
@@ -801,8 +944,22 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
     shutil.copytree(backend_src,  sb_backend,  ignore=_COPY_IGNORE)
     shutil.copytree(frontend_src, sb_frontend, ignore=_COPY_IGNORE)
 
-    # Patch vite proxy: rewrite existing URLs + inject proxy block for relative-URL apps
-    _patch_vite_config(sb_frontend, spring_port=spring_port, inject_proxy=(api_style == "relative"))
+    # Apply source patches and collect warnings for each one that fires
+    sandbox_warnings: list[str] = []
+
+    if api_style == "hardcoded" and hardcoded_api_port:
+        w = _strip_hardcoded_origin(sb_frontend, hardcoded_api_port)
+        if w: sandbox_warnings.append(w)
+
+    w = _patch_vite_config(
+        sb_frontend,
+        spring_port=spring_port,
+        inject_proxy=(api_style in ("relative", "hardcoded")),
+    )
+    if w: sandbox_warnings.append(w)
+
+    w = _patch_tailwind_css(sb_frontend)
+    if w: sandbox_warnings.append(w)
 
     (sb_backend  / "Dockerfile").write_text(
         _BACKEND_DOCKERFILE_MAVEN if build_tool == "maven" else _BACKEND_DOCKERFILE_GRADLE
@@ -815,6 +972,7 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
         spring_port=spring_port,
         api_style=api_style,
         hardcoded_api_port=hardcoded_api_port,
+        env_var_names=env_var_names,
     ))
 
     # Unique project name per job — prevents cross-job container collisions
@@ -851,6 +1009,7 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
                 "spring_port":         spring_port,
                 "api_style":           api_style,
                 "build_time_s":        build_time_s,
+                "sandbox_warnings":    sandbox_warnings,
             }
 
         # Start containers
@@ -863,13 +1022,14 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
         )
         if up.returncode != 0:
             return {
-                "boot_status":   "boot_failed",
-                "error":         f"docker compose up failed:\n{up.stderr[-2000:]}",
-                "build_tool":    build_tool,
-                "frontend_type": frontend_type,
-                "spring_port":   spring_port,
-                "api_style":     api_style,
-                "build_time_s":  build_time_s,
+                "boot_status":      "boot_failed",
+                "error":            f"docker compose up failed:\n{up.stderr[-2000:]}",
+                "build_tool":       build_tool,
+                "frontend_type":    frontend_type,
+                "spring_port":      spring_port,
+                "api_style":        api_style,
+                "build_time_s":     build_time_s,
+                "sandbox_warnings": sandbox_warnings,
             }
 
         backend_url  = f"http://localhost:{BACKEND_HOST_PORT}"
@@ -902,22 +1062,25 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
             "build_time_s":        build_time_s,
             "boot_time_s":         boot_time_s,
             "test_results":        [],
+            "sandbox_warnings":    sandbox_warnings,
             "error":               None,
         }
 
     except subprocess.TimeoutExpired:
         _teardown(compose_base, compose_file, sandbox_dir)
         return {
-            "boot_status":   "boot_failed",
-            "error":         f"Docker build timed out after {BUILD_TIMEOUT_S}s — Maven dependency download may need a longer timeout",
-            "build_tool":    build_tool,
-            "frontend_type": frontend_type,
-            "spring_port":   spring_port,
-            "api_style":     api_style,
+            "boot_status":      "boot_failed",
+            "error":            f"Docker build timed out after {BUILD_TIMEOUT_S}s — Maven dependency download may need a longer timeout",
+            "build_tool":       build_tool,
+            "frontend_type":    frontend_type,
+            "spring_port":      spring_port,
+            "api_style":        api_style,
+            "test_results":     [],
+            "sandbox_warnings": sandbox_warnings,
         }
     except Exception as exc:
         _teardown(compose_base, compose_file, sandbox_dir)
-        return {"boot_status": "boot_failed", "error": str(exc)}
+        return {"boot_status": "boot_failed", "error": str(exc), "test_results": [], "sandbox_warnings": sandbox_warnings}
 
 
 async def run(job_id: str, extract_to: Path, project_context: dict) -> dict:

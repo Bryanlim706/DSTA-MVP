@@ -316,6 +316,7 @@ export interface Step11Result {
   build_time_s: number | null
   boot_time_s: number | null
   test_results: Step11TestResult[]
+  sandbox_warnings: string[]
   error: string | null
 }
 
