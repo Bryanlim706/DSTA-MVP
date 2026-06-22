@@ -315,7 +315,7 @@ Steps 0 and 1 execute **in parallel** — both read directly from the uploaded z
                                        └─────────────────┘
 ```
 
-Steps 6 and 7.5 execute **in parallel** after Step 5 completes. Step 7.5 reads directly from Steps 3.5, 4, and 5 — it does **not** depend on Step 6 output. Step 7 waits only for Step 6.
+Step 7.5 chains sequentially after Step 7 completes (job status: `step_7_complete` → `step_7_5_running`). Although Step 7.5 reads only from Steps 3.5, 4, and 5 (not Step 6 or 7 output), the implementation runs it after Step 7 for simplicity. Step 7 waits only for Step 6.
 
 ---
 
@@ -1089,6 +1089,12 @@ where α = 0.7. If S = 0, α = 1.0.
 
 **Note on `api_calls_observed`:** Step 5's passive crawl only captures page-load GET requests. POST/PUT/DELETE from form submissions are never observed. `api_calls_observed` is supplementary cross-check against Step 4 only — not used for E() scoring. The L3 signal comes entirely from Step 4 `implementation_units` (filtered to `kind == "api_endpoint"`).
 
+**Deterministic fallback chain (runs after the LLM call, outside the retry loop):** The LLM grounding call fails in predictable ways — label/route vocabulary gaps, transient errors. Four deterministic passes patch up any null results the LLM left behind, firing only when the LLM returned null for that entity:
+- **Pass 1 — node** (`_match_node_to_route`): word-overlap scoring between label words and route path segments + element content; semantic bonuses for detail/list/home/add labels; PascalCase split; minimum score threshold 3.
+- **Pass 2 — element** (`_match_element_in_inventory`): scoped to the route resolved in Pass 1; word-overlap against `page_inventory` then raw `route_elements`; noise words stripped; dot-notation labels (`product.name`) excluded.
+- **Pass 3 — navigation edge**: uses surrounding resolved node routes to look up `nav_inventory`; if only prev-route known and Playwright confirmed outbound links from that page (`playwright_exit_routes`), source is `"playwright_element"` → E()=1.0 (fixes OBV CHECK-3 scoring inconsistency).
+- **Pass 4 — data edge** (`_match_data_edge_endpoint`): infers HTTP verb from edge label keywords; accepts a lone matching endpoint even at score=0.
+
 **Unlinked detection:**
 ```python
 # Step 5 routes visited by Playwright where no L1a path[] node entity matched them
@@ -1121,7 +1127,9 @@ l3_unlinked_endpoints = set(step4_endpoint_keys) - set(matched_endpoint_keys_by_
   ],
   "unlinked_l3": [
     { "method": "GET", "path": "/api/users/{id}", "handler": "getUser", "file": "src/main/java/.../UserController.java", "note": "No L1a requirement matched this endpoint as its L3 signal" }
-  ]
+  ],
+  "llm_model": "claude-haiku-4-5-20251001",
+  "error": null
 }
 ```
 
@@ -1217,7 +1225,9 @@ Type B (Step 7.5, positive-grounded): "Your schema has `team_id` on the Task mod
       "priority": "medium"
     }
   ],
-  "total_count": 4
+  "total_count": 4,
+  "llm_model": "claude-haiku-4-5-20251001",
+  "error": null
 }
 ```
 
@@ -1285,16 +1295,20 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
 **Primary stack: Spring Boot (Maven/Gradle) + React Vite**
 
 **Docker boot sequence:**
-1. Detect backend dir (pom.xml / build.gradle) and frontend dir (vite.config*)
-2. Detect Spring test profile (`application-test.properties` / `application-dev.properties` etc.) → `SPRING_PROFILES_ACTIVE`
-3. Fallback: H2 dep in pom.xml but no profile file → inject H2 datasource env vars directly
+1. Detect backend dir (pom.xml / build.gradle) and frontend dir + type (vite/cra/angular/nextjs/generic)
+2. Detect DB type from artifact IDs (mysql/postgresql/mariadb/H2 fallback); detect Spring port from `application.properties`/`application.yml`; detect Spring profile (`application-test/dev/local.properties`) → `SPRING_PROFILES_ACTIVE`; detect extra env vars needed (JWT_SECRET for jjwt, SPRING_MAIL_HOST for mail starters)
+3. Detect API call style (`_detect_api_call_style`): `"env_based"` (VITE_*/REACT_APP_*/NEXT_PUBLIC_*), `"relative"` (fetch('/api/...')), `"hardcoded"` (http://localhost:PORT literal). Scan all env var names used in source (`_scan_env_var_names`) for Docker build args.
 4. Copy source into `jobs/{job_id}/sandbox/{backend,frontend}/` (strips node_modules, target, .git)
-5. Write generated Dockerfile for each service; write docker-compose.yml
-6. `docker compose build --no-cache` (Maven build timeout: 360s)
-7. `docker compose up -d`
-8. Poll host ports 8081 (backend) / 5181 (frontend) until healthy or timeout
-9. Execute test scripts from Step 9 (empty list until Steps 8–10 are built)
-10. `docker compose down --remove-orphans -v` in finally block
+5. **Source patching** (applied to copy, each emits a `sandbox_warnings` entry):
+   - `_patch_vite_config`: rewrites proxy targets `http://localhost:8xxx` → `http://backend:{spring_port}`; copies `server.proxy` → `preview.proxy`; injects catch-all proxy when `api_style` is `"relative"` or `"hardcoded"` and no proxy exists
+   - `_strip_hardcoded_origin` (only when `api_style="hardcoded"`): removes `http://localhost:{port}` from all `.jsx/.tsx/.js/.ts` source, converting absolute URLs to relative paths
+   - `_patch_tailwind_css`: replaces `@tailwind base/components/utilities` with `@import "tailwindcss"` when Tailwind v4 detected
+6. Write Dockerfiles (backend: Maven/Gradle multi-stage fat-JAR; frontend: template by type — Vite/CRA/Angular/Next.js/Generic, all on internal port 5174 with detected env var names as build args); write docker-compose.yml (DB service + healthcheck + `depends_on`)
+7. `docker compose build` (Maven/Gradle download + compile; build timeout: 420s)
+8. `docker compose up -d`
+9. Poll host ports 8081 (backend) / 5181 (frontend) until healthy or timeout
+10. Execute test scripts from Step 9 (empty list until Steps 8–10 are built)
+11. `docker compose down --remove-orphans -v` in finally block
 
 **Output schema:**
 ```json
@@ -1306,7 +1320,12 @@ Sub-weights: 0.8 + 0.8 + 0.4 = 2.0 = L1Cx ✓
   "frontend_accessible": true,
   "spring_profile_used": "test",
   "h2_dep_found": true,
+  "db_type": "mysql" | "postgresql" | "mariadb" | null,
   "build_tool": "maven" | "gradle",
+  "frontend_type": "vite" | "cra" | "angular" | "nextjs" | "generic",
+  "spring_port": 8080,
+  "api_style": "env_based" | "relative" | "hardcoded" | "unknown",
+  "sandbox_warnings": ["Vite proxy patched: rewrote localhost:8080 → http://backend:8080"],
   "build_time_s": 87.4,
   "boot_time_s": 23.1,
   "test_results": [],
