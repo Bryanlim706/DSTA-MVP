@@ -405,6 +405,31 @@ def _detect_spring_extra_env(backend_dir: Path) -> dict[str, str]:
     return env
 
 
+_PROP_PLACEHOLDER_RE = re.compile(r"\$\{([^}:]+)\}")
+
+
+def _detect_property_placeholders(backend_dir: Path) -> dict[str, str]:
+    """
+    Scan application.properties for ${varname} placeholders that have no
+    :default fallback. These cause 'Could not resolve placeholder' errors at
+    Spring Boot startup when no corresponding env var is set.
+    Returns {ENV_VAR_NAME: 'sandbox_dummy'} for each unresolved placeholder.
+    """
+    props = backend_dir / "src/main/resources/application.properties"
+    if not props.exists():
+        return {}
+    try:
+        text = props.read_text(errors="ignore")
+    except Exception:
+        return {}
+    result: dict[str, str] = {}
+    for m in _PROP_PLACEHOLDER_RE.finditer(text):
+        name = m.group(1).strip()
+        env_name = name.upper().replace("-", "_").replace(".", "_")
+        result[env_name] = "sandbox_dummy"
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Port and API call style detection
 # ---------------------------------------------------------------------------
@@ -460,8 +485,9 @@ def _detect_frontend_port(frontend_dir: Path, frontend_type: str) -> int:
 _SCAN_EXTS       = {".js", ".ts", ".tsx", ".jsx"}
 _SCAN_IGNORE     = {"node_modules", "dist", "build", ".next", "__pycache__"}
 _ENV_BASED_RE    = re.compile(r"import\.meta\.env\.VITE_|process\.env\.REACT_APP_|process\.env\.NEXT_PUBLIC_")
-_RELATIVE_API_RE = re.compile(r"""(?:fetch|axios\.(?:get|post|put|delete|patch))\s*\(\s*["']/(?!/)""")
-_HARDCODED_RE    = re.compile(r"https?://localhost:(\d+)")
+_RELATIVE_API_RE  = re.compile(r"""(?:fetch|axios\.(?:get|post|put|delete|patch))\s*\(\s*["']/(?!/)""")
+_HARDCODED_RE     = re.compile(r"https?://localhost:(\d+)")
+_SAME_ORIGIN_RE   = re.compile(r"window\.location\.(?:host|origin|protocol)")
 
 
 def _scan_env_var_names(frontend_dir: Path) -> list[str]:
@@ -503,7 +529,7 @@ def _strip_hardcoded_origin(sb_frontend: Path, hardcoded_port: int) -> str | Non
         if path.suffix not in _SCAN_EXTS:
             continue
         try:
-            text = path.read_text(errors="ignore")
+            text = path.read_text(encoding="utf-8", errors="replace")
             if origin in text:
                 path.write_text(text.replace(origin, ""), encoding="utf-8")
                 patched_files.append(path.name)
@@ -524,14 +550,16 @@ def _detect_api_call_style(frontend_dir: Path) -> tuple[str, int | None]:
     """
     Scan frontend source files to determine how the app calls the backend API.
     Returns one of:
-      ("env_based", None)   — uses VITE_API_URL / REACT_APP_API_URL / NEXT_PUBLIC_API_URL
-      ("relative", None)    — fetch('/api/...') or axios.get('/...')
-      ("hardcoded", port)   — http://localhost:PORT hardcoded in source
-      ("unknown", None)     — no API calls detected
-    Priority: env_based > relative > hardcoded.
+      ("env_based", None)    — uses VITE_API_URL / REACT_APP_API_URL / NEXT_PUBLIC_API_URL
+      ("relative", None)     — fetch('/api/...') or axios.get('/...')
+      ("same_origin", None)  — window.location.host/origin used to build API URLs
+      ("hardcoded", port)    — http://localhost:PORT hardcoded in source
+      ("unknown", None)      — no API calls detected
+    Priority: env_based > relative > same_origin > hardcoded.
     """
-    found_env       = False
-    found_rel       = False
+    found_env         = False
+    found_rel         = False
+    found_same_origin = False
     hardcoded_port: int | None = None
 
     for path in frontend_dir.rglob("*"):
@@ -547,6 +575,8 @@ def _detect_api_call_style(frontend_dir: Path) -> tuple[str, int | None]:
             found_env = True
         if _RELATIVE_API_RE.search(text):
             found_rel = True
+        if _SAME_ORIGIN_RE.search(text):
+            found_same_origin = True
         if hardcoded_port is None:
             m = _HARDCODED_RE.search(text)
             if m:
@@ -556,10 +586,12 @@ def _detect_api_call_style(frontend_dir: Path) -> tuple[str, int | None]:
 
     if found_env:
         return ("env_based", None)
-    if hardcoded_port is not None:
-        return ("hardcoded", hardcoded_port)
     if found_rel:
         return ("relative", None)
+    if found_same_origin:
+        return ("same_origin", None)
+    if hardcoded_port is not None:
+        return ("hardcoded", hardcoded_port)
     return ("unknown", None)
 
 
@@ -642,7 +674,7 @@ _PROXY_CATCH_ALL = """\
 """
 
 
-def _patch_vite_config(sb_frontend: Path, spring_port: int = 8080, inject_proxy: bool = False) -> str | None:
+def _patch_vite_config(sb_frontend: Path, spring_port: int = 8080, inject_proxy: bool | str = False) -> str | None:
     """
     1. Rewrite existing localhost backend URLs in vite.config proxy to Docker service name.
     2. Copy server.proxy → preview.proxy (vite preview ignores server.proxy).
@@ -666,14 +698,21 @@ def _patch_vite_config(sb_frontend: Path, spring_port: int = 8080, inject_proxy:
         if not has_preview:
             server_m = _SERVER_BLOCK_RE.search(patched)
             if server_m and "proxy" in server_m.group(0):
-                preview_block = "preview: " + server_m.group(0) + ","
+                preview_block = "preview: " + server_m.group(1) + ","
                 insert_at = server_m.end()
-                patched = patched[:insert_at] + "\n  " + preview_block + patched[insert_at:]
+                rest = patched[insert_at:]
+                comma = "" if re.match(r"[ \t]*,", rest) else ","
+                patched = patched[:insert_at] + comma + "\n  " + preview_block + rest
                 has_preview = True
                 server_proxy_copied = True
 
-        # Step 3: inject catch-all proxy when requested and still no proxy exists
-        if inject_proxy and "proxy" not in patched:
+        # Step 3: inject catch-all proxy when requested.
+        # "always" (same_origin): inject even if a specific proxy already exists,
+        # because the app builds URLs from window.location.host and any path prefix
+        # must reach the backend.
+        # True / other truthy: inject only when no proxy block exists yet.
+        has_catchall = bool(re.search(r"""proxy\s*:\s*\{[^}]*['"]\/['"]""", patched))
+        if inject_proxy and not has_catchall and (inject_proxy == "always" or "proxy" not in patched):
             proxy_block = _PROXY_CATCH_ALL.format(target=target)
             m = _DEFINECONFIG_RE.search(patched)
             if m:
@@ -935,6 +974,10 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
     build_tool = _detect_build_tool(backend_src)
     extra_env  = _detect_spring_extra_env(backend_src)
 
+    # Merge placeholder dummies first, then let extra_env overwrite its known keys
+    placeholder_env = _detect_property_placeholders(backend_src)
+    extra_env = {**placeholder_env, **extra_env}
+
     # Copy source into sandbox (strips build artefacts and node_modules)
     sb_backend  = sandbox_dir / "backend"
     sb_frontend = sandbox_dir / "frontend"
@@ -946,6 +989,14 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
 
     # Apply source patches and collect warnings for each one that fires
     sandbox_warnings: list[str] = []
+    if placeholder_env:
+        names = sorted(placeholder_env)
+        sandbox_warnings.append(
+            f"application.properties has {len(names)} unresolved placeholder(s) "
+            f"({', '.join(names[:6])}{'…' if len(names) > 6 else ''}): "
+            f"injected sandbox dummy values so the app can start. "
+            f"Features using these credentials (OAuth2, external APIs, mail) will not function."
+        )
 
     if api_style == "hardcoded" and hardcoded_api_port:
         w = _strip_hardcoded_origin(sb_frontend, hardcoded_api_port)
@@ -954,7 +1005,10 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
     w = _patch_vite_config(
         sb_frontend,
         spring_port=spring_port,
-        inject_proxy=(api_style in ("relative", "hardcoded")),
+        inject_proxy=(
+            "always" if api_style == "same_origin"
+            else (api_style in ("relative", "hardcoded"))
+        ),
     )
     if w: sandbox_warnings.append(w)
 

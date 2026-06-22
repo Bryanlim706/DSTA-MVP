@@ -27,6 +27,7 @@ _PORT_FRONTEND_VITE = 5174
 _PORT_FRONTEND_CRA = 3000
 _PORT_BACKEND = 8001
 _PORT_BACKEND_FLASK = 5001
+_PORT_BACKEND_SPRING = 8080   # Spring Boot default — matches typical Vite proxy config
 _PORT_BACKEND_EXPRESS = 3001
 _PORT_STATIC = 8082
 
@@ -60,6 +61,11 @@ def _bootstrap_commands(ctx: dict, root: Path) -> list[_BootSpec]:
         if service_layout == "separate_frontend_backend":
             frontend_dir = _find_frontend_dir(root) or root
             cmd, port = _npm_cmd(frontend_dir, tooling, frontend_fw)
+            backend_spec = _backend_spec(root, backend_fw)
+            if backend_spec:
+                # Backend first so it has maximum startup time before Playwright crawls.
+                # crawl_port = bootstrap[-1][1] still resolves to the frontend port.
+                return [backend_spec, (cmd, port, frontend_dir)]
             return [(cmd, port, frontend_dir)]
         else:
             template_engine = ctx.get("template_engine")
@@ -117,6 +123,7 @@ def _backend_spec(root: Path, backend_fw: str) -> _BootSpec | None:
     if "express" in backend_fw or "nestjs" in backend_fw:
         return (_wrap_npm_cmd([npm, "start"]), _PORT_BACKEND_EXPRESS, root)
     if "spring" in backend_fw:
+        # Use 8080 (Spring Boot default) so the Vite dev proxy (localhost:8080) works without patching.
         # Search root and up to 2 levels of subdirs for mvnw.cmd/mvnw
         # (handles nested zip structures where the project is not at root)
         search_dirs = [root]
@@ -130,14 +137,14 @@ def _backend_spec(root: Path, backend_fw: str) -> _BootSpec | None:
             if (spring_root / "mvnw.cmd").exists():
                 return (
                     ["cmd", "/c", str(spring_root / "mvnw.cmd"), "spring-boot:run",
-                     f"-Dspring-boot.run.jvmArguments=-Dserver.port={_PORT_BACKEND}"],
-                    _PORT_BACKEND, spring_root,
+                     f"-Dspring-boot.run.jvmArguments=-Dserver.port={_PORT_BACKEND_SPRING}"],
+                    _PORT_BACKEND_SPRING, spring_root,
                 )
             if (spring_root / "mvnw").exists():
                 return (
                     [str(spring_root / "mvnw"), "spring-boot:run",
-                     f"-Dspring-boot.run.jvmArguments=-Dserver.port={_PORT_BACKEND}"],
-                    _PORT_BACKEND, spring_root,
+                     f"-Dspring-boot.run.jvmArguments=-Dserver.port={_PORT_BACKEND_SPRING}"],
+                    _PORT_BACKEND_SPRING, spring_root,
                 )
     return None
 
@@ -520,6 +527,12 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
 
         if not app_started:
             return _full_static(routes, reason="boot_failed")
+
+        # If a backend was also started (multi-process bootstrap), wait for it before crawling
+        # so API-populated elements appear in the Playwright DOM snapshot.
+        # Non-fatal: crawl continues even if the backend never responds (e.g. needs a DB).
+        if len(bootstrap) > 1:
+            await _wait_for_port(bootstrap[0][1], timeout=45.0)
 
         playwright_pages, playwright_unvisitable = await _crawl_routes(routes, crawl_port)
 

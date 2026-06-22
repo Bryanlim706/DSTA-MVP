@@ -41,6 +41,47 @@ function LoadingView({ job }: { job: Job | null }) {
   )
 }
 
+function EarlyResultsView({ job }: { job: Job }) {
+  const step0 = job.step_results.step_0
+  const step1 = job.step_results.step_1
+  const step2 = job.step_results.step_2
+
+  return (
+    <div className="min-h-screen bg-gray-50 px-4 py-12">
+      <div className="max-w-3xl mx-auto">
+        <div className="mb-6">
+          <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
+          {job.project_name && (
+            <p className="text-sm font-medium text-gray-600 mt-0.5">{job.project_name}</p>
+          )}
+          <p className="text-xs text-gray-400 mt-0.5">Steps 0–2 complete — generating implied requirements…</p>
+          <p className="text-[10px] text-gray-300 mt-0.5 font-mono">{job.job_id}</p>
+        </div>
+
+        {step0 && <ClassificationResult result={step0} />}
+        {step1 && (
+          <div className="mt-6">
+            <RequirementsResult result={step1} />
+          </div>
+        )}
+        {step2 && (
+          <div className="mt-6">
+            <ObviousRequirementsResult result={step2} />
+          </div>
+        )}
+
+        <div className="mt-6 flex items-center gap-3 px-5 py-4 bg-white rounded-xl border border-gray-200">
+          <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-gray-700">Step 3 — Generating implied requirements…</p>
+            <p className="text-xs text-gray-400 mt-0.5">This usually takes 10–15 seconds</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ErrorView({ error, onRetry }: { error: string | null; onRetry: () => void }) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -296,7 +337,11 @@ export default function App() {
       <Sidebar stage={stage} currentStep={job?.current_step} jobStatus={job?.status} />
       <main className="flex-1 overflow-y-auto">
         {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
-        {stage === 'loading' && <LoadingView job={job} />}
+        {stage === 'loading' && (
+          job?.step_results?.step_2
+            ? <EarlyResultsView job={job} />
+            : <LoadingView job={job} />
+        )}
         {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
         {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />}
         {stage === 'error' && <ErrorView error={error} onRetry={reset} />}

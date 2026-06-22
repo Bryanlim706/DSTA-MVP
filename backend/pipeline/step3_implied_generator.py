@@ -26,15 +26,14 @@ PASS 1 — SOP-TRIGGERED FUNCTIONS
 
 For each node that appears in Step 1 stated functions, check whether any pattern below applies. Generate the corresponding function if it is not already covered by a stated or obvious function.
 
-DEDUPLICATION RULES — skip a pattern if any of these apply:
-1. A stated function already covers the exact same interaction type on the same page (same verb + same object, even if worded differently). "filter by size" stated → do not generate "view filter options" — same action, different label.
-2. An obvious function (OBV-xxx) already covers navigation TO or FROM a node. Do not generate another "access X" or "open X" or "close X" function for the same node — the obvious functions are authoritative for connectivity.
-3. A new-page SOP pattern (auth → profile page; preferences → settings page; etc.) fires on a node that already EXISTS as a stated node with stated sub-functions. If the page already exists, the pattern is satisfied — do not re-generate its contents as new functions.
-4. The function would only assert that a page/element exists as a prerequisite for interactions already stated. Do not generate "User can view list" or "User can select item" when the stated functions already have those as primary path entities.
+DEDUPLICATION — CORE RULE:
+Before generating any function, ask: does a stated or obvious function already give the user control over the same target? If yes, skip — regardless of how the verb is phrased.
 
-5. MULTI-OBJECT TYPES: When the app manages multiple distinct named object types (e.g., "categories" AND "tasks"), fire ALL applicable patterns independently for EACH object type. "User can edit a task" and "User can edit a category name" are distinct functions — generate both. Never conflate two different object types into one function.
+The test is capability, not wording. If the user can already accomplish the same goal via a stated function, skip — regardless of how the verb or path is phrased. A richer path structure does not make a distinct function.
 
-Do NOT skip just because functions share elements — edit-item and delete-item both touch the same list item but are distinct interactions. When in doubt, generate.
+MULTI-OBJECT TYPES: When the app manages multiple distinct named object types (e.g., "categories" AND "tasks"), fire ALL applicable patterns independently for EACH object type. "User can edit a task" and "User can edit a category name" are distinct functions — generate both. Never conflate two different object types into one function.
+
+Do NOT skip just because functions share elements — edit-item and delete-item both touch the same list item but are distinct interactions. When in doubt, generate — but only if the function adds a capability the user does not already have.
 
 Fires ONLY on nodes from Step 1 stated functions — NOT on nodes you generate in this pass.
 
@@ -83,7 +82,7 @@ Read the project_summary and all stated functions. Before generating any functio
 
 Be BOLD — generate functions even at confidence 0.50–0.70 if they represent genuine domain gaps. This pass drives FA (Functional Appropriateness) scoring: a well-calibrated app should have most of these; their absence is meaningful and scored. Aim for breadth — it is better to generate a function the reviewer demotes than to silently omit a real gap.
 
-Do NOT re-generate functions already produced in Pass 1, already stated in Step 1, or already covered by a Step 2 obvious function. Before writing each item, confirm the description is genuinely new.
+Do NOT re-generate functions already produced in Pass 1, already stated in Step 1, or already covered by a Step 2 obvious function. Apply the same capability test: if the user can already accomplish this goal via a stated function — even if worded differently — skip it.
 
 Gate: only generate functions a user can independently navigate to or invoke — a page, form, modal, view, panel, or interactive feature. Do NOT generate system reactions or behavioral properties ("User sees validation error", "User receives confirmation message", "User is redirected when X") — those are acceptance criteria, not functions.
 

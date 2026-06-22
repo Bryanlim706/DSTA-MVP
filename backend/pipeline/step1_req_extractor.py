@@ -78,7 +78,7 @@ PRIMARY ENTITY RULES:
 - State-variant nodes ("Task List Page (filtered)", "Task List Page (updated)"): OMIT entirely — they are not scored. End the path at the last interaction element or edge.
 
 VAGUE REQUIREMENTS:
-If the text is too broad to construct a specific path (e.g. "users can manage their tasks"), set vague: true and use a minimal path with one node only. Step 3 will decompose it.
+Broad statements must be decomposed before resorting to vague. If the text implies multiple sub-actions (e.g. "users can manage their tasks"), generate one specific function per inferred sub-action (view list, create, edit, delete) — all sharing the same source_quote. Only mark vague: true if the text remains too broad to identify any specific interaction even after attempting decomposition (e.g. "the system supports task operations"). A vague function uses a minimal single-node path; Step 3 will further decompose it.
 
 SCREENSHOT PAGES:
 A markdown section heading (`###`) immediately followed by a screenshot image (`![...](...)`), with no other requirement text, documents that a page exists. Extract it as a vague function: "User can access [Page Name]" with `vague: true` and `source_quote` set to the heading text (e.g. "Welcome Page"). Extract one function per page heading. Do NOT extract the image line itself as the quote.
@@ -102,7 +102,13 @@ path: [
   {"type": "edge",    "label": "submit new task", "primary": true, "from": "Task List Page", "to": "Task List Page"}
 ]
 
-"Users can manage their tasks" — vague, minimal path:
+"Users can manage their tasks" — decompose first, one function per sub-action (all share the same source_quote):
+  "User can view tasks"   → path: [node: Task List Page (false), element: task list (true)]
+  "User can add a task"   → path: [node: Task List Page (false), element: add task form (true), edge: submit new task (true)]
+  "User can edit a task"  → path: [node: Task List Page (false), element: edit task form (true), edge: save changes (true)]
+  "User can delete a task"→ path: [node: Task List Page (false), element: delete button (true), edge: confirm delete (true)]
+
+"The system supports task operations" — still too broad after decomposition attempt, use vague:
 path: [{"type": "node", "label": "Task Management Page", "primary": true}]
 vague: true
 

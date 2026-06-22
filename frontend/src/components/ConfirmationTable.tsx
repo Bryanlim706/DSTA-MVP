@@ -242,6 +242,7 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
     return m
   })
 
+  const [advisoryOpen, setAdvisoryOpen] = useState(false)
   const [customCount, setCustomCount] = useState(0)
   const [newDesc, setNewDesc] = useState('')
   const [newArea, setNewArea] = useState('')
@@ -392,28 +393,34 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
         {/* Section 2: L1b Advisory */}
         {advisoryArr.length > 0 && (
           <div className="bg-white rounded-xl border border-yellow-200 overflow-hidden mb-4">
-            <div className="px-5 py-3 border-b border-yellow-100 bg-yellow-50 flex items-center gap-3">
+            <button
+              className="w-full px-5 py-3 border-b border-yellow-100 bg-yellow-50 flex items-center gap-3 text-left hover:bg-yellow-100 transition-colors"
+              onClick={() => setAdvisoryOpen(v => !v)}
+            >
               <span className="text-sm font-semibold text-yellow-800">Advisory (L1b — not in score)</span>
               <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">{advisoryArr.length}</span>
-            </div>
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-yellow-100">
-                  <th className="px-4 py-2">ID</th>
-                  <th className="px-4 py-2">Function</th>
-                  <th className="px-4 py-2">Category</th>
-                  <th className="px-4 py-2">Confidence</th>
-                  <th className="px-4 py-2">Strength</th>
-                  <th className="px-4 py-2"></th>
-                  <th className="px-4 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {advisoryArr.map(req => (
-                  <AdvisoryRow key={req.req_id} req={req} onPromote={promoteToL1a} />
-                ))}
-              </tbody>
-            </table>
+              <span className="ml-auto text-xs text-yellow-600">{advisoryOpen ? '▲' : '▼'}</span>
+            </button>
+            {advisoryOpen && (
+              <table className="w-full text-left">
+                <thead>
+                  <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-yellow-100">
+                    <th className="px-4 py-2">ID</th>
+                    <th className="px-4 py-2">Function</th>
+                    <th className="px-4 py-2">Category</th>
+                    <th className="px-4 py-2">Confidence</th>
+                    <th className="px-4 py-2">Strength</th>
+                    <th className="px-4 py-2"></th>
+                    <th className="px-4 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {advisoryArr.map(req => (
+                    <AdvisoryRow key={req.req_id} req={req} onPromote={promoteToL1a} />
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
 
