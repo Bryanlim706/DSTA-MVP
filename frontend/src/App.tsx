@@ -84,6 +84,9 @@ function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () 
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
+            {job.project_name && (
+              <p className="text-sm font-medium text-gray-600 mt-0.5">{job.project_name}</p>
+            )}
             <p className="text-xs text-gray-400 mt-0.5">
               {job.status === 'step_7_5_complete' ? 'Steps 0–7.5 complete'
             : job.status === 'step_7_complete' || job.status === 'step_7_5_running' ? 'Steps 0–7 complete'

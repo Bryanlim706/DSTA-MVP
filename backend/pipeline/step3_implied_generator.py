@@ -93,17 +93,22 @@ category: "inf"
 
 PATH CONSTRUCTION RULES (both passes):
 
-1. Every function must have a complete path with entry + body + exit.
-   - If introducing a page NOT in Step 1: first path entity MUST be an edge from an existing stated page (never null, never fabricated origin).
-   - Include the body elements the user interacts with.
-   - Include an exit edge back to an existing stated page.
+PRIMARY flag — one rule for all functions:
+- element, edge → always primary: true
+- node → always primary: false
+- Exception: if the function has no element or edge (sole purpose is asserting a page exists), the node is primary: true
 
-2. Primary entity flags:
-   - SOP list/detail element functions (filter, edit, delete): element = primary, containing page = primary: false
-   - SOP element + submit edge: both element and edge are primary
-   - New page introductions: entry edge + destination page = both primary; exit edge = primary: false
-   - Multi-hop flows: all entities primary
-   - State-variant or result-state trailing entities: OMIT entirely. Do NOT append a node like "Filtered Employee List" or "Employee List Page (updated)", and do NOT append a trailing element like "filtered employee list", "search results", or "reordered employee list". For same-page interactions (filter, search, sort, edit, delete), the path terminates at the last interaction element or submit edge — never at a post-interaction result state.
+Page scope — two cases:
+
+A. EXISTING PAGE (page already in Step 1):
+   node (primary: false) → element(s) (primary: true) → submit edge if applicable (primary: true)
+   Do NOT add entry or exit navigation edges — navigation to/from existing pages is already covered by stated and obvious functions.
+
+B. NEW PAGE (page not in Step 1):
+   entry edge (primary: true, from: existing stated page) → new page node (primary: false) → body elements (primary: true) → exit edge (primary: true, to: existing stated page)
+   The entry edge must reference a real existing stated page — never null, never fabricated.
+
+State-variant or result-state trailing entities: OMIT entirely. Path terminates at the last interaction element or submit edge — never at a post-interaction result state (no "Filtered List", no "Page (updated)").
 
 ---
 
@@ -113,11 +118,9 @@ OUTPUT SCHEMA:
   "req_id": "GEN-001",
   "description": "User can [action]",
   "path": [
-    {"type": "edge",    "label": "navigate to account",  "primary": true,  "from": "Dashboard", "to": "Account Page"},
-    {"type": "node",    "label": "Account Page",          "primary": true},
-    {"type": "element", "label": "profile information",  "primary": true,  "ui_node": "Account Page"},
-    {"type": "element", "label": "change password form", "primary": true,  "ui_node": "Account Page"},
-    {"type": "edge",    "label": "return to dashboard",  "primary": false, "from": "Account Page", "to": "Dashboard"}
+    {"type": "node",    "label": "Task Page",   "primary": false},
+    {"type": "element", "label": "merge button", "primary": true,  "ui_node": "Task Page"},
+    {"type": "edge",    "label": "submit merge", "primary": true,  "from": "Task Page", "to": "Task Page"}
   ],
   "source": "generated",
   "tag": "generated",

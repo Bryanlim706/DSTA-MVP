@@ -25,6 +25,7 @@ SPEC_DOC_KEYWORDS = {
 README_NAMES = {"readme.md", "readme.rst", "readme.txt", "readme"}
 
 
+# Lowercases and collapses all whitespace to single spaces for source_quote verification.
 def _norm(text: str) -> str:
     return re.sub(r'\s+', ' ', text.lower().strip())
 
@@ -71,11 +72,10 @@ Fields per entity:
   from/to  — (edges only) source and destination page names
 
 PRIMARY ENTITY RULES:
-- Multi-hop flows (log in, register, checkout): ALL entities are primary — every step is load-bearing.
-- New page access (first function to assert a page exists): page node + entry edge are both primary.
-- Feature functions (add, filter, edit, delete on an existing page): the element(s) and submit edge are primary; the containing page node is primary: false if the page is stated by another function.
-- Navigation cross-links: the edge is primary; surrounding nodes are primary: false.
-- State-variant destination nodes ("Task List Page (filtered)", "Task List Page (updated)"): OMIT them entirely — they are not scored. End the path at the last interaction (submit edge or element). Never append a result-state or updated-state node.
+- element, edge → always primary: true. These are what the function asserts.
+- node → always primary: false. Pages are traversal context, not assertions.
+- Exception: if the function has no element or edge (sole purpose is asserting a page exists), the node is primary: true.
+- State-variant nodes ("Task List Page (filtered)", "Task List Page (updated)"): OMIT entirely — they are not scored. End the path at the last interaction element or edge.
 
 VAGUE REQUIREMENTS:
 If the text is too broad to construct a specific path (e.g. "users can manage their tasks"), set vague: true and use a minimal path with one node only. Step 3 will decompose it.
@@ -87,15 +87,15 @@ A markdown section heading (`###`) immediately followed by a screenshot image (`
 
 PATH EXAMPLES
 
-"Users should be able to log in" — multi-hop, all primary:
+"Users should be able to log in" — elements and edge are primary; pages are context:
 path: [
-  {"type": "node",    "label": "Login Page",         "primary": true},
+  {"type": "node",    "label": "Login Page",         "primary": false},
   {"type": "element", "label": "login form",         "primary": true, "ui_node": "Login Page"},
   {"type": "edge",    "label": "submit credentials", "primary": true, "from": "Login Page", "to": "Dashboard"},
-  {"type": "node",    "label": "Dashboard",          "primary": true}
+  {"type": "node",    "label": "Dashboard",          "primary": false}
 ]
 
-"The add-task button opens a form to create a new task" — element + edge primary; page context (no trailing state-variant node):
+"The add-task button opens a form to create a new task" — same rule:
 path: [
   {"type": "node",    "label": "Task List Page", "primary": false},
   {"type": "element", "label": "add task form",  "primary": true, "ui_node": "Task List Page"},
@@ -145,6 +145,7 @@ Return ONLY a valid JSON object (no markdown fences, no explanation):
 }"""
 
 
+# Descends into single-child directories to unwrap zip wrappers, returning the real project root.
 def _find_project_root(extract_to: Path) -> Path:
     root = extract_to
     while True:
@@ -156,6 +157,7 @@ def _find_project_root(extract_to: Path) -> Path:
     return root
 
 
+# Walks the project tree collecting README files (depth ≤ 2) and keyword-matched spec docs (.md/.rst/.txt); returns them split into priority buckets with truncation and exclusion tracking.
 def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str], int]:
     readme_bucket: dict[str, str] = {}
     spec_bucket: dict[str, str] = {}
@@ -209,16 +211,22 @@ def _find_spec_docs(root: Path) -> tuple[dict[str, str], list[str], int]:
     return merged, truncated, excluded_count
 
 
+# Assembles the LLM user message: spec docs first (to avoid anchoring bias), then the requirements text, then an instruction treating all sections equally.
 def _build_user_message(requirements_text: str, spec_docs: dict[str, str]) -> str:
     parts = []
-    if requirements_text:
-        parts.append(f"=== USER REQUIREMENTS ===\n{requirements_text}")
-    for label, content in spec_docs.items():
+    for label, content in spec_docs.items():          # docs first — no anchoring bias
         parts.append(f"=== {label} ===\n{content}")
-    parts.append("Extract all explicitly stated functional requirements as functions with paths.")
+    if requirements_text.strip():
+        parts.append(f"=== user_input ===\n{requirements_text}")   # same neutral format as docs
+    parts.append(
+        "Extract all explicitly stated functional requirements from ALL sections above. "
+        "Every section is an equal source — do not skip content in one section because "
+        "another section covers a similar topic. Set source to the section name the requirement came from."
+    )
     return "\n\n".join(parts)
 
 
+# Parses the LLM's raw text into a (requirements list, project_summary) tuple, stripping markdown fences and recovering a partial array when the response was truncated mid-JSON.
 def _parse_llm_response(raw: str) -> tuple[list, str]:
     text = raw.strip()
     if "```json" in text:
@@ -249,6 +257,7 @@ def _parse_llm_response(raw: str) -> tuple[list, str]:
     raise ValueError("Could not parse LLM response as requirements")
 
 
+# Filters raw LLM items: drops entries without a verifiable source_quote, validates path arrays, assigns weights from priority, and re-sequences req_ids.
 def _validate_and_normalise(
     items: list,
     requirements_text: str,
@@ -302,6 +311,7 @@ def _validate_and_normalise(
     return valid, dropped
 
 
+# Entry point: selects spec docs based on user source flags, calls claude-haiku with 529-retry, parses and validates requirements, and returns the full Step 1 result envelope.
 async def run(
     requirements_text: str,
     extract_to: Path,

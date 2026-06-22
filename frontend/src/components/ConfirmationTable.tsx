@@ -329,6 +329,9 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
 
         <div className="mb-6">
           <h1 className="text-xl font-semibold text-gray-900">Step 3.5 — Review Functions</h1>
+          {job.project_name && (
+            <p className="text-sm font-medium text-gray-600 mt-0.5">{job.project_name}</p>
+          )}
           <p className="text-sm text-gray-500 mt-1">
             Confirm what goes into the L1a scoring pool. Edit priorities, remove items, promote generated suggestions, or add your own.
           </p>

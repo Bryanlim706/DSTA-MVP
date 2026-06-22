@@ -118,8 +118,8 @@ _SPA_FRAMEWORKS = {
 }
 
 
+# Returns True if the file tree contains SSR template files in views/ or templates/, indicating server-side rendering.
 def _has_html_views(file_tree: list[str]) -> bool:
-    """True if the project appears to server-side render HTML pages."""
     for path in file_tree:
         if any(path.endswith(ext) for ext in _SSR_SPECIFIC_EXTS):
             return True
@@ -132,6 +132,7 @@ def _has_html_views(file_tree: list[str]) -> bool:
 
 # --- Tooling, template engine, layout, and server-route helpers ---
 
+# Identifies the frontend build tool (Vite, CRA, Vue CLI, Webpack, Parcel) from JS deps and config filenames.
 def _detect_frontend_tooling(js_deps: dict[str, str], file_tree: list[str]) -> str | None:
     if "vite" in js_deps or any("vite.config" in p for p in file_tree):
         return "Vite"
@@ -163,6 +164,7 @@ _TEMPLATE_ENGINE_EXTS: dict[str, str] = {
 }
 
 
+# Returns the SSR template engine name (Jinja2, Thymeleaf, Blade, EJS, etc.) from file extensions and Java build content.
 def _detect_template_engine(file_tree: list[str], java_build_content: str = "") -> str | None:
     for path in file_tree:
         for ext, engine in _TEMPLATE_ENGINE_EXTS.items():
@@ -175,6 +177,7 @@ def _detect_template_engine(file_tree: list[str], java_build_content: str = "") 
     return None
 
 
+# Returns how the project is structured: separate_frontend_backend, monorepo, single_project_ssr, single_project, or unknown.
 def _detect_service_layout(
     file_tree: list[str],
     project_type: str,
@@ -197,6 +200,7 @@ def _detect_service_layout(
     frontend_kws = {"frontend", "client", "web", "ui"}
     backend_kws = {"backend", "server", "api", "service"}
 
+    # Returns True if directory name d equals or starts/ends with any keyword, separated by -, _, or space.
     def _matches(d: str, kws: set[str]) -> bool:
         dl = d.lower()
         return any(
@@ -230,8 +234,8 @@ _STATIC_ASSET_DIRS = {"static", "public", "www", "assets"}
 _PAGE_COMPONENT_EXTS = {".tsx", ".jsx", ".vue", ".svelte"}
 
 
+# Walks the file tree and returns deduplicated page/screen filenames: HTML templates, SPA component files, and Android Activity files.
 def _discover_pages(file_tree: list[str], project_type: str, frontend_fw: str | None, template_engine: str | None) -> list[str]:
-    """Return deduplicated page/screen filenames found in the project file tree."""
     seen: set[str] = set()
     pages: list[str] = []
 
@@ -273,6 +277,7 @@ def _discover_pages(file_tree: list[str], project_type: str, frontend_fw: str | 
     return pages
 
 
+# Returns True if a meta-framework (Next.js, Nuxt, SvelteKit, Remix) has API route directories in the file tree.
 def _detect_server_routes(frontend_fw: str | None, file_tree: list[str]) -> bool:
     if frontend_fw not in _META_FW_WITH_ROUTES:
         return False
@@ -356,6 +361,7 @@ _BACKEND_TEST_PRIMARY: dict[str, str] = {
 }
 
 
+# Returns the primary and secondary test tools for this project type, with backend-framework-specific overrides applied.
 def _get_test_strategy(project_type: str, backend_framework: str | None) -> dict:
     strategy = dict(TEST_STRATEGY_MAP.get(project_type, TEST_STRATEGY_MAP["unknown"]))
     if backend_framework:
@@ -424,10 +430,12 @@ CLASSIFICATION_TOOL: dict = {
 
 # --- Helpers ---
 
+# Strips version specifiers, extras, and whitespace from a raw dependency string (e.g. "flask>=2.0[async]" → "flask").
 def _parse_pkg_name(raw: str) -> str:
     return re.split(r'[<>=~!@\[\s;]', raw.strip())[0].lower().strip()
 
 
+# Reads all Python dependency manifests under root (requirements*.txt, pyproject.toml, Pipfile, setup.cfg) and returns a unified set of lowercased package names.
 def _collect_python_packages(root: Path) -> set[str]:
     packages: set[str] = set()
 
@@ -489,6 +497,7 @@ def _collect_python_packages(root: Path) -> set[str]:
     return packages
 
 
+# Scans JS deps for a known frontend framework key and returns the human-readable name, or None.
 def _detect_frontend(deps: dict[str, str]) -> str | None:
     for key, name in FRONTEND_FRAMEWORKS.items():
         if key.lower() in deps:
@@ -496,6 +505,7 @@ def _detect_frontend(deps: dict[str, str]) -> str | None:
     return None
 
 
+# Scans JS production deps for a known Node.js backend framework key and returns its name, or None.
 def _detect_backend_js(deps: dict[str, str]) -> str | None:
     for key, name in BACKEND_FRAMEWORKS_JS.items():
         if key.lower() in deps:
@@ -503,6 +513,7 @@ def _detect_backend_js(deps: dict[str, str]) -> str | None:
     return None
 
 
+# Scans the Python packages set for a known backend framework and returns its name, or None.
 def _detect_backend_py(packages: set[str]) -> str | None:
     for key, name in BACKEND_FRAMEWORKS_PY.items():
         if key in packages:
@@ -510,12 +521,14 @@ def _detect_backend_py(packages: set[str]) -> str | None:
     return None
 
 
+# Concatenates all pom.xml and build.gradle contents from config_files for keyword searching (Java framework and template engine detection).
 def _java_build_content(config_files: dict[str, str]) -> str:
     return " ".join(v for k, v in config_files.items() if "pom.xml" in k or "build.gradle" in k)
 
 
 # --- File scanner ---
 
+# Walks the project root, collecting file tree, config file contents (≤5 000 chars each), extension frequency counts, and JS dep dicts (merged + prod-only). Skips IGNORE_DIRS.
 def _scan_project(root: Path) -> dict:
     file_tree: list[str] = []
     config_contents: dict[str, str] = {}
@@ -563,6 +576,7 @@ def _scan_project(root: Path) -> dict:
     }
 
 
+# Descends into single-child directories to unwrap zip wrappers at any depth until it reaches the real project root.
 def _find_project_root(extract_to: Path) -> Path:
     """Unwrap single-directory zip wrappers at any depth (e.g. myproject/myproject/src)."""
     root = extract_to
@@ -575,6 +589,7 @@ def _find_project_root(extract_to: Path) -> Path:
     return root
 
 
+# For frontend_only and electron_app projects, replaces the static secondary test tool with the actual tool found in JS devDependencies (Vitest > Jest+RTL > Jest).
 def _apply_test_strategy_overrides(result: dict, js_deps: dict) -> None:
     """Override the static test_strategy secondary based on actual test deps in the project."""
     project_type = result.get("project_type", "unknown")
@@ -599,6 +614,7 @@ def _apply_test_strategy_overrides(result: dict, js_deps: dict) -> None:
 
 # --- Rule-based classifier ---
 
+# Attempts deterministic project classification from config files and extension counts. Returns a result dict on success or None to trigger LLM fallback.
 def _classify_by_rules(root: Path, scan: dict) -> dict | None:
     """Returns a result dict if rules are confident, None to trigger LLM fallback."""
     ext_counts = scan["extension_counts"]
@@ -852,6 +868,7 @@ def _classify_by_rules(root: Path, scan: dict) -> dict | None:
 
 # --- LLM fallback ---
 
+# Formats the file tree, extension counts, and config file contents into a single prompt string for the LLM classification call.
 def _build_llm_message(scan: dict) -> str:
     tree_str = "\n".join(scan["file_tree"])
     ext_str = json.dumps(scan["extension_counts"], indent=2)
@@ -879,6 +896,7 @@ _LLM_FALLBACK = {
 }
 
 
+# Calls claude-haiku via forced tool use to classify the project, then computes template_engine, service_layout, server_routes, and test_strategy deterministically from the LLM's output.
 async def _classify_by_llm(scan: dict, client: anthropic.AsyncAnthropic) -> dict:
     response = await client.messages.create(
         model="claude-haiku-4-5-20251001",
@@ -939,6 +957,7 @@ async def _classify_by_llm(scan: dict, client: anthropic.AsyncAnthropic) -> dict
 
 # --- Entry point ---
 
+# Entry point: scans the project, runs rule-based classification, falls back to LLM when confidence is medium or rules return None, attaches metadata, and returns the full Step 0 result.
 async def run(extract_to: Path, client: anthropic.AsyncAnthropic) -> dict:
     root = _find_project_root(extract_to)
     scan = await asyncio.to_thread(_scan_project, root)

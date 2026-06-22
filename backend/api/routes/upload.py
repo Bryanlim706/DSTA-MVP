@@ -40,6 +40,7 @@ async def upload_project(
     create_job(
         job_id,
         {
+            "project_name": Path(project_zip.filename).stem,
             "zip_path": str(zip_path),
             "requirements_text": requirements.strip(),
             "extracted_path": str(job_dir / "extracted"),

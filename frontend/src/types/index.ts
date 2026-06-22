@@ -371,4 +371,5 @@ export interface Job {
   created_at: string
   updated_at: string
   requirements_text?: string
+  project_name?: string
 }
