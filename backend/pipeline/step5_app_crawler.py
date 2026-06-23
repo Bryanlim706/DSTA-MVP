@@ -102,7 +102,7 @@ def _wrap_npm_cmd(cmd: list[str]) -> list[str]:
 
 def _npm_cmd(cwd: Path, tooling: str, frontend_fw: str) -> tuple[list[str], int]:
     npm = shutil.which("npm") or "npm"
-    if "vite" in tooling or "vite" in frontend_fw:
+    if "vite" in tooling.lower() or "vite" in frontend_fw.lower():
         return (_wrap_npm_cmd([npm, "run", "dev", "--", "--port", str(_PORT_FRONTEND_VITE)]), _PORT_FRONTEND_VITE)
     if "next" in frontend_fw:
         return (_wrap_npm_cmd([npm, "run", "dev", "--", "-p", str(_PORT_FRONTEND_CRA)]), _PORT_FRONTEND_CRA)
