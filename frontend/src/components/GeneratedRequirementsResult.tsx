@@ -101,6 +101,7 @@ function ReqTable({ reqs }: { reqs: Step3Requirement[] }) {
 export default function GeneratedRequirementsResult({ result }: { result: Step3Result }) {
   const l1a = result.requirements.filter(r => r.placement === 'l1a')
   const l1b = result.requirements.filter(r => r.placement === 'l1b')
+  const [l1bOpen, setL1bOpen] = useState(false)
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -134,11 +135,15 @@ export default function GeneratedRequirementsResult({ result }: { result: Step3R
           )}
           {l1b.length > 0 && (
             <div>
-              <div className="px-5 py-2 bg-yellow-50 border-b border-yellow-100 flex items-center gap-2">
+              <button
+                className="w-full px-5 py-2 bg-yellow-50 border-b border-yellow-100 flex items-center gap-2 text-left hover:bg-yellow-100 transition-colors"
+                onClick={() => setL1bOpen(v => !v)}
+              >
                 <span className="text-xs font-semibold text-yellow-700">L1b Advisory</span>
                 <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">{l1b.length}</span>
-              </div>
-              <ReqTable reqs={l1b} />
+                <span className="ml-auto text-xs text-yellow-600">{l1bOpen ? '▲' : '▼'}</span>
+              </button>
+              {l1bOpen && <ReqTable reqs={l1b} />}
             </div>
           )}
         </>

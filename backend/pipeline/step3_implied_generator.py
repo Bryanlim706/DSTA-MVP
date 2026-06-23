@@ -242,6 +242,7 @@ def _validate_and_normalise(
     all_reqs = step1_requirements + step2_requirements
     stated_lower = {r["description"].lower() for r in all_reqs}
     valid_step1_ids = {r.get("req_id", "") for r in step1_requirements}
+    vague_step1_ids = {r.get("req_id", "") for r in step1_requirements if r.get("vague")}
     valid = []
     dropped = 0
 
@@ -317,11 +318,12 @@ def _validate_and_normalise(
             if isinstance(d, str) and d in valid_step1_ids
         ]
 
-        # Validate unpacks pointer — LLM occasionally returns a list instead of a string
+        # Validate unpacks pointer — must be a string and must point to a vague stated function.
+        # Non-vague stated functions cannot have children; reject the pointer if the target is non-vague.
         unpacks = item.get("unpacks")
         if not isinstance(unpacks, str):
             unpacks = None
-        item["unpacks"] = unpacks if unpacks and unpacks in valid_step1_ids else None
+        item["unpacks"] = unpacks if unpacks and unpacks in vague_step1_ids else None
 
         valid.append(item)
 

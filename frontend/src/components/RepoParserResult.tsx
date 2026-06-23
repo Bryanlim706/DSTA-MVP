@@ -85,7 +85,7 @@ export default function RepoParserResult({ result, loading }: Props) {
         <div className="flex items-center gap-3">
           <div className="h-4 w-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Step 4 — Repo Parser</h2>
+            <h2 className="text-base font-semibold text-gray-900">Repo Parser</h2>
             <p className="text-sm text-gray-500 mt-0.5">Analysing codebase with Tree-sitter…</p>
           </div>
         </div>
@@ -98,7 +98,7 @@ export default function RepoParserResult({ result, loading }: Props) {
   if (result.error) {
     return (
       <div className="bg-white border border-red-200 rounded-xl p-6 shadow-sm">
-        <h2 className="text-base font-semibold text-gray-900 mb-2">Step 4 — Repo Parser</h2>
+        <h2 className="text-base font-semibold text-gray-900 mb-2">Repo Parser</h2>
         <p className="text-sm text-red-600">{result.error}</p>
       </div>
     )
@@ -119,7 +119,7 @@ export default function RepoParserResult({ result, loading }: Props) {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-base font-semibold text-gray-900">Step 4 — Repo Parser</h2>
+          <h2 className="text-base font-semibold text-gray-900">Repo Parser</h2>
           <p className="text-sm text-gray-500 mt-0.5">Static L3 inventory extracted from source</p>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">

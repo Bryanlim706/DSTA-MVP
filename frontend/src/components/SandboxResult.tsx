@@ -85,7 +85,7 @@ export default function SandboxResult({
       <div className="bg-white border border-gray-200 rounded-xl p-5">
         <div className="flex items-center gap-3">
           <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-          <span className="text-sm text-gray-500">Step 11 — Booting app in Docker…</span>
+          <span className="text-sm text-gray-500">Booting app in Docker…</span>
         </div>
         <p className="text-xs text-gray-400 mt-2 ml-7">
           First run downloads Docker base images and Maven dependencies — this can take 3–8 minutes.
@@ -103,7 +103,7 @@ export default function SandboxResult({
       {/* Header */}
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-900">Step 11 — Test Sandbox</h3>
+          <h3 className="text-sm font-semibold text-gray-900">Test Sandbox</h3>
           <p className="text-xs text-gray-400 mt-0.5">Docker boot · Spring Boot + React (Vite / CRA / Angular / Next.js)</p>
         </div>
         <div className="flex items-center gap-2">

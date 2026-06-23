@@ -134,6 +134,15 @@ function RequirementRow({ req }: { req: MappedRequirement }) {
   )
 }
 
+export function MappedRequirementList({ reqs }: { reqs: MappedRequirement[] }) {
+  if (reqs.length === 0) return null
+  return (
+    <div className="space-y-2">
+      {reqs.map(req => <RequirementRow key={req.req_id} req={req} />)}
+    </div>
+  )
+}
+
 export default function MappingResult({ result, loading }: Props) {
   const [showUnlinkedL2, setShowUnlinkedL2] = useState(false)
   const [showUnlinkedL3, setShowUnlinkedL3] = useState(false)

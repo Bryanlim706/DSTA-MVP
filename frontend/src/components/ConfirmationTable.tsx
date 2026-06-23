@@ -329,7 +329,7 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
       <div className="max-w-4xl mx-auto">
 
         <div className="mb-6">
-          <h1 className="text-xl font-semibold text-gray-900">Step 3.5 — Review Functions</h1>
+          <h1 className="text-xl font-semibold text-gray-900">Review Functions</h1>
           {job.project_name && (
             <p className="text-sm font-medium text-gray-600 mt-0.5">{job.project_name}</p>
           )}
@@ -338,7 +338,7 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
           </p>
           {vagueIds.size > 0 && (
             <p className="text-xs text-orange-600 mt-1">
-              {vagueIds.size} vague stated function{vagueIds.size > 1 ? 's were' : ' was'} auto-replaced by their Step 3 children — all children shown in L1a for review.
+              {vagueIds.size} vague stated function{vagueIds.size > 1 ? 's were' : ' was'} auto-replaced by their generated children — all children shown in L1a for review.
             </p>
           )}
           <p className="text-[10px] text-gray-300 mt-1 font-mono">{job.job_id}</p>

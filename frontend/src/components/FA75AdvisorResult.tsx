@@ -65,7 +65,7 @@ export default function FA75AdvisorResult({ result, loading }: Props) {
         <div className="flex items-center gap-3">
           <div className="h-4 w-4 rounded-full border-2 border-purple-500 border-t-transparent animate-spin" />
           <div>
-            <p className="text-sm font-semibold text-gray-900">Step 7.5 — FA Advisor</p>
+            <p className="text-sm font-semibold text-gray-900">Appropriateness Advisor</p>
             <p className="text-xs text-gray-500 mt-0.5">
               Generating codebase-grounded improvement suggestions…
             </p>
@@ -80,7 +80,7 @@ export default function FA75AdvisorResult({ result, loading }: Props) {
   if (result.error) {
     return (
       <div className="bg-white border border-red-200 rounded-xl p-6 shadow-sm">
-        <p className="text-sm font-semibold text-gray-900">Step 7.5 — FA Advisor</p>
+        <p className="text-sm font-semibold text-gray-900">Appropriateness Advisor</p>
         <p className="text-xs text-red-600 mt-1">{result.error}</p>
       </div>
     )
@@ -89,7 +89,7 @@ export default function FA75AdvisorResult({ result, loading }: Props) {
   if (result.suggestions.length === 0) {
     return (
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-        <p className="text-sm font-semibold text-gray-900">Step 7.5 — FA Advisor</p>
+        <p className="text-sm font-semibold text-gray-900">Appropriateness Advisor</p>
         <p className="text-xs text-gray-500 mt-1">
           No codebase-grounded suggestions identified.
         </p>
@@ -100,7 +100,7 @@ export default function FA75AdvisorResult({ result, loading }: Props) {
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
       <div>
-        <p className="text-base font-semibold text-gray-900">Step 7.5 — FA Advisor</p>
+        <p className="text-base font-semibold text-gray-900">Appropriateness Advisor</p>
         <p className="text-sm text-gray-500 mt-0.5">
           Codebase-grounded improvement suggestions —{' '}
           <span className="font-medium text-gray-700">{result.total_count}</span> identified

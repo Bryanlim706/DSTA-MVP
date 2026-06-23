@@ -7,7 +7,6 @@ import ObviousRequirementsResult from './components/ObviousRequirementsResult'
 import AppCrawlerResult from './components/AppCrawlerResult'
 import FA75AdvisorResult from './components/FA75AdvisorResult'
 import SandboxResult from './components/SandboxResult'
-import MappingResult from './components/MappingResult'
 import RepoParserResult from './components/RepoParserResult'
 import ScoringResult from './components/ScoringResult'
 import RequirementsResult from './components/RequirementsResult'
@@ -20,12 +19,12 @@ type Stage = 'upload' | 'loading' | 'confirming' | 'step_3_complete' | 'error'
 function LoadingView({ job }: { job: Job | null }) {
   const stepLabel =
     job?.current_step === 3
-      ? 'Step 3 — Generating implied requirements…'
+      ? 'Generating implied requirements…'
       : job?.current_step === 2
-      ? 'Step 2 — Generating obvious requirements…'
+      ? 'Generating obvious requirements…'
       : job?.current_step === 1
-      ? 'Step 1 — Extracting stated requirements…'
-      : 'Step 0 — Classifying project type…'
+      ? 'Extracting stated requirements…'
+      : 'Classifying project type…'
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -73,7 +72,7 @@ function EarlyResultsView({ job }: { job: Job }) {
         <div className="mt-6 flex items-center gap-3 px-5 py-4 bg-white rounded-xl border border-gray-200">
           <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
           <div>
-            <p className="text-sm font-medium text-gray-700">Step 3 — Generating implied requirements…</p>
+            <p className="text-sm font-medium text-gray-700">Generating implied requirements…</p>
             <p className="text-xs text-gray-400 mt-0.5">This usually takes 10–15 seconds</p>
           </div>
         </div>
@@ -113,7 +112,10 @@ function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () 
   const step5Loading  = job.status === 'step_5_running' || job.status === 'step_4_complete'
   const step6Loading  = job.status === 'step_6_running' || job.status === 'step_5_complete'
   const step7Loading  = job.status === 'step_7_running' || job.status === 'step_6_complete'
+  const step67Loading = step6Loading || step7Loading
   const step75Loading = job.status === 'step_7_5_running' || job.status === 'step_7_complete'
+
+  const l1aIds = new Set(step35?.confirmed_requirements.map(r => r.req_id) ?? [])
   const step11Loading = job.status === 'step_11_running'
 
   const showSandboxButton = job.status === 'step_7_5_complete' && !job.step_results.step_11
@@ -165,7 +167,7 @@ function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () 
         {step35 && (
           <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm font-semibold text-green-800">Step 3.5 — L1a Locked</span>
+              <span className="text-sm font-semibold text-green-800">Requirements Confirmed</span>
               {step35.skipped && (
                 <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">skipped</span>
               )}
@@ -197,11 +199,12 @@ function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () 
         </div>
 
         <div className="mt-6">
-          <MappingResult result={job.step_results.step_6 ?? null} loading={step6Loading} />
-        </div>
-
-        <div className="mt-6">
-          <ScoringResult result={job.step_results.step_7 ?? null} loading={step7Loading} />
+          <ScoringResult
+            result={job.step_results.step_7 ?? null}
+            loading={step67Loading}
+            step6Result={job.step_results.step_6 ?? null}
+            l1aIds={l1aIds}
+          />
         </div>
 
         <div className="mt-6">
@@ -214,7 +217,7 @@ function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () 
               onClick={onTriggerSandbox}
               className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
             >
-              Run Sandbox (Step 11)
+              Run Sandbox
             </button>
           </div>
         )}
