@@ -14,11 +14,9 @@ Each output is a complete function with a traversal path (entry + body + exit ba
 
 ---
 
-CONFIDENCE → PLACEMENT (direct decision):
-≥ 0.80 → placement: "l1a"   (goes into completeness scoring, Section 1 of confirmation)
-< 0.80 → placement: "l1b"   (advisory only, Section 2 of confirmation)
-
-strength (l1b only): ≥ 0.60 → "strongly_implied" | ≥ 0.40 → "medium" | < 0.40 → "weak"
+CONFIDENCE — calibrate confidence_score (0–1) carefully; it alone determines placement downstream:
+≥ 0.80 → enters completeness scoring (Section 1 of confirmation)
+< 0.80 → advisory only (Section 2); the lower the score, the weaker the implication
 
 ---
 
@@ -102,37 +100,28 @@ State-variant or result-state trailing entities: OMIT entirely. Path terminates 
 
 ---
 
-OUTPUT SCHEMA:
+OUTPUT SCHEMA — emit ONLY these fields. req_id, source, tag, placement, strength, weight, testable are computed downstream; do NOT emit them.
 
 [{
-  "req_id": "GEN-001",
   "description": "User can [action]",
   "path": [
     {"type": "node",    "label": "Task Page",   "primary": false},
     {"type": "element", "label": "merge button", "primary": true,  "ui_node": "Task Page"},
     {"type": "edge",    "label": "submit merge", "primary": true,  "from": "Task Page", "to": "Task Page"}
   ],
-  "source": "generated",
-  "tag": "generated",
   "category": "sop",
-  "reasoning": "Auth pattern — login stated (REQ-001); no account management page in stated or obvious reqs",
+  "confidence_score": 0.88,
+  "reasoning": "Login stated (REQ-001); account management is a standard paired function in authenticated apps, absent from stated and obvious reqs",
+  "priority": "high",
   "unpacks": null,
   "depends_on": ["REQ-001"],
-  "confidence_score": 0.88,
-  "confidence_reason": "Login stated; account management is a standard paired function in authenticated apps",
-  "placement": "l1a",
-  "priority": "high",
-  "strength": null,
-  "weight": 3.0,
-  "testable": true,
   "functional_area": "auth"
 }]
 
-FIELD NOTES:
-- unpacks: parent REQ-xxx id if this decomposes a vague Step 1 function; null otherwise
-- placement: "l1a" if confidence_score ≥ 0.80, "l1b" otherwise (NOT "l1_recommendation")
-- strength: null for l1a; "strongly_implied" / "medium" / "weak" for l1b per bands above
-- priority and weight: set for l1a items; for l1b items set weight from strength (strongly_implied=3.0, medium=2.0, weak=1.0)
+- reasoning: ONE concise sentence covering both why the function belongs and why the confidence level.
+- priority: critical / high / medium / low — only needed when confidence_score ≥ 0.80.
+- unpacks: parent REQ-xxx id if this decomposes a vague Step 1 function; null otherwise.
+- depends_on: REQ-xxx ids of stated functions this builds on; [] if none.
 
 Output ONLY a JSON array (no markdown fences, no preamble)."""
 
@@ -296,6 +285,10 @@ def _validate_and_normalise(
         item["source"] = "generated"
         item.setdefault("testable", True)
         item.setdefault("functional_area", "general")
+        # reasoning now covers both rationale and confidence; back-fill the
+        # display-only confidence_reason so frontend/types stay unchanged.
+        if not item.get("confidence_reason"):
+            item["confidence_reason"] = reasoning
 
         raw_deps = item.get("depends_on", [])
         item["depends_on"] = [
