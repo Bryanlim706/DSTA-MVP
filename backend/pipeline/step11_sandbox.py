@@ -113,7 +113,8 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
 # Vite — production build + vite preview (avoids SWC native binary
 # incompatibility between Windows node_modules and Alpine Linux; preview
-# respects preview.proxy config patched by _patch_vite_config).
+# respects preview.proxy config from the vite.sandbox.config.js sidecar
+# written by _write_vite_sandbox_config).
 _FRONTEND_DOCKERFILE_VITE = f"""\
 FROM node:20-alpine
 WORKDIR /app
@@ -124,10 +125,12 @@ ARG VITE_API_URL=http://localhost:{BACKEND_HOST_PORT}
 ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 EXPOSE 5174
-CMD ["./node_modules/.bin/vite", "preview", "--host", "0.0.0.0", "--port", "5174"]
+CMD ["./node_modules/.bin/vite", "preview", "--config", "vite.sandbox.config.js", "--host", "0.0.0.0", "--port", "5174"]
 """
 
 # Create React App — PORT env var controls the CRA dev server port.
+# REACT_APP_API_URL is baked at build time via webpack DefinePlugin, so it must be
+# an ARG (not ENV) so compose build args can override the default.
 _FRONTEND_DOCKERFILE_CRA = f"""\
 FROM node:20-alpine
 WORKDIR /app
@@ -136,7 +139,8 @@ RUN npm install --prefer-offline --strict-ssl=false
 COPY . .
 ENV PORT=5174
 ENV HOST=0.0.0.0
-ENV REACT_APP_API_URL=http://localhost:{BACKEND_HOST_PORT}
+ARG REACT_APP_API_URL=http://localhost:{FRONTEND_HOST_PORT}
+ENV REACT_APP_API_URL=$REACT_APP_API_URL
 ENV CHOKIDAR_USEPOLLING=true
 ENV BROWSER=none
 EXPOSE 5174
@@ -156,7 +160,7 @@ CMD ["npx", "ng", "serve", "--host", "0.0.0.0", "--port", "5174", "--disable-hos
 """
 
 # Next.js — PORT env var; HOSTNAME for the dev server; NEXT_PUBLIC_ prefix for
-# client-accessible env vars.
+# client-accessible env vars. ARG so compose build args can override.
 _FRONTEND_DOCKERFILE_NEXTJS = f"""\
 FROM node:20-alpine
 WORKDIR /app
@@ -165,7 +169,8 @@ RUN npm install --prefer-offline --strict-ssl=false
 COPY . .
 ENV PORT=5174
 ENV HOSTNAME=0.0.0.0
-ENV NEXT_PUBLIC_API_URL=http://localhost:{BACKEND_HOST_PORT}
+ARG NEXT_PUBLIC_API_URL=http://localhost:{FRONTEND_HOST_PORT}
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 EXPOSE 5174
 CMD ["npm", "run", "dev"]
 """
@@ -586,12 +591,14 @@ def _detect_api_call_style(frontend_dir: Path) -> tuple[str, int | None]:
 
     if found_env:
         return ("env_based", None)
+    # hardcoded takes priority over relative: when both exist (e.g. axios instance with
+    # hardcoded baseURL + relative path calls), the hardcoded origin must be stripped.
+    if hardcoded_port is not None:
+        return ("hardcoded", hardcoded_port)
     if found_rel:
         return ("relative", None)
     if found_same_origin:
         return ("same_origin", None)
-    if hardcoded_port is not None:
-        return ("hardcoded", hardcoded_port)
     return ("unknown", None)
 
 
@@ -643,17 +650,26 @@ def _patch_tailwind_css(sb_frontend: Path) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Vite proxy patching
+# Vite proxy — sidecar config written next to the submission's vite.config
 # ---------------------------------------------------------------------------
 
-# Matches backend-like localhost URLs (ports 8xxx / 9xxx) in vite.config.
-_PROXY_URL_RE    = re.compile(r"http://localhost:[89]\d{3}")
-_DEFINECONFIG_RE = re.compile(r"(defineConfig\s*\(\s*\{)")
-# Matches `server: { ... }` block so we can duplicate it as `preview: { ... }`
-_SERVER_BLOCK_RE = re.compile(r"\bserver\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})", re.DOTALL)
+# Written into the sandbox frontend dir; Vite is told to use it via --config.
+# Imports the submission's vite.config (any format: object or function form,
+# .ts/.js/.mjs) and merges in a catch-all preview proxy pointing at the backend
+# container.  No regex parsing of the original config needed.
+_VITE_SANDBOX_CONFIG = """\
+// Written by DSTA sandbox — merges submission's vite config with a preview proxy
+// so API calls from the browser are forwarded to the backend container.
+import {{ mergeConfig }} from 'vite';
+import baseConfig from './vite.config';
 
-_PROXY_CATCH_ALL = """\
+// defineConfig(fn) returns the fn; defineConfig(obj) returns the obj.
+// Handle both so the typeof check works correctly.
+const base = typeof baseConfig === 'function'
+  ? baseConfig({{ mode: 'production', command: 'preview', ssrBuild: false }})
+  : (baseConfig || {{}});
 
+export default mergeConfig(base, {{
   preview: {{
     proxy: {{
       '/': {{
@@ -661,72 +677,81 @@ _PROXY_CATCH_ALL = """\
         changeOrigin: true,
         bypass: function(req) {{
           var url = req.url.split('?')[0];
-          if (url.startsWith('/@') || url.startsWith('/src/') || url.startsWith('/node_modules/') || /\\.\\w+$/.test(url)) {{
+          // Let Vite serve its own assets and source files directly.
+          if (url.startsWith('/@') || url.startsWith('/src/') ||
+              url.startsWith('/node_modules/') || /\\.\\w+$/.test(url)) {{
             return url;
           }}
+          // HTML-accepting requests (browser navigation) → SPA shell.
           if (req.headers.accept && req.headers.accept.includes('text/html')) {{
             return '/index.html';
           }}
+          // Everything else (fetch/axios API calls) → proxy to backend.
         }}
       }}
     }}
-  }},
+  }}
+}});
 """
 
 
-def _patch_vite_config(sb_frontend: Path, spring_port: int = 8080, inject_proxy: bool | str = False) -> str | None:
+def _inject_cra_proxy(sb_frontend: Path, spring_port: int) -> str | None:
     """
-    1. Rewrite existing localhost backend URLs in vite.config proxy to Docker service name.
-    2. Copy server.proxy → preview.proxy (vite preview ignores server.proxy).
-    3. When inject_proxy=True and no proxy block exists, inject a catch-all preview proxy
-       so relative-URL API calls (fetch('/api/...')) are forwarded to the backend container.
-    Returns a warning string if server.proxy was copied to preview.proxy, else None.
+    Inject or rewrite the CRA proxy field in package.json so the webpack dev server
+    forwards all non-asset requests to the backend Docker service.
+    The simple string form proxies everything CRA dev server doesn't serve as a
+    static file — HTML navigation requests are still served as index.html by CRA.
+    Returns a warning string if the proxy was injected (not already present), else None.
     """
-    for name in ("vite.config.js", "vite.config.ts", "vite.config.mjs", "vite.config.cjs"):
-        cfg = sb_frontend / name
-        if not cfg.exists():
-            continue
-        text   = cfg.read_text(errors="ignore")
-        target = f"http://backend:{spring_port}"
-
-        # Step 1: rewrite hardcoded localhost backend URLs
-        patched = _PROXY_URL_RE.sub(target, text)
-
-        # Step 2: copy server.proxy → preview.proxy if preview block absent
-        has_preview = bool(re.search(r"\bpreview\s*:", patched))
-        server_proxy_copied = False
-        if not has_preview:
-            server_m = _SERVER_BLOCK_RE.search(patched)
-            if server_m and "proxy" in server_m.group(0):
-                preview_block = "preview: " + server_m.group(1) + ","
-                insert_at = server_m.end()
-                rest = patched[insert_at:]
-                comma = "" if re.match(r"[ \t]*,", rest) else ","
-                patched = patched[:insert_at] + comma + "\n  " + preview_block + rest
-                has_preview = True
-                server_proxy_copied = True
-
-        # Step 3: inject catch-all proxy when requested.
-        # "always" (same_origin): inject even if a specific proxy already exists,
-        # because the app builds URLs from window.location.host and any path prefix
-        # must reach the backend.
-        # True / other truthy: inject only when no proxy block exists yet.
-        has_catchall = bool(re.search(r"""proxy\s*:\s*\{[^}]*['"]\/['"]""", patched))
-        if inject_proxy and not has_catchall and (inject_proxy == "always" or "proxy" not in patched):
-            proxy_block = _PROXY_CATCH_ALL.format(target=target)
-            m = _DEFINECONFIG_RE.search(patched)
-            if m:
-                patched = patched[:m.end()] + proxy_block + patched[m.end():]
-
-        if patched != text:
-            cfg.write_text(patched, encoding="utf-8")
-
-        if server_proxy_copied:
-            return (
-                "vite.config server.proxy copied to preview.proxy — the submission's proxy "
-                "rules only applied to the dev server, not to production preview builds."
-            )
+    pkg = sb_frontend / "package.json"
+    if not pkg.exists():
         return None
+    try:
+        data = json.loads(pkg.read_text(errors="ignore"))
+    except Exception:
+        return None
+    target = f"http://backend:{spring_port}"
+    if "proxy" in data:
+        if data["proxy"] != target:
+            data["proxy"] = target
+            pkg.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        return None
+    data["proxy"] = target
+    pkg.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return (
+        "CRA proxy injected in package.json — all non-asset requests are forwarded "
+        f"to the backend container ({target}). "
+        "The submission lacked a proxy configuration for the development build."
+    )
+
+
+def _write_vite_sandbox_config(sb_frontend: Path, spring_port: int) -> str | None:
+    """
+    Write vite.sandbox.config.js into the sandbox frontend directory.
+    Vite is invoked with --config vite.sandbox.config.js (see _FRONTEND_DOCKERFILE_VITE).
+    The sidecar imports the submission's own vite.config (any format — object literal
+    or function form, .ts/.js/.mjs) and merges in a catch-all preview proxy.
+    Using a sidecar + mergeConfig avoids any regex rewriting of the original config,
+    which silently fails for the common defineConfig(({ mode }) => ({...})) pattern.
+    Returns a warning string when written, else None (no vite.config found).
+    """
+    if not any(
+        (sb_frontend / n).exists()
+        for n in ("vite.config.js", "vite.config.ts", "vite.config.mjs", "vite.config.cjs")
+    ):
+        return None
+    target = f"http://backend:{spring_port}"
+    (sb_frontend / "vite.sandbox.config.js").write_text(
+        _VITE_SANDBOX_CONFIG.format(target=target), encoding="utf-8"
+    )
+    return (
+        "Sandbox accommodation (not a submission defect): vite.sandbox.config.js written — "
+        "the submission's vite.config is wrapped with a preview proxy so the browser's API "
+        "calls reach the backend container while we crawl the production build via `vite preview`. "
+        "Real deployments serve the built SPA behind a reverse proxy, same-origin from the "
+        "backend, or via absolute API URLs — none of which use Vite's preview proxy — so its "
+        "absence is normal and does not indicate a defect."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -863,7 +888,15 @@ def _compose_yaml(
         port_lines.append(f'      - "{hardcoded_api_port}:{spring_port}"')
     backend_ports = "\n".join(port_lines)
 
-    api_url = f"http://localhost:{BACKEND_HOST_PORT}"
+    # env_based: point at the frontend's own host port so browser API calls are same-origin.
+    # The Vite/CRA proxy then forwards them to the backend container — Spring Boot CORS config
+    # is never involved. Using "" breaks apps that do `VITE_API_URL || fallback_url` (empty
+    # string is falsy → falls back to the hardcoded URL → cross-origin CORS fails again).
+    api_url = (
+        f"http://localhost:{FRONTEND_HOST_PORT}"
+        if api_style == "env_based"
+        else f"http://localhost:{BACKEND_HOST_PORT}"
+    )
 
     # Build args: inject every env var name the app actually uses, plus safe fallbacks.
     # Hardcoded-style apps have had their origins stripped so they no longer need a URL
@@ -998,19 +1031,29 @@ def _run_sandbox_sync(job_id: str, extract_to: Path, project_context: dict) -> d
             f"Features using these credentials (OAuth2, external APIs, mail) will not function."
         )
 
+    if api_style == "env_based":
+        sandbox_warnings.append(
+            f"Frontend uses environment-based API URLs (VITE_* / REACT_APP_* / NEXT_PUBLIC_*). "
+            f"Build args set to http://localhost:{FRONTEND_HOST_PORT} (sandbox frontend port) "
+            f"so API calls are same-origin from the browser — the proxy routes them to the "
+            f"backend container without CORS involvement. "
+            f"The submission's API URL is not portable without build-time environment configuration."
+        )
+
     if api_style == "hardcoded" and hardcoded_api_port:
         w = _strip_hardcoded_origin(sb_frontend, hardcoded_api_port)
         if w: sandbox_warnings.append(w)
 
-    w = _patch_vite_config(
-        sb_frontend,
-        spring_port=spring_port,
-        inject_proxy=(
-            "always" if api_style == "same_origin"
-            else (api_style in ("relative", "hardcoded"))
-        ),
-    )
+    # For Vite: write a sidecar config that uses mergeConfig() to add the preview
+    # proxy regardless of the original vite.config format (object or function form).
+    # A sidecar avoids regex rewriting of the original config, which silently fails
+    # for the common defineConfig(({ mode }) => ({...})) pattern.
+    w = _write_vite_sandbox_config(sb_frontend, spring_port)
     if w: sandbox_warnings.append(w)
+
+    if frontend_type == "cra":
+        w = _inject_cra_proxy(sb_frontend, spring_port)
+        if w: sandbox_warnings.append(w)
 
     w = _patch_tailwind_css(sb_frontend)
     if w: sandbox_warnings.append(w)
