@@ -3,7 +3,7 @@ import json
 
 import anthropic
 
-from pipeline.utils import _extract_nodes_from_paths, _identify_root_node, _is_state_variant, _validate_path
+from pipeline.utils import _identify_root_node, _is_state_variant, _validate_path
 
 WEIGHT_MAP = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
 VALID_CATEGORIES = {"sop", "inf"}
@@ -24,18 +24,24 @@ strength (l1b only): ≥ 0.60 → "strongly_implied" | ≥ 0.40 → "medium" | <
 
 PASS 1 — SOP-TRIGGERED FUNCTIONS
 
-For each node that appears in Step 1 stated functions, check whether any pattern below applies. Generate the corresponding function if it is not already covered by a stated or obvious function.
+For each Step 1 stated requirement, check whether any pattern in the table below applies. Generate only functions explicitly listed in the pattern table — do not invent patterns outside it. Generate the corresponding function if it is not already covered by a stated or obvious function.
 
 DEDUPLICATION — CORE RULE:
-Before generating any function, ask: does a stated or obvious function already give the user control over the same target? If yes, skip — regardless of how the verb is phrased.
+Before generating any function, ask: does a stated or obvious function roughly mean the same thing? If yes, skip — regardless of how the verb is phrased.
 
 The test is capability, not wording. If the user can already accomplish the same goal via a stated function, skip — regardless of how the verb or path is phrased. A richer path structure does not make a distinct function.
 
+Specifying WHERE or HOW an action happens never creates a new function. Location/container phrasing — "on a page", "on a dedicated detail page", "from the detail page", "in a modal", "via a form" — is path detail, not a new capability. "User can view employee details on a dedicated detail page" and "User can edit employee from the detail page" are the same capabilities as a stated "view employee" / "edit employee" — skip them.
+
+A function is one complete user goal — never a step within a goal. For example, navigating to a form, filling it, and submitting it are the entry/element/submit entities of the SAME function's path[] — not separate functions. Never split a stated capability into step-functions, skip them.
+
+Do NOT generate composite restatements. A function whose entire content is already covered by a combination of stated functions adds no new capability — skip it. A function that adds a specific new interaction step not implied by any stated function (e.g. a confirmation guard, a sub-flow) is valid.
+
 MULTI-OBJECT TYPES: When the app manages multiple distinct named object types (e.g., "categories" AND "tasks"), fire ALL applicable patterns independently for EACH object type. "User can edit a task" and "User can edit a category name" are distinct functions — generate both. Never conflate two different object types into one function.
 
-Do NOT skip just because functions share elements — edit-item and delete-item both touch the same list item but are distinct interactions. When in doubt, generate — but only if the function adds a capability the user does not already have.
+Do NOT skip just because functions share elements — edit-item and delete-item both touch the same list item but are distinct interactions. Pass 1 is conservative: generate only clear pattern-table matches that add a capability the user DOES NOT ALREADY HAVE. When in doubt, skip — Pass 2 is where breadth comes from.
 
-Fires ONLY on nodes from Step 1 stated functions — NOT on nodes you generate in this pass.
+Applies ONLY to Step 1 stated requirements — not to functions you generate in this pass.
 
 PATTERN TABLE:
 
@@ -58,11 +64,12 @@ Stated node type → Generate these functions (confidence):
     notification surface (~0.65)
 - Multi-user / per-user data stated:
     user profile / identity page (~0.82)
-
-CRUD COMPLETION RULE: When CREATE (add) is stated for an entity type, edit and delete for the same entity type complete the CRUD cycle and are completeness requirements — they belong in L1a. Assign edit ≥ 0.85 and delete ≥ 0.82 for these cases, regardless of how the entity is described.
+- Create / add stated for an entity type:
+    edit item (~0.85), delete item (~0.82)
 
 VAGUE FUNCTION UNPACKING:
 Functions marked vague: true in Step 1 are priority unpack targets. Apply ALL applicable patterns against their node and generate specific child functions. Set unpacks: "<parent_req_id>" on each child.
+Do not generate a child that is semantically similar to any non-vague stated requirement already listed above — skip that pattern if the function is already covered.
 
 category: "sop"
 
@@ -179,10 +186,6 @@ def _build_user_message(
             lines.append(f"{i}. [{r.get('req_id', f'{prefix}-{i:03d}')}] {r['description']}{vague_tag}")
         return "\n".join(lines)
 
-    # Show node inventory for SOP pass
-    nodes = _extract_nodes_from_paths(step1_requirements)
-    nodes_str = ", ".join(nodes) if nodes else "(none)"
-
     return (
         f"=== PROJECT CONTEXT ===\n"
         f"Project type: {project_type}\n"
@@ -192,8 +195,6 @@ def _build_user_message(
         f"{root_section}"
         f"=== STATED FUNCTIONS (Step 1 — do not regenerate) ===\n"
         f"{fmt_funcs(step1_requirements, 'REQ')}\n\n"
-        f"=== STATED NODE INVENTORY (for SOP pattern matching) ===\n"
-        f"{nodes_str}\n\n"
         f"=== OBVIOUS FUNCTIONS (Step 2 — do not regenerate) ===\n"
         f"{fmt_funcs(step2_requirements, 'OBV')}\n\n"
         f"Run Pass 1 (SOP patterns) then Pass 2 (domain inference)."
