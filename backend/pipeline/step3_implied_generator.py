@@ -24,24 +24,11 @@ strength (l1b only): ≥ 0.60 → "strongly_implied" | ≥ 0.40 → "medium" | <
 
 PASS 1 — SOP-TRIGGERED FUNCTIONS
 
-For each Step 1 stated requirement, check whether any pattern in the table below applies. Generate only functions explicitly listed in the pattern table — do not invent patterns outside it. Generate the corresponding function if it is not already covered by a stated or obvious function.
+For each Step 1 stated requirement, check whether any pattern in the table below applies, and generate it. Generate only patterns explicitly in the table — fire them on stated requirements only, never on functions you generate in this pass. Do not self-censor for overlap; a later pass removes duplicates.
 
-DEDUPLICATION — CORE RULE:
-Before generating any function, ask: does a stated or obvious function roughly mean the same thing? If yes, skip — regardless of how the verb is phrased.
+A function is one complete user goal, not a step within it — navigate / fill / submit / confirm steps belong in its path[], never as separate functions.
 
-The test is capability, not wording. If the user can already accomplish the same goal via a stated function, skip — regardless of how the verb or path is phrased. A richer path structure does not make a distinct function.
-
-Specifying WHERE or HOW an action happens never creates a new function. Location/container phrasing — "on a page", "on a dedicated detail page", "from the detail page", "in a modal", "via a form" — is path detail, not a new capability. "User can view employee details on a dedicated detail page" and "User can edit employee from the detail page" are the same capabilities as a stated "view employee" / "edit employee" — skip them.
-
-A function is one complete user goal — never a step within a goal. For example, navigating to a form, filling it, and submitting it are the entry/element/submit entities of the SAME function's path[] — not separate functions. Never split a stated capability into step-functions, skip them.
-
-Do NOT generate composite restatements. A function whose entire content is already covered by a combination of stated functions adds no new capability — skip it. A function that adds a specific new interaction step not implied by any stated function (e.g. a confirmation guard, a sub-flow) is valid.
-
-MULTI-OBJECT TYPES: When the app manages multiple distinct named object types (e.g., "categories" AND "tasks"), fire ALL applicable patterns independently for EACH object type. "User can edit a task" and "User can edit a category name" are distinct functions — generate both. Never conflate two different object types into one function.
-
-Do NOT skip just because functions share elements — edit-item and delete-item both touch the same list item but are distinct interactions. Pass 1 is conservative: generate only clear pattern-table matches that add a capability the user DOES NOT ALREADY HAVE. When in doubt, skip — Pass 2 is where breadth comes from.
-
-Applies ONLY to Step 1 stated requirements — not to functions you generate in this pass.
+MULTI-OBJECT TYPES: When the app manages multiple distinct named object types (e.g., "categories" AND "tasks"), fire all applicable patterns independently for EACH object type. "User can edit a task" and "User can edit a category name" are distinct — generate both. Never conflate two object types into one function.
 
 PATTERN TABLE:
 
@@ -68,8 +55,7 @@ Stated node type → Generate these functions (confidence):
     edit item (~0.85), delete item (~0.82)
 
 VAGUE FUNCTION UNPACKING:
-Functions marked vague: true in Step 1 are priority unpack targets. Apply ALL applicable patterns against their node and generate specific child functions. Set unpacks: "<parent_req_id>" on each child.
-Do not generate a child that is semantically similar to any non-vague stated requirement already listed above — skip that pattern if the function is already covered.
+Functions marked vague: true in Step 1 are priority unpack targets. Apply applicable patterns against their node and generate specific child functions, each with unpacks: "<parent_req_id>".
 
 category: "sop"
 
@@ -88,8 +74,6 @@ Read the project_summary and all stated functions. Before generating any functio
 7. OVERVIEW + INSIGHT — What summary views, dashboards, or analytics would help users understand the state of their data at a glance?
 
 Be BOLD — generate functions even at confidence 0.50–0.70 if they represent genuine domain gaps. This pass drives FA (Functional Appropriateness) scoring: a well-calibrated app should have most of these; their absence is meaningful and scored. Aim for breadth — it is better to generate a function the reviewer demotes than to silently omit a real gap.
-
-Do NOT re-generate functions already produced in Pass 1, already stated in Step 1, or already covered by a Step 2 obvious function. Apply the same capability test: if the user can already accomplish this goal via a stated function — even if worded differently — skip it.
 
 Gate: only generate functions a user can independently navigate to or invoke — a page, form, modal, view, panel, or interactive feature. Do NOT generate system reactions or behavioral properties ("User sees validation error", "User receives confirmation message", "User is redirected when X") — those are acceptance criteria, not functions.
 
@@ -334,6 +318,82 @@ def _validate_and_normalise(
     return valid, dropped
 
 
+# --- Pass 3: dedicated deduplication filter ---
+# A separate, single-purpose LLM call. Generation (Passes 1+2) optimises for
+# recall; this pass is the precision gate. It sees the full set — stated +
+# obvious + ALL generated — so it catches duplicates the generation passes
+# structurally cannot: cross-list (generated vs obvious), step-of (a path step
+# emitted as a function), and generated-vs-generated.
+DEDUP_SYSTEM_PROMPT = """You are a deduplication filter for generated requirements. You receive three lists:
+- STATED — functions the app explicitly has (ground truth)
+- OBVIOUS — navigation functions already generated
+- GENERATED — candidate functions to judge, each with an id
+
+For EACH generated function output "keep" or "drop".
+
+DROP it if ANY holds:
+1. SAME CAPABILITY as a STATED or OBVIOUS function — judged by meaning, not words. Ignore verb synonyms (edit = update = modify, delete = remove, view = see = browse) and location/container phrasing ("on a page", "from the detail page", "in a modal", "via a form"). "Navigate to X section" equals an obvious "navigate to X page".
+2. PART OF a stated/obvious function's flow — opening, filling, or submitting a form, confirming, cancelling, or navigating back are STEPS, not standalone functions. If "add employee" is stated, "submit employee form" is a step of it — drop.
+3. REDUNDANT with another GENERATED function — keep the single clearest one, drop the rest.
+
+KEEP it only if it adds a genuinely new, independent capability not covered by, and not a sub-step of, any stated/obvious function or any generated function you keep. When two features are genuinely distinct (e.g. an attendance report vs a payroll report), keep both.
+
+Output ONLY a JSON array, one object per generated function in the same order:
+[{"id": "GEN-001", "decision": "keep", "duplicate_of": null, "reason": "<short>"}]
+Set duplicate_of to the id it duplicates or is a step of (null when kept). No markdown, no preamble."""
+
+
+def _build_dedup_user_message(stated: list, obvious: list, generated: list) -> str:
+    def fmt(reqs):
+        if not reqs:
+            return "(none)"
+        return "\n".join(f"- [{r.get('req_id', '?')}] {r.get('description', '')}" for r in reqs)
+    return (
+        f"=== STATED ===\n{fmt(stated)}\n\n"
+        f"=== OBVIOUS ===\n{fmt(obvious)}\n\n"
+        f"=== GENERATED (judge each) ===\n{fmt(generated)}\n\n"
+        f"Return one decision per generated function, in order."
+    )
+
+
+async def _dedup_generated(
+    stated: list,
+    obvious: list,
+    generated: list,
+    client: anthropic.AsyncAnthropic,
+    model: str,
+) -> tuple[list, list]:
+    """Filter generated functions against stated/obvious/each-other. Returns
+    (kept, drop_log). Fails open — on any error, keeps all generated."""
+    if not generated:
+        return generated, []
+    try:
+        response = await client.messages.create(
+            model=model,
+            max_tokens=4000,
+            system=[{"type": "text", "text": DEDUP_SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": _build_dedup_user_message(stated, obvious, generated)}],
+        )
+        decisions = _parse_llm_response(response.content[0].text)
+    except Exception:
+        return generated, []
+    drops = {
+        d.get("id"): d for d in decisions
+        if isinstance(d, dict) and str(d.get("decision", "")).strip().lower() == "drop"
+    }
+    kept = [g for g in generated if g.get("req_id") not in drops]
+    drop_log = [
+        {
+            "id": g.get("req_id"),
+            "description": g.get("description"),
+            "duplicate_of": drops[g.get("req_id")].get("duplicate_of"),
+            "reason": drops[g.get("req_id")].get("reason", ""),
+        }
+        for g in generated if g.get("req_id") in drops
+    ]
+    return kept, drop_log
+
+
 async def run(
     step1_requirements: list,
     step2_requirements: list,
@@ -355,6 +415,12 @@ async def run(
             )
             raw_items = _parse_llm_response(response.content[0].text)
             requirements, dropped = _validate_and_normalise(raw_items, step1_requirements, step2_requirements)
+            # Pass 3 — dedicated deduplication against stated + obvious + each other.
+            requirements, dedup_log = await _dedup_generated(
+                step1_requirements, step2_requirements, requirements, client, model
+            )
+            for i, item in enumerate(requirements, start=1):
+                item["req_id"] = f"GEN-{i:03d}"
             sop = sum(1 for r in requirements if r.get("category") == "sop")
             inf = sum(1 for r in requirements if r.get("category") == "inf")
             return {
@@ -364,6 +430,8 @@ async def run(
                 "inference_count": inf,
                 "llm_model": model,
                 "dropped_count": dropped,
+                "deduped_count": len(dedup_log),
+                "dedup_log": dedup_log,
                 "error": None,
             }
         except anthropic.APIStatusError as exc:
@@ -378,5 +446,6 @@ async def run(
     return {
         "requirements": [], "total_count": 0,
         "sop_count": 0, "inference_count": 0,
-        "llm_model": model, "dropped_count": 0, "error": str(last_exc),
+        "llm_model": model, "dropped_count": 0,
+        "deduped_count": 0, "dedup_log": [], "error": str(last_exc),
     }

@@ -546,13 +546,13 @@ Step 3 user message is built from:
 - Step 1 requirement descriptions + vague flags (SOP node inventory via `_extract_nodes_from_paths`; Step 1 `req_ids` used to validate both `depends_on` and `unpacks` — OBV-XXX IDs from Step 2 are never valid `depends_on` targets; a generated enhancement depends on a domain feature, not a navigation gap)
 - Step 2 requirement descriptions (dedup only)
 
-**Two-pass generation:**
+**Three-pass generation:** Passes 1+2 generate (optimised for recall, no dedup prose); Pass 3 deduplicates.
 
 **Pass 1 — SOP pattern-triggered (category: "sop")**
-Fires on nodes from Step 1 path arrays. Pattern table:
+Fires on Step 1 stated requirements (reads their descriptions directly — no separate node-inventory block). Generate only patterns in the table; fire on stated requirements only, never on self-generated functions. Pattern table:
 - List node → filter (~0.82), search (~0.80), sort (~0.68), edit item (~0.85), delete item (~0.82)
 - Detail node → edit (~0.85), delete (~0.82)
-- CRUD COMPLETION RULE: when CREATE is stated for an entity, edit and delete always L1a (≥0.85 / ≥0.82)
+- Create / add stated for an entity → edit item (~0.85), delete item (~0.82)  (CRUD completion, a plain table row governed by Pass 3 dedup — not a forced override)
 - Auth present → account management / profile page (~0.87)
 - Named changeable status → cross-status overview (~0.75), filter-by-status (~0.82)
 - Temporal field → time-scoped view (~0.75), overdue alert (~0.72)
@@ -564,6 +564,9 @@ Fires on nodes from Step 1 path arrays. Pattern table:
 **Pass 2 — INF domain inference (category: "inf")**
 Grounding step first (understand app purpose/structure), then generates across 7 angles:
 1. RECURRING USE, 2. WORKFLOW COMPLETENESS, 3. DATA MANAGEMENT, 4. DOMAIN STANDARDS (exhaustive), 5. DISCOVERABILITY + HELP, 6. USER CONTROL, 7. OVERVIEW + INSIGHT
+
+**Pass 3 — dedicated deduplication (`_dedup_generated`)**
+Separate single-purpose LLM call after Passes 1+2 + `_validate_and_normalise`. Receives the full set (stated + obvious + all generated) and returns keep/drop per generated function. Drops any that: (1) mean the same capability as a stated/obvious function (verb-synonym and location/container-phrasing invariant; "navigate to X section" == obvious "navigate to X page"); (2) are a step within a stated/obvious flow (open/fill/submit form, confirm, cancel, back-nav); (3) are redundant with another generated function. Survivors renumbered `GEN-001…`. Fails open (keeps all on any error). Centralising dedup here is why the generation prompts carry no dedup rules — pass-scoped in-prompt rules could not see obvious or generated-vs-generated.
 
 **Confidence → placement:**
 - ≥ 0.80 → `placement: "l1a"`, strength: null
@@ -606,6 +609,10 @@ Grounding step first (understand app purpose/structure), then generates across 7
   "inference_count": 7,
   "llm_model": "claude-haiku-4-5-20251001",
   "dropped_count": 2,
+  "deduped_count": 3,
+  "dedup_log": [
+    {"id": "GEN-006", "description": "User can submit new employee form", "duplicate_of": "REQ-001", "reason": "step of stated add employee"}
+  ],
   "error": null
 }
 ```
