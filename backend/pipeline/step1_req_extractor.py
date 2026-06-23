@@ -40,11 +40,13 @@ LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract stated requiremen
 
 EXTRACTION GATE
 
-Before extracting any item, ask: "Does this text describe a goal a user can directly perform?"
+A requirement qualifies if and only if it describes a discrete action a user intentionally initiates in the UI to achieve a personal goal — and the outcome is directly observable by that user.
+
+Before extracting any item, ask: "Is this a deliberate user action with a direct, user-visible outcome?"
 YES → extract as a function.
 NO → skip entirely.
 
-Rejects: backend subjects (app.py, database, server), quality attributes (responsive, secure, accessible, performant), automatic behaviors the user cannot directly invoke, pure system reactions with no user-facing trigger ("X happens automatically when Y"). Role conditions ("Admins can edit products") and trigger phrasings ("click edit to modify") are still user goals — extract them.
+Role conditions ("Admins can edit products") and trigger phrasings ("click edit to modify") are still user goals — extract them.
 
 ---
 
