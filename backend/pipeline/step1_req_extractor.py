@@ -40,9 +40,9 @@ LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract stated requiremen
 
 EXTRACTION GATE
 
-A requirement qualifies if and only if it describes a discrete action a user intentionally initiates in the UI to achieve a personal goal — and the outcome is directly observable by that user.
+A requirement qualifies only if the user is the actor performing a deliberate action they initiate in the UI (an active verb: log in, add, delete, navigate). The user must be doing something — not merely observing a result, receiving a message, or having the system act on their behalf.
 
-Before extracting any item, ask: "Is this a deliberate user action with a direct, user-visible outcome?"
+Test: "Is the user the subject, and are they choosing to do this?" If the real subject is the system/app/database, it fails.
 YES → extract as a function.
 NO → skip entirely.
 
