@@ -8,7 +8,7 @@ from pydantic import BaseModel
 import anthropic
 
 from pipeline import step4_repo_parser, step5_app_crawler, step6_entity_mapper, step7_scorer, step7_5_fa_advisor
-from storage.job_store import add_step_result, get_job, update_job
+from storage.job_store import add_step_result, get_job, is_terminated, update_job
 
 router = APIRouter()
 
@@ -64,33 +64,47 @@ class ConfirmRequest(BaseModel):
 
 
 async def _run_step4(job_id: str, extract_to: Path) -> None:
+    if is_terminated(job_id):
+        return
     try:
         update_job(job_id, {"status": "step_4_running"})
         job = get_job(job_id)
         step3_5 = job["step_results"]["step_3_5"]
         result = await step4_repo_parser.run(step3_5, extract_to)
+        if is_terminated(job_id):
+            return
         add_step_result(job_id, "step_4", result)
         update_job(job_id, {"status": "step_4_complete", "current_step": 5})
         await _run_step5(job_id, extract_to)
     except Exception as exc:
+        if is_terminated(job_id):
+            return
         update_job(job_id, {"status": "step_4_error", "errors": [str(exc)]})
 
 
 async def _run_step5(job_id: str, extract_to: Path) -> None:
+    if is_terminated(job_id):
+        return
     try:
         update_job(job_id, {"status": "step_5_running"})
         job = get_job(job_id)
         step3_5 = job["step_results"]["step_3_5"]
         step4 = job["step_results"]["step_4"]
         result = await step5_app_crawler.run(step3_5, step4, extract_to)
+        if is_terminated(job_id):
+            return
         add_step_result(job_id, "step_5", result)
         update_job(job_id, {"status": "step_5_complete", "current_step": 6})
         await _run_step6(job_id)
     except Exception as exc:
+        if is_terminated(job_id):
+            return
         update_job(job_id, {"status": "step_5_error", "errors": [str(exc)]})
 
 
 async def _run_step6(job_id: str) -> None:
+    if is_terminated(job_id):
+        return
     try:
         update_job(job_id, {"status": "step_6_running"})
         job = get_job(job_id)
@@ -101,14 +115,20 @@ async def _run_step6(job_id: str) -> None:
             job["step_results"]["step_5"],
             client,
         )
+        if is_terminated(job_id):
+            return
         add_step_result(job_id, "step_6", result)
         update_job(job_id, {"status": "step_6_complete", "current_step": 7})
         await _run_step7(job_id)
     except Exception as exc:
+        if is_terminated(job_id):
+            return
         update_job(job_id, {"status": "step_6_error", "errors": [str(exc)]})
 
 
 async def _run_step7(job_id: str) -> None:
+    if is_terminated(job_id):
+        return
     try:
         update_job(job_id, {"status": "step_7_running"})
         job = get_job(job_id)
@@ -116,14 +136,20 @@ async def _run_step7(job_id: str) -> None:
             job["step_results"]["step_6"],
             job["step_results"]["step_3_5"],
         )
+        if is_terminated(job_id):
+            return
         add_step_result(job_id, "step_7", result)
         update_job(job_id, {"status": "step_7_complete", "current_step": 8})
         await _run_step7_5(job_id)
     except Exception as exc:
+        if is_terminated(job_id):
+            return
         update_job(job_id, {"status": "step_7_error", "errors": [str(exc)]})
 
 
 async def _run_step7_5(job_id: str) -> None:
+    if is_terminated(job_id):
+        return
     try:
         update_job(job_id, {"status": "step_7_5_running"})
         job = get_job(job_id)
@@ -134,9 +160,13 @@ async def _run_step7_5(job_id: str) -> None:
             job["step_results"]["step_5"],
             client,
         )
+        if is_terminated(job_id):
+            return
         add_step_result(job_id, "step_7_5", result)
         update_job(job_id, {"status": "step_7_5_complete", "current_step": 9})
     except Exception as exc:
+        if is_terminated(job_id):
+            return
         update_job(job_id, {"status": "step_7_5_error", "errors": [str(exc)]})
 
 

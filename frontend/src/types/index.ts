@@ -361,6 +361,7 @@ export type JobStatus =
   | 'step_11_error'
   | 'complete'
   | 'error'
+  | 'terminated'
 
 export interface Job {
   job_id: string

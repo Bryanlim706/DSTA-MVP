@@ -49,7 +49,8 @@ export async function pollJob(
       job.status === 'step_2_complete' ||
       job.status === 'step_3_complete' ||
       job.status === 'waiting_for_confirmation' ||
-      job.status === 'complete'
+      job.status === 'complete' ||
+      job.status === 'terminated'
     ) {
       return job
     }
@@ -69,6 +70,14 @@ export async function triggerSandbox(jobId: string): Promise<void> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail ?? 'Sandbox trigger failed')
+  }
+}
+
+export async function terminateJob(jobId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/terminate`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Terminate failed')
   }
 }
 

@@ -3,7 +3,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pathlib import Path
 
 from pipeline import step11_sandbox
-from storage.job_store import get_job, update_job
+from storage.job_store import get_job, is_terminated, update_job
 
 router = APIRouter()
 
@@ -23,6 +23,8 @@ async def _run_step11(job_id: str) -> None:
             project_context=project_context,
         )
 
+        if is_terminated(job_id):
+            return
         job = get_job(job_id)
         job["step_results"]["step_11"] = result
         job["status"] = (

@@ -51,6 +51,13 @@ def update_job(job_id: str, updates: dict) -> dict:
     return job
 
 
+def is_terminated(job_id: str) -> bool:
+    """True if the job has been terminated by the user. Pipeline runners check
+    this at step boundaries to halt the chain without overwriting the status."""
+    job = get_job(job_id)
+    return bool(job and job.get("status") == "terminated")
+
+
 def add_step_result(job_id: str, step_key: str, result: dict) -> dict:
     job = get_job(job_id)
     if job is None:

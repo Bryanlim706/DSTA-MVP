@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { confirmRequirements, getJob, pollJob, triggerSandbox } from './api/client'
+import { confirmRequirements, getJob, pollJob, terminateJob, triggerSandbox } from './api/client'
 import ClassificationResult from './components/ClassificationResult'
 import ConfirmationTable from './components/ConfirmationTable'
 import GeneratedRequirementsResult from './components/GeneratedRequirementsResult'
@@ -93,6 +93,54 @@ function ErrorView({ error, onRetry }: { error: string | null; onRetry: () => vo
           className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
         >
           Try again
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function TopBar({
+  canTerminate,
+  onTerminate,
+  onNewSession,
+}: {
+  canTerminate: boolean
+  onTerminate: () => void
+  onNewSession: () => void
+}) {
+  return (
+    <div className="sticky top-0 z-20 flex items-center justify-end gap-2 px-4 py-2 bg-white/90 backdrop-blur border-b border-gray-200">
+      <button
+        onClick={onTerminate}
+        disabled={!canTerminate}
+        className="text-sm font-medium px-3 py-1.5 rounded-lg border text-red-600 border-red-300 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+      >
+        Terminate
+      </button>
+      <button
+        onClick={onNewSession}
+        className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+      >
+        New session
+      </button>
+    </div>
+  )
+}
+
+function TerminatedView({ onNewSession }: { onNewSession: () => void }) {
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center px-4">
+      <div className="max-w-md text-center">
+        <div className="text-4xl mb-4">⏹️</div>
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Session terminated</h2>
+        <p className="text-sm text-gray-500 mb-6">
+          The pipeline was stopped. Start a new session to analyse another project.
+        </p>
+        <button
+          onClick={onNewSession}
+          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
+        >
+          New session
         </button>
       </div>
     </div>
@@ -261,7 +309,7 @@ export default function App() {
   // Poll whenever stage is step_3_complete and status is non-terminal
   useEffect(() => {
     if (stage !== 'step_3_complete' || !job || pollingStep4.current) return
-    const terminalStatuses = ['step_7_5_complete', 'step_7_5_error', 'step_7_error', 'step_6_error', 'step_5_error', 'step_4_error', 'step_11_complete', 'step_11_error', 'error', 'complete']
+    const terminalStatuses = ['step_7_5_complete', 'step_7_5_error', 'step_7_error', 'step_6_error', 'step_5_error', 'step_4_error', 'step_11_complete', 'step_11_error', 'error', 'complete', 'terminated']
     if (terminalStatuses.includes(job.status)) return
 
     pollingStep4.current = true
@@ -335,19 +383,62 @@ export default function App() {
     setError(null)
   }
 
+  async function handleTerminate() {
+    if (!job) return
+    try {
+      await terminateJob(job.job_id)
+    } catch {
+      /* best-effort — still reflect terminated state locally */
+    }
+    try {
+      const updated = await getJob(job.job_id)
+      setJob(updated)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function handleNewSession() {
+    if (job && job.status !== 'terminated') {
+      try {
+        await terminateJob(job.job_id)
+      } catch {
+        /* best-effort */
+      }
+    }
+    reset()
+  }
+
+  const isTerminated = job?.status === 'terminated'
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar stage={stage} currentStep={job?.current_step} jobStatus={job?.status} />
-      <main className="flex-1 overflow-y-auto">
-        {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
-        {stage === 'loading' && (
-          job?.step_results?.step_2
-            ? <EarlyResultsView job={job} />
-            : <LoadingView job={job} />
-        )}
-        {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
-        {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />}
-        {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
+      <main className="flex-1 overflow-y-auto flex flex-col">
+        <TopBar
+          canTerminate={!!job && !isTerminated}
+          onTerminate={handleTerminate}
+          onNewSession={handleNewSession}
+        />
+        <div className="flex-1">
+          {isTerminated ? (
+            job.step_results?.step_3_5
+              ? <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />
+              : <TerminatedView onNewSession={handleNewSession} />
+          ) : (
+            <>
+              {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
+              {stage === 'loading' && (
+                job?.step_results?.step_2
+                  ? <EarlyResultsView job={job} />
+                  : <LoadingView job={job} />
+              )}
+              {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
+              {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />}
+              {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
+            </>
+          )}
+        </div>
       </main>
     </div>
   )
