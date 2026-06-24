@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 from pathlib import Path
 
 import anthropic
@@ -23,11 +22,6 @@ SPEC_DOC_KEYWORDS = {
     "use-case", "usecase", "epic", "functional",
 }
 README_NAMES = {"readme.md", "readme.rst", "readme.txt", "readme"}
-
-
-# Lowercases and collapses all whitespace to single spaces for source_quote verification.
-def _norm(text: str) -> str:
-    return re.sub(r'\s+', ' ', text.lower().strip())
 
 
 MAX_DOCS = 30
@@ -226,11 +220,17 @@ def _build_user_message(requirements_text: str, spec_docs: dict[str, str]) -> st
         parts.append(f"=== {label} ===\n{content}")
     if requirements_text.strip():
         parts.append(f"=== user_input ===\n{requirements_text}")   # same neutral format as docs
-    parts.append(
+    instruction = (
         "Extract all explicitly stated functional requirements from ALL sections above. "
         "Every section is an equal source — do not skip content in one section because "
         "another section covers a similar topic. Set source to the section name the requirement came from."
     )
+    if requirements_text.strip() and spec_docs:
+        instruction += (
+            " IMPORTANT: the user_input section is a partial list and does NOT represent all requirements. "
+            "You must also extract every additional requirement found in the other sections that is not already covered by user_input."
+        )
+    parts.append(instruction)
     return "\n\n".join(parts)
 
 
@@ -265,27 +265,13 @@ def _parse_llm_response(raw: str) -> tuple[list, str]:
     raise ValueError("Could not parse LLM response as requirements")
 
 
-# Filters raw LLM items: drops entries without a verifiable source_quote, validates path arrays, assigns weights from priority, and re-sequences req_ids.
-def _validate_and_normalise(
-    items: list,
-    requirements_text: str,
-    spec_docs: dict[str, str],
-) -> tuple[list, int]:
-    all_sources_norm = _norm(requirements_text + " " + " ".join(spec_docs.values()))
+# Validates path arrays, assigns weights from priority, and re-sequences req_ids.
+def _validate_and_normalise(items: list) -> tuple[list, int]:
     valid = []
     dropped = 0
 
     for item in items:
         if not isinstance(item, dict):
-            dropped += 1
-            continue
-
-        quote = str(item.get("source_quote", "")).strip()
-        if not quote:
-            dropped += 1
-            continue
-
-        if _norm(quote) not in all_sources_norm:
             dropped += 1
             continue
 
@@ -362,7 +348,7 @@ async def run(
                 messages=[{"role": "user", "content": _build_user_message(req_text, spec_docs)}],
             )
             raw_items, project_summary = _parse_llm_response(response.content[0].text)
-            requirements, dropped = _validate_and_normalise(raw_items, req_text, spec_docs)
+            requirements, dropped = _validate_and_normalise(raw_items)
             break
         except anthropic.APIStatusError as exc:
             last_exc = exc

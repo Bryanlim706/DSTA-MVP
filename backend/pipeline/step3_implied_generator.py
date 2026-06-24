@@ -213,8 +213,6 @@ def _validate_and_normalise(
     step1_requirements: list,
     step2_requirements: list,
 ) -> tuple[list, int]:
-    all_reqs = step1_requirements + step2_requirements
-    stated_lower = {r["description"].lower() for r in all_reqs}
     valid_step1_ids = {r.get("req_id", "") for r in step1_requirements}
     vague_step1_ids = {r.get("req_id", "") for r in step1_requirements if r.get("vague")}
     valid = []
@@ -243,10 +241,6 @@ def _validate_and_normalise(
         item["confidence_score"] = conf
 
         if item.get("category") not in VALID_CATEGORIES:
-            dropped += 1
-            continue
-
-        if desc.lower() in stated_lower:
             dropped += 1
             continue
 

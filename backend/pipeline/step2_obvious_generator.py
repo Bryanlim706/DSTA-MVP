@@ -206,7 +206,6 @@ def _parse_llm_response(raw: str) -> list:
 
 
 def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list, int]:
-    stated_lower = {r["description"].lower() for r in step1_requirements}
     valid_req_ids = {r.get("req_id", "") for r in step1_requirements}
     valid = []
     dropped = 0
@@ -227,10 +226,6 @@ def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list
         if not (reasoning_up.startswith("CHECK 2") or reasoning_up.startswith("CHECK 3")):
             dropped += 1
             continue
-        if desc.lower() in stated_lower:
-            dropped += 1
-            continue
-
         # Validate and normalise path
         path = item.get("path")
         if not isinstance(path, list) or len(path) == 0:

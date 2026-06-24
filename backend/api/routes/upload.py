@@ -4,9 +4,9 @@ import zipfile
 from pathlib import Path
 
 import aiofiles
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
-from pipeline import step0_classifier, step1_req_extractor, step2_obvious_generator, step3_implied_generator
+from pipeline import step0_classifier, step1_req_extractor, step2_obvious_generator, step3_implied_generator, task_registry
 from storage.job_store import add_step_result, create_job, get_job, is_terminated, update_job
 
 router = APIRouter()
@@ -17,7 +17,6 @@ UPLOAD_DIR = Path("./uploads")
 @router.post("/upload")
 async def upload_project(
     request: Request,
-    background_tasks: BackgroundTasks,
     project_zip: UploadFile = File(...),
     requirements: str = Form(""),
     use_requirements_box: bool = Form(True),
@@ -51,7 +50,8 @@ async def upload_project(
     )
 
     client = request.app.state.anthropic_client
-    background_tasks.add_task(_run_pipeline, job_id, zip_path, job_dir / "extracted", client)
+    task = asyncio.create_task(_run_pipeline(job_id, zip_path, job_dir / "extracted", client))
+    task_registry.register(job_id, task)
 
     return {"job_id": job_id, "status": "created"}
 
@@ -107,6 +107,8 @@ async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
         if is_terminated(job_id):
             return
         update_job(job_id, {"status": "error", "errors": [str(e)]})
+    finally:
+        task_registry.remove(job_id)
 
 
 def _extract_zip(zip_path: Path, extract_to: Path) -> None:

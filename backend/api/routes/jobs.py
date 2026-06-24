@@ -2,7 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException
 
-from pipeline import step11_sandbox
+from pipeline import step11_sandbox, task_registry
 from storage.job_store import get_job, list_jobs, update_job
 
 router = APIRouter()
@@ -30,6 +30,7 @@ async def terminate_job(job_id: str):
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     update_job(job_id, {"status": "terminated"})
+    task_registry.cancel(job_id)
     try:
         await asyncio.to_thread(step11_sandbox.teardown, job_id)
     except Exception:

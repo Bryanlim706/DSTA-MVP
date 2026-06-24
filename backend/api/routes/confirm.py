@@ -2,12 +2,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+import asyncio
+
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 import anthropic
 
-from pipeline import step4_repo_parser, step5_app_crawler, step6_entity_mapper, step7_scorer, step7_5_fa_advisor
+from pipeline import step4_repo_parser, step5_app_crawler, step6_entity_mapper, step7_scorer, step7_5_fa_advisor, task_registry
 from storage.job_store import add_step_result, get_job, is_terminated, update_job
 
 router = APIRouter()
@@ -80,6 +82,8 @@ async def _run_step4(job_id: str, extract_to: Path) -> None:
         if is_terminated(job_id):
             return
         update_job(job_id, {"status": "step_4_error", "errors": [str(exc)]})
+    finally:
+        task_registry.remove(job_id)
 
 
 async def _run_step5(job_id: str, extract_to: Path) -> None:
@@ -175,7 +179,6 @@ async def confirm_requirements(
     job_id: str,
     body: ConfirmRequest,
     request: Request,
-    background_tasks: BackgroundTasks,
 ):
     job = get_job(job_id)
     if job is None:
@@ -248,6 +251,7 @@ async def confirm_requirements(
     update_job(job_id, {"status": "confirmed", "current_step": 4})
 
     extract_to = Path(job.get("extracted_path", f"./uploads/{job_id}/extracted")).resolve()
-    background_tasks.add_task(_run_step4, job_id, extract_to)
+    task = asyncio.create_task(_run_step4(job_id, extract_to))
+    task_registry.register(job_id, task)
 
     return {"status": "confirmed", "l1a_count": l1a_count}
