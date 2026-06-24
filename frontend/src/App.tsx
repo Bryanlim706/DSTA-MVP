@@ -16,7 +16,21 @@ import type { ConfirmedRequirement, Job } from './types'
 
 type Stage = 'upload' | 'loading' | 'confirming' | 'step_3_complete' | 'error'
 
-function LoadingView({ job }: { job: Job | null }) {
+function LoadingView({ job, isTerminated }: { job: Job | null; isTerminated?: boolean }) {
+  if (isTerminated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-sm font-medium text-gray-700">Pipeline terminated</p>
+          <p className="text-xs text-gray-400 mt-1">No results were produced before termination.</p>
+          {job?.job_id && (
+            <p className="text-[10px] text-gray-300 mt-2 font-mono">{job.job_id}</p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   const stepLabel =
     job?.current_step === 3
       ? 'Generating implied requirements…'
@@ -40,7 +54,7 @@ function LoadingView({ job }: { job: Job | null }) {
   )
 }
 
-function EarlyResultsView({ job }: { job: Job }) {
+function EarlyResultsView({ job, isTerminated }: { job: Job; isTerminated?: boolean }) {
   const step0 = job.step_results.step_0
   const step1 = job.step_results.step_1
   const step2 = job.step_results.step_2
@@ -53,7 +67,9 @@ function EarlyResultsView({ job }: { job: Job }) {
           {job.project_name && (
             <p className="text-sm font-medium text-gray-600 mt-0.5">{job.project_name}</p>
           )}
-          <p className="text-xs text-gray-400 mt-0.5">Steps 0–2 complete — generating implied requirements…</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {isTerminated ? 'Steps 0–2 complete — pipeline terminated' : 'Steps 0–2 complete — generating implied requirements…'}
+          </p>
           <p className="text-[10px] text-gray-300 mt-0.5 font-mono">{job.job_id}</p>
         </div>
 
@@ -69,13 +85,15 @@ function EarlyResultsView({ job }: { job: Job }) {
           </div>
         )}
 
-        <div className="mt-6 flex items-center gap-3 px-5 py-4 bg-white rounded-xl border border-gray-200">
-          <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-gray-700">Generating implied requirements…</p>
-            <p className="text-xs text-gray-400 mt-0.5">This usually takes 10–15 seconds</p>
+        {!isTerminated && (
+          <div className="mt-6 flex items-center gap-3 px-5 py-4 bg-white rounded-xl border border-gray-200">
+            <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-gray-700">Generating implied requirements…</p>
+              <p className="text-xs text-gray-400 mt-0.5">This usually takes 10–15 seconds</p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )
@@ -101,10 +119,12 @@ function ErrorView({ error, onRetry }: { error: string | null; onRetry: () => vo
 
 function TopBar({
   canTerminate,
+  isTerminated,
   onTerminate,
   onNewSession,
 }: {
   canTerminate: boolean
+  isTerminated: boolean
   onTerminate: () => void
   onNewSession: () => void
 }) {
@@ -112,10 +132,14 @@ function TopBar({
     <div className="sticky top-0 z-20 flex items-center justify-end gap-2 px-4 py-2 bg-white/90 backdrop-blur border-b border-gray-200">
       <button
         onClick={onTerminate}
-        disabled={!canTerminate}
-        className="text-sm font-medium px-3 py-1.5 rounded-lg border text-red-600 border-red-300 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+        disabled={!canTerminate || isTerminated}
+        className={
+          isTerminated
+            ? 'text-sm font-medium px-3 py-1.5 rounded-lg border text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed opacity-60'
+            : 'text-sm font-medium px-3 py-1.5 rounded-lg border text-red-600 border-red-300 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent'
+        }
       >
-        Terminate
+        {isTerminated ? 'Terminated' : 'Terminate'}
       </button>
       <button
         onClick={onNewSession}
@@ -127,25 +151,6 @@ function TopBar({
   )
 }
 
-function TerminatedView({ onNewSession }: { onNewSession: () => void }) {
-  return (
-    <div className="min-h-[60vh] flex items-center justify-center px-4">
-      <div className="max-w-md text-center">
-        <div className="text-4xl mb-4">⏹️</div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-2">Session terminated</h2>
-        <p className="text-sm text-gray-500 mb-6">
-          The pipeline was stopped. Start a new session to analyse another project.
-        </p>
-        <button
-          onClick={onNewSession}
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
-        >
-          New session
-        </button>
-      </div>
-    </div>
-  )
-}
 
 function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () => void; onTriggerSandbox: () => void }) {
   const step0 = job.step_results.step_0!
@@ -299,7 +304,13 @@ export default function App() {
     getJob(jobId)
       .then((j) => {
         setJob(j)
-        setStage(stageFromStatus(j.status))
+        // Terminated without step_3_5 → stay in loading so LoadingView/EarlyResultsView
+        // shows the terminated state. Terminated with step_3_5 → show results normally.
+        if (j.status === 'terminated' && !j.step_results?.step_3_5) {
+          setStage('loading')
+        } else {
+          setStage(stageFromStatus(j.status))
+        }
       })
       .catch(() => {
         window.location.hash = ''
@@ -342,6 +353,9 @@ export default function App() {
       setJob(completed)
       if (completed.status === 'waiting_for_confirmation') {
         setStage('confirming')
+      } else if (completed.status === 'terminated') {
+        // Stay in loading — LoadingView/EarlyResultsView renders the terminated state
+        // without requiring all step results to be present.
       } else {
         setStage('step_3_complete')
       }
@@ -393,6 +407,11 @@ export default function App() {
     try {
       const updated = await getJob(job.job_id)
       setJob(updated)
+      // During confirming, all of steps 0–3 are present so ResultPage renders safely.
+      // Transition away from the confirmation table to show those results read-only.
+      if (stage === 'confirming') {
+        setStage('step_3_complete')
+      }
     } catch {
       /* ignore */
     }
@@ -417,27 +436,20 @@ export default function App() {
       <main className="flex-1 overflow-y-auto flex flex-col">
         <TopBar
           canTerminate={!!job && !isTerminated}
+          isTerminated={isTerminated}
           onTerminate={handleTerminate}
           onNewSession={handleNewSession}
         />
         <div className="flex-1">
-          {isTerminated ? (
-            job.step_results?.step_3_5
-              ? <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />
-              : <TerminatedView onNewSession={handleNewSession} />
-          ) : (
-            <>
-              {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
-              {stage === 'loading' && (
-                job?.step_results?.step_2
-                  ? <EarlyResultsView job={job} />
-                  : <LoadingView job={job} />
-              )}
-              {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
-              {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />}
-              {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
-            </>
+          {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
+          {stage === 'loading' && (
+            job?.step_results?.step_2
+              ? <EarlyResultsView job={job} isTerminated={isTerminated} />
+              : <LoadingView job={job} isTerminated={isTerminated} />
           )}
+          {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
+          {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />}
+          {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
         </div>
       </main>
     </div>
