@@ -434,12 +434,14 @@ export default function App() {
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar stage={stage} currentStep={job?.current_step} jobStatus={job?.status} />
       <main className="flex-1 overflow-y-auto flex flex-col">
-        <TopBar
-          canTerminate={!!job && !isTerminated}
-          isTerminated={isTerminated}
-          onTerminate={handleTerminate}
-          onNewSession={handleNewSession}
-        />
+        {stage !== 'upload' && (
+          <TopBar
+            canTerminate={!!job && !isTerminated}
+            isTerminated={isTerminated}
+            onTerminate={handleTerminate}
+            onNewSession={handleNewSession}
+          />
+        )}
         <div className="flex-1">
           {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
           {stage === 'loading' && (
