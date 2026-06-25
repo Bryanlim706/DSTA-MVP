@@ -140,7 +140,7 @@ stated            so basic         would help       exists with
 
 **Behavioral properties** (persistence, error messages, confirmation dialogs) are not functions — they belong as ACs at Step 8. They cannot be mapped to a UI element or endpoint in Step 6.
 
-**Known gap — behavioral requirements** (auto-reset, scheduled notifications, cache expiry): these correctly fail Step 1's extraction gate. Schema fix (Step 1 `type: "behavioral"`, Step 6 L3-only E(), Step 8 time/state ACs) deferred to before Step 8.
+**Known gap — behavioral requirements** (auto-reset, scheduled notifications, cache expiry): these correctly fail Step 1's extraction gate.
 
 **L1a validity:** Steps 1–3 produce heuristic starting points from project type + requirements text, not the codebase. The formula is only valid after Step 3.5 locks L1a. The `functional_area` tag helps reviewers spot fabricated requirement clusters.
 
@@ -170,15 +170,7 @@ The X axis encodes distance from the software's core purpose — how clearly a f
 
 ### Y axis — implementation depth (two distinct phases)
 
-**Phase 1 — Presence** (FCom/FA, measured by E()): Does the function exist at any layer? Detection only — no app execution needed.
-
-| E() | Condition |
-|---|---|
-| 1.0 | L2 (UI accessible) AND L3 (backend implemented) |
-| 0.75 | L3 only (element / nav edge / data edge / structural edge) — confirmed in source; not live-confirmed (typically: backend not running during crawl, data-driven pages render empty) |
-| 0.5 | L3 only (node) — route defined in router but Playwright could not confirm accessibility |
-| 0.4 | Data edge only — trigger element found in Playwright DOM but no matching backend handler in `implementation_units` |
-| 0.0 | Not found in L2 or L3 |
+**Phase 1 — Presence** (FCom/FA, measured by E()): Does the function exist at any layer? Detection only — no app execution needed. E() values as defined in the FCom formula above (1.0 / 0.75 / 0.5 / 0.4 / 0.0).
 
 **Phase 2 — Correctness** (FCor): For requirements above the presence threshold (L3 exists), does the implementation behave correctly? Requires running the app and executing tests.
 
