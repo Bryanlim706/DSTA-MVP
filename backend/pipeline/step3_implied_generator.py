@@ -68,7 +68,7 @@ Read the project_summary and all stated functions. Before generating any functio
 6. USER CONTROL — What functions give users control over their experience? (account settings, preferences, notification controls, display options, theme, language)
 7. OVERVIEW + INSIGHT — What summary views, dashboards, or analytics would help users understand the state of their data at a glance?
 
-Be BOLD — generate functions even at confidence 0.50–0.70 if they represent genuine domain gaps. This pass drives FA (Functional Appropriateness) scoring: a well-calibrated app should have most of these; their absence is meaningful and scored. Aim for breadth — it is better to generate a function the reviewer demotes than to silently omit a real gap.
+Generate the 12–30 best functions across these angles. Prioritise genuine domain gaps not already covered by stated requirements; skip angles that are already well-covered.
 
 Gate: only generate functions a user can independently navigate to or invoke — a page, form, modal, view, panel, or interactive feature. Do NOT generate system reactions or behavioral properties ("User sees validation error", "User receives confirmation message", "User is redirected when X") — those are acceptance criteria, not functions.
 
