@@ -230,7 +230,7 @@ This gate applies equally to L1a and L1b. An implied enhancement that is only a 
  │       STEP 0 · Classifier            │    │          STEP 1 · Req Extractor                │
  │  project_type, frameworks            │    │  REQ-xxx: stated functions + path[]            │
  │  discovered_pages, template_engine   │    │  project_summary                               │
- │  service_layout, test_strategy       │    │  vague, functional_area                        │
+ │  service_layout, test_strategy       │    │  functional_area                               │
  └─────────────┬────────────────────────┘    └────────────────────────┬───────────────────────┘
                │                                                       │
        discovered_pages                              node inventory (from path[])
@@ -249,7 +249,7 @@ This gate applies equally to L1a and L1b. An implied enhancement that is only a 
  ┌────────────────────────────────────────────────────────────────────────────────────────────┐
  │                          STEP 3 · Implied Generator                                         │
  │       GEN-xxx · Pass 1: SOP pattern table · Pass 2: INF domain inference                  │
- │       placement: l1a (conf ≥ 0.80) · l1b advisory (< 0.80) · unpacks (vague parents)      │
+ │       placement: l1a (conf ≥ 0.80) · l1b advisory (< 0.80)                                │
  └────────────────────────────────────────────────────────────────────────────────────────────┘
 
  project_context (0) ────────────────────────────────────────────────────────────────────►┐
@@ -423,7 +423,6 @@ Step 1 does NOT receive the Step 0 result. It reads the zip directory itself to 
         {"type": "element", "label": "login button",          "primary": true,  "ui_node": "Login Page"},
         {"type": "edge",    "label": "navigate to dashboard", "primary": true,  "from": "Login Page", "to": "Dashboard"}
       ],
-      "vague": false,
       "source": "user_input",
       "source_quote": "users should be able to log in",
       "tag": "stated",
@@ -446,10 +445,10 @@ Step 1 does NOT receive the Step 0 result. It reads the zip directory itself to 
 **Output consumed by:**
 | Field(s) | Consumed by |
 |---|---|
-| `requirements` (full array) | Step 2 as `step1_requirements` — descriptions, paths, req_ids, vague flags |
+| `requirements` (full array) | Step 2 as `step1_requirements` — descriptions, paths, req_ids |
 | `requirements` (full array) | Step 3 as `step1_requirements` — same |
 | `project_summary` (str) | Step 3 as `project_summary` keyword arg |
-| `requirements[].req_id`, `requirements[].path`, `requirements[].vague` | Step 3.5 confirmation UI (pre-populates L1a table) |
+| `requirements[].req_id`, `requirements[].path` | Step 3.5 confirmation UI (pre-populates L1a table) |
 | `requirements` (after Step 3.5 confirmation) | Step 6 L1a → L2/L3 mapping |
 | `requirements[].path[].primary` entities | Step 6 E() scoring per entity |
 | `requirements` (after Step 3.5 confirmation) | Step 7 FCom formula (weights + E() scores) |
@@ -526,7 +525,7 @@ Step 2 derives its working data from these inputs via helper functions:
 **Inputs:**
 | Field | Source |
 |---|---|
-| `step1_requirements` (list) | `job["step_results"]["step_1"]["requirements"]` — full array with descriptions, paths, vague flags, req_ids |
+| `step1_requirements` (list) | `job["step_results"]["step_1"]["requirements"]` — full array with descriptions, paths, req_ids |
 | `step2_requirements` (list) | `job["step_results"]["step_2"]["requirements"]` — descriptions used for dedup only |
 | `step0_result` (dict) | `job["step_results"]["step_0"]` — uses `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` |
 | `project_summary` (str) | `job["step_results"]["step_1"]["project_summary"]` — passed as keyword arg |
@@ -535,7 +534,7 @@ Step 2 derives its working data from these inputs via helper functions:
 Step 3 user message is built from:
 - `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` (project context + root node detection via `_identify_root_node`)
 - `project_summary` (INF grounding)
-- Step 1 requirement descriptions + vague flags (SOP node inventory via `_extract_nodes_from_paths`; Step 1 `req_ids` used to validate both `depends_on` and `unpacks` — OBV-XXX IDs from Step 2 are never valid `depends_on` targets; a generated enhancement depends on a domain feature, not a navigation gap)
+- Step 1 requirement descriptions (SOP pattern firing; Step 1 `req_ids` used to validate `depends_on` — OBV-XXX IDs from Step 2 are never valid `depends_on` targets; a generated enhancement depends on a domain feature, not a navigation gap)
 - Step 2 requirement descriptions (dedup only)
 
 **Three-pass generation:** Passes 1+2 generate (optimised for recall, no dedup prose); Pass 3 deduplicates.
@@ -584,7 +583,6 @@ Separate single-purpose LLM call after Passes 1+2 + `_validate_and_normalise`. R
       "tag": "generated",
       "category": "sop",
       "reasoning": "Auth pattern — login stated (REQ-001); no account management page in stated or obvious reqs",
-      "unpacks": null,
       "depends_on": ["REQ-001"],
       "confidence_score": 0.88,
       "confidence_reason": "Login stated; account management is a standard paired function in authenticated apps",
@@ -613,9 +611,7 @@ Separate single-purpose LLM call after Passes 1+2 + `_validate_and_normalise`. R
 | Field(s) | Consumed by |
 |---|---|
 | `requirements` where `placement == "l1a"` | Step 3.5 UI — pre-included in L1a section, demotable |
-| `requirements` where `placement == "l1b"` AND `unpacks` targets a vague Step 1 parent | Step 3.5 UI — promoted to L1a section alongside l1a items, tagged "vague child", demotable |
-| `requirements` where `placement == "l1b"` AND no vague `unpacks` | Step 3.5 UI — shown in Advisory section, promotable |
-| `requirements[].unpacks` | Step 3.5 — vague parent auto-replace logic |
+| `requirements` where `placement == "l1b"` | Step 3.5 UI — shown in Advisory section, promotable |
 | `requirements` where `placement == "l1a"` | Step 3.5 confirm endpoint — merged into `confirmed_requirements` |
 | `requirements` where `placement == "l1b"` | Step 3.5 confirm endpoint — copied as `advisory_requirements` |
 | All downstream (Steps 6, 7, 8, 9, 13) read via `step_3_5` only — not from Step 3 directly |
@@ -640,8 +636,8 @@ Separate single-purpose LLM call after Passes 1+2 + `_validate_and_normalise`. R
 
 **`ConfirmedRequirement` schema (Pydantic):**
 ```
-req_id, description, path: list[PathEntity], vague: bool, tag, priority, weight,
-functional_area, testable, source, promoted: bool, unpacks: str|null,
+req_id, description, path: list[PathEntity], tag, priority, weight,
+functional_area, testable, source, promoted: bool,
 depends_on: list[str], source_quote: str|null
 ```
 `depends_on` and `source_quote` are looked up server-side from prior step results by `req_id` — the frontend does not pass them.
@@ -654,7 +650,6 @@ depends_on: list[str], source_quote: str|null
       "req_id": "REQ-001",
       "description": "User can log in",
       "path": [...],
-      "vague": false,
       "tag": "stated",
       "priority": "high",
       "weight": 3.0,
@@ -662,7 +657,6 @@ depends_on: list[str], source_quote: str|null
       "testable": true,
       "source": "stated",
       "promoted": false,
-      "unpacks": null,
       "depends_on": [],
       "source_quote": "users should be able to log in"
     },
@@ -670,7 +664,6 @@ depends_on: list[str], source_quote: str|null
       "req_id": "OBV-001",
       "description": "User can navigate to Dashboard",
       "path": [...],
-      "vague": false,
       "tag": "obvious",
       "priority": "high",
       "weight": 3.0,
@@ -678,7 +671,6 @@ depends_on: list[str], source_quote: str|null
       "testable": true,
       "source": "obvious",
       "promoted": false,
-      "unpacks": null,
       "depends_on": ["REQ-003"],
       "source_quote": null
     }
@@ -743,7 +735,7 @@ depends_on: list[str], source_quote: str|null
 
 *Step 3 envelope:* `total_count`, `sop_count`, `inference_count`, `llm_model`, `dropped_count`, `error` — promoted l1a items: `category`, `reasoning`, `confidence_score`, `confidence_reason`, `placement`, `strength` — l1b advisory items: no fields dropped, copied as-is with full schema.
 
-**If skipped:** `confirmed_requirements` = all Step 1 stated (non-vague) + all Step 2 obvious at default weights; `advisory_requirements` = all Step 3 l1b items; `project_context` and `project_summary` still populated. The skip logic is frontend-driven — ConfirmationTable pre-populates the HTTP body with only stated+obvious items; the backend stores `skipped: true` but applies no special branching.
+**If skipped:** `confirmed_requirements` = all Step 1 stated + all Step 2 obvious at default weights; `advisory_requirements` = all Step 3 l1b items; `project_context` and `project_summary` still populated. The skip logic is frontend-driven — ConfirmationTable pre-populates the HTTP body with only stated+obvious items; the backend stores `skipped: true` but applies no special branching.
 
 ---
 
@@ -752,9 +744,9 @@ Exact fields per edge:
 - **Disk → Step 0:** file tree, config file contents (package.json, pom.xml, build.gradle, etc.)
 - **Disk + job → Step 1:** README files (depth ≤ 2), keyword-matched spec docs (.md/.rst/.txt), `job["requirements_text"]`
 - **Step 0 → Step 2:** `discovered_pages` only — passed to `_identify_root_node()` for root exclusion; also shown to LLM as page-file context (node inventory itself comes from Step 1 path arrays via `_extract_nodes_from_paths`)
-- **Step 1 → Step 2:** `requirements[]` full array — descriptions, paths, req_ids, vague flags
+- **Step 1 → Step 2:** `requirements[]` full array — descriptions, paths, req_ids
 - **Step 0 → Step 3:** `project_type`, `frontend_framework`, `backend_framework`, `discovered_pages` — project context for LLM prompt and `_identify_root_node()`
-- **Step 1 → Step 3:** `requirements[]` full array — SOP node extraction, vague detection, `depends_on`/`unpacks` validation; `project_summary` — INF pass domain grounding
+- **Step 1 → Step 3:** `requirements[]` full array — SOP pattern firing, `depends_on` validation; `project_summary` — INF pass domain grounding
 - **Step 2 → Step 3:** `requirements[]` descriptions only — dedup check (LLM shown as "already covered"; `_validate_and_normalise` semantic dedup)
 - **Step 0 → Step 3.5:** 10 fields → `project_context`: `project_type`, `frontend_framework`, `frontend_tooling`, `backend_framework`, `template_engine`, `service_layout`, `server_routes_detected`, `discovered_pages`, `test_strategy`, `runtime`
 - **Step 1 → Step 3.5:** `requirements[]` as req_id lookup for server-side `depends_on` + `source_quote` enrichment; `step1_ids` set for `deleted_count`; `project_summary` copied to output
