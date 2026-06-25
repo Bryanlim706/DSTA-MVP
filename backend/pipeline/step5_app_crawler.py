@@ -12,6 +12,7 @@ No LLM call.
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess as _subprocess
 import sys
@@ -30,6 +31,76 @@ _PORT_BACKEND_FLASK = 5001
 _PORT_BACKEND_SPRING = 8080   # Spring Boot default — matches typical Vite proxy config
 _PORT_BACKEND_EXPRESS = 3001
 _PORT_STATIC = 8082
+
+def _kill_process_tree(proc: _subprocess.Popen) -> None:
+    """Terminate a process and all its children.
+
+    On Windows, proc.terminate() only kills the direct process (e.g. the npm
+    wrapper) but leaves child node.exe processes (the Vite dev server) running
+    as orphans that keep the port occupied for subsequent jobs.
+    taskkill /F /T kills the entire process tree.
+    """
+    try:
+        if sys.platform == "win32":
+            _subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                stdout=_subprocess.DEVNULL,
+                stderr=_subprocess.DEVNULL,
+            )
+        else:
+            import signal
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:
+                proc.kill()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def _kill_process_on_port(port: int) -> None:
+    """Kill whichever process is currently listening on port (best-effort).
+
+    Used to evict orphaned evaluation servers left behind when uvicorn crashed
+    or was force-killed during a previous Step 5 run.  All evaluation ports
+    (5174, 3000, 8001, etc.) are DSTA-reserved, so it is always safe to kill
+    whatever occupies them before starting a new evaluation.
+    """
+    if sys.platform == "win32":
+        try:
+            result = _subprocess.run(
+                ["netstat", "-ano"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.splitlines():
+                cols = line.split()
+                # Format: Proto  Local  Foreign  State  PID
+                if len(cols) >= 5 and f":{port}" in cols[1] and cols[3] == "LISTENING":
+                    pid = int(cols[4])
+                    _subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(pid)],
+                        stdout=_subprocess.DEVNULL,
+                        stderr=_subprocess.DEVNULL,
+                    )
+        except Exception:
+            pass
+    else:
+        try:
+            result = _subprocess.run(
+                ["lsof", "-ti", f"tcp:{port}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            import signal
+            for pid_str in result.stdout.strip().splitlines():
+                try:
+                    os.kill(int(pid_str), signal.SIGKILL)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
 
 # (cmd, port, cwd)
 _BootSpec = tuple[list[str], int, Path]
@@ -520,11 +591,16 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
 
     crawl_port = bootstrap[-1][1]
 
-    # Abort if the crawl port is already occupied by another server (e.g. DSTA's own
-    # frontend bumped from 5173→5174 due to port collision).  Crawling a pre-existing
-    # server would return that server's elements, not the evaluated app's.
+    # If the crawl port is already occupied, evict the occupant first.
+    # All evaluation ports are DSTA-reserved, so anything pre-existing is an
+    # orphaned server from a previous run whose uvicorn was force-killed before
+    # the finally-block cleanup could fire.
     if await _port_already_listening(crawl_port):
-        return _full_static(routes, reason="port_conflict")
+        await asyncio.to_thread(_kill_process_on_port, crawl_port)
+        await asyncio.sleep(1.5)   # give the OS time to release the port
+        if await _port_already_listening(crawl_port):
+            # Eviction failed — something we don't own is there; abort.
+            return _full_static(routes, reason="port_conflict")
 
     processes: list[_subprocess.Popen] = []
     try:
@@ -582,11 +658,4 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
 
     finally:
         for proc in processes:
-            try:
-                proc.terminate()
-                proc.wait(timeout=5.0)
-            except Exception:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+            _kill_process_tree(proc)
