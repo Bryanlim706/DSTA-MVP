@@ -59,7 +59,10 @@ function statusIndex(s?: string): number {
 
 function activeStepId(stage: Stage, currentStep?: number, jobStatus?: string): number {
   if (stage === 'upload') return -1
-  if (stage === 'loading') return currentStep ?? 0
+  if (stage === 'loading') {
+    if (jobStatus === 'terminated') return -99  // terminated: no step is "in progress"
+    return currentStep ?? 0
+  }
   if (stage === 'confirming') return 3.5
   if (stage !== 'step_3_complete') return -99
   if (jobStatus === 'step_4_running') return 4
@@ -96,7 +99,7 @@ function stepNumLabel(id: number): string {
 
 export default function Sidebar({ stage, currentStep, jobStatus }: { stage: Stage; currentStep?: number; jobStatus?: string }) {
   const active = activeStepId(stage, currentStep, jobStatus)
-  // Correctness group collapsed by default — none of its steps are built yet
+  const [collapsed, setCollapsed] = useState(false)
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set(['fcom_fa']))
 
   function toggleGroup(id: string) {
@@ -109,68 +112,77 @@ export default function Sidebar({ stage, currentStep, jobStatus }: { stage: Stag
   }
 
   return (
-    <aside className="flex-shrink-0 w-52 h-screen bg-white border-r border-gray-200 flex flex-col overflow-hidden">
-      <div className="px-4 py-4 border-b border-gray-100">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">ISO 25010</p>
-        <p className="text-sm font-medium text-gray-800 mt-0.5">Pipeline</p>
+    <aside className={`flex-shrink-0 ${collapsed ? 'w-10' : 'w-52'} h-full bg-white border-r border-gray-200 flex flex-col overflow-hidden transition-all duration-200`}>
+      {/* Collapse toggle */}
+      <div className={`flex ${collapsed ? 'justify-center' : 'justify-end'} px-2 py-2 border-b border-gray-100`}>
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="1" y="1" width="2" height="12" rx="1" fill="currentColor" />
+            <rect x="4.5" y="1" width="8.5" height="12" rx="2" stroke="currentColor" strokeWidth="1.25" />
+          </svg>
+        </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-2">
-        {GROUPS.map(group => {
-          const open = openGroups.has(group.id)
-          return (
-            <div key={group.id}>
-              {/* Group header */}
-              <button
-                onClick={() => toggleGroup(group.id)}
-                className="w-full flex items-start px-4 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                <span className="flex-1 text-left leading-tight">{group.label}</span>
-                <span className={`flex-shrink-0 text-gray-300 ml-1 mt-px inline-block transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>▼</span>
-              </button>
+      {!collapsed && (
+        <nav className="flex-1 overflow-y-auto py-2">
+          {GROUPS.map(group => {
+            const open = openGroups.has(group.id)
+            return (
+              <div key={group.id}>
+                <button
+                  onClick={() => toggleGroup(group.id)}
+                  className="w-full flex items-start px-4 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  <span className="flex-1 text-left leading-tight">{group.label}</span>
+                  <span className={`flex-shrink-0 text-gray-300 ml-1 mt-px inline-block transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>▼</span>
+                </button>
 
-              {/* Steps */}
-              {open && group.steps.map(step => {
-                const done = isComplete(step.id, stage, currentStep, jobStatus)
-                const current = step.id === active && stage !== 'error'
-                const built = BUILT.has(step.id)
+                {open && group.steps.map(step => {
+                  const done = isComplete(step.id, stage, currentStep, jobStatus)
+                  const current = step.id === active && stage !== 'error'
+                  const built = BUILT.has(step.id)
 
-                return (
-                  <div
-                    key={step.id}
-                    className={`flex items-center gap-2.5 px-4 py-1.5 text-xs ${step.sub ? 'pl-7' : ''} ${
-                      current
-                        ? 'bg-blue-50 text-blue-700 font-medium'
-                        : done
-                        ? 'text-gray-700'
-                        : built
-                        ? 'text-gray-500'
-                        : 'text-gray-300'
-                    }`}
-                  >
+                  return (
                     <div
-                      className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center font-medium leading-none ${
-                        step.sub ? 'text-[9px]' : 'text-[10px]'
-                      } ${
-                        done
-                          ? 'bg-green-100 text-green-600'
-                          : current
-                          ? 'bg-blue-600 text-white'
+                      key={step.id}
+                      className={`flex items-center gap-2.5 px-4 py-1.5 text-xs ${step.sub ? 'pl-7' : ''} ${
+                        current
+                          ? 'bg-blue-50 text-blue-700 font-medium'
+                          : done
+                          ? 'text-gray-700'
                           : built
-                          ? 'bg-gray-100 text-gray-500'
-                          : 'bg-gray-50 text-gray-300'
+                          ? 'text-gray-500'
+                          : 'text-gray-300'
                       }`}
                     >
-                      {done ? '✓' : stepNumLabel(step.id)}
+                      <div
+                        className={`flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center font-medium leading-none ${
+                          step.sub ? 'text-[9px]' : 'text-[10px]'
+                        } ${
+                          done
+                            ? 'bg-green-100 text-green-600'
+                            : current
+                            ? 'bg-blue-600 text-white'
+                            : built
+                            ? 'bg-gray-100 text-gray-500'
+                            : 'bg-gray-50 text-gray-300'
+                        }`}
+                      >
+                        {done ? '✓' : stepNumLabel(step.id)}
+                      </div>
+                      <span className="truncate">{step.label}</span>
                     </div>
-                    <span className="truncate">{step.label}</span>
-                  </div>
-                )
-              })}
-            </div>
-          )
-        })}
-      </nav>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </nav>
+      )}
     </aside>
   )
 }

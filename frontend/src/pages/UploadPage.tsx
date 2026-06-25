@@ -67,10 +67,7 @@ export default function UploadPage({ onUploadComplete }: Props) {
     <div className="min-h-screen bg-gray-50 flex items-start justify-center pt-16 px-4">
       <div className="w-full max-w-2xl">
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold text-gray-900">ISO 25010 Functional Suitability</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Upload your project and describe its intended functionality to begin analysis.
-          </p>
+          <h1 className="text-2xl font-semibold text-gray-900">Upload</h1>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -117,7 +114,7 @@ export default function UploadPage({ onUploadComplete }: Props) {
           </div>
 
           {/* Requirements */}
-          <div>
+          <div className="mt-10">
             <p className="text-sm font-medium text-gray-700 mb-2">
               Project requirements are found in
             </p>

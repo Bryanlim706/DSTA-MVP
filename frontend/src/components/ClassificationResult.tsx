@@ -55,9 +55,9 @@ export default function ClassificationResult({ result }: Props) {
     : null
 
   return (
-    <div className="space-y-4">
-      {/* Main card */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      {/* Main */}
+      <div className="p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">{typeLabel}</h2>
@@ -86,8 +86,8 @@ export default function ClassificationResult({ result }: Props) {
       </div>
 
       {/* Test strategy */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Test strategy</h3>
+      <div className="border-t border-gray-100 px-6 py-4">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Test strategy</h3>
         <div className="space-y-2">
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-400 w-16">Primary</span>
@@ -103,9 +103,9 @@ export default function ClassificationResult({ result }: Props) {
       </div>
 
       {/* Config files */}
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+      <div className="border-t border-gray-100 px-6 py-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-700">Config files found</h3>
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Config files found</h3>
           {result.llm_used && (
             <span className="text-xs text-gray-400">AI-assisted</span>
           )}

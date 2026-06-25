@@ -429,22 +429,29 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
         </div>
 
         {/* Action bar */}
-        <div className="flex items-center justify-between">
-          <button
-            onClick={handleSkip}
-            disabled={submitting}
-            className="text-sm text-gray-500 hover:text-gray-700 border border-gray-300 hover:border-gray-400 px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
-          >
-            Skip — use stated + obvious only
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={submitting || included.size === 0}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors disabled:opacity-40"
-          >
-            {submitting ? 'Confirming…' : `Confirm (${included.size} in score)`}
-          </button>
-        </div>
+        {job.status === 'terminated' ? (
+          <div className="flex items-center gap-3 px-5 py-4 bg-red-50 border border-red-200 rounded-xl">
+            <div className="w-2 h-2 rounded-full bg-red-400 flex-shrink-0" />
+            <p className="text-sm text-red-700 font-medium">Pipeline terminated — scoring was not started.</p>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <button
+              onClick={handleSkip}
+              disabled={submitting}
+              className="text-sm text-gray-500 hover:text-gray-700 border border-gray-300 hover:border-gray-400 px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
+            >
+              Skip — use stated + obvious only
+            </button>
+            <button
+              onClick={handleConfirm}
+              disabled={submitting || included.size === 0}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors disabled:opacity-40"
+            >
+              {submitting ? 'Confirming…' : `Confirm (${included.size} in score)`}
+            </button>
+          </div>
+        )}
 
       </div>
     </div>

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { confirmRequirements, getJob, pollJob, terminateJob, triggerSandbox } from './api/client'
 import ClassificationResult from './components/ClassificationResult'
 import ConfirmationTable from './components/ConfirmationTable'
-import GeneratedRequirementsResult from './components/GeneratedRequirementsResult'
 import ObviousRequirementsResult from './components/ObviousRequirementsResult'
 import AppCrawlerResult from './components/AppCrawlerResult'
 import FA75AdvisorResult from './components/FA75AdvisorResult'
@@ -12,66 +11,41 @@ import ScoringResult from './components/ScoringResult'
 import RequirementsResult from './components/RequirementsResult'
 import Sidebar from './components/Sidebar'
 import UploadPage from './pages/UploadPage'
-import type { ConfirmedRequirement, Job } from './types'
+import type { ConfirmedRequirement, Job, Step3Requirement } from './types'
 
 type Stage = 'upload' | 'loading' | 'confirming' | 'step_3_complete' | 'error'
 
-function LoadingView({ job, isTerminated }: { job: Job | null; isTerminated?: boolean }) {
-  if (isTerminated) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-sm font-medium text-gray-700">Pipeline terminated</p>
-          <p className="text-xs text-gray-400 mt-1">No results were produced before termination.</p>
-          {job?.job_id && (
-            <p className="text-[10px] text-gray-300 mt-2 font-mono">{job.job_id}</p>
-          )}
-        </div>
-      </div>
-    )
-  }
+function EarlyResultsView({ job, isTerminated }: { job: Job | null; isTerminated?: boolean }) {
+  const step0 = job?.step_results?.step_0
+  const step1 = job?.step_results?.step_1
+  const step2 = job?.step_results?.step_2
 
-  const stepLabel =
-    job?.current_step === 3
-      ? 'Generating implied requirements…'
-      : job?.current_step === 2
-      ? 'Generating obvious requirements…'
-      : job?.current_step === 1
-      ? 'Extracting stated requirements…'
-      : 'Classifying project type…'
+  const loadingLabel = step2
+    ? 'Generating implied requirements…'
+    : step1
+    ? 'Generating obvious requirements…'
+    : step0
+    ? 'Extracting stated requirements…'
+    : 'Classifying project type…'
 
-  return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="text-center">
-        <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-sm font-medium text-gray-700">{stepLabel}</p>
-        <p className="text-xs text-gray-400 mt-1">This usually takes 10–20 seconds</p>
-        {job?.job_id && (
-          <p className="text-[10px] text-gray-300 mt-2 font-mono">{job.job_id}</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function EarlyResultsView({ job, isTerminated }: { job: Job; isTerminated?: boolean }) {
-  const step0 = job.step_results.step_0
-  const step1 = job.step_results.step_1
-  const step2 = job.step_results.step_2
+  const statusText = isTerminated
+    ? step2 ? 'Steps 0–2 complete — pipeline terminated'
+    : step1 ? 'Steps 0–1 complete — pipeline terminated'
+    : step0 ? 'Step 0 complete — pipeline terminated'
+    : 'Pipeline terminated'
+    : step2 ? 'Steps 0–2 complete'
+    : step1 ? 'Steps 0–1 complete'
+    : step0 ? 'Step 0 complete'
+    : ''
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-12">
+    <div className="min-h-screen bg-gray-50 px-4 pt-6 pb-12">
       <div className="max-w-3xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
-          {job.project_name && (
-            <p className="text-sm font-medium text-gray-600 mt-0.5">{job.project_name}</p>
-          )}
-          <p className="text-xs text-gray-400 mt-0.5">
-            {isTerminated ? 'Steps 0–2 complete — pipeline terminated' : 'Steps 0–2 complete — generating implied requirements…'}
-          </p>
-          <p className="text-[10px] text-gray-300 mt-0.5 font-mono">{job.job_id}</p>
-        </div>
+        {statusText && (
+          <div className="mb-4">
+            <p className="text-xs font-semibold text-gray-500 text-center">{statusText}</p>
+          </div>
+        )}
 
         {step0 && <ClassificationResult result={step0} />}
         {step1 && (
@@ -89,12 +63,100 @@ function EarlyResultsView({ job, isTerminated }: { job: Job; isTerminated?: bool
           <div className="mt-6 flex items-center gap-3 px-5 py-4 bg-white rounded-xl border border-gray-200">
             <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
             <div>
-              <p className="text-sm font-medium text-gray-700">Generating implied requirements…</p>
-              <p className="text-xs text-gray-400 mt-0.5">This usually takes 10–15 seconds</p>
+              <p className="text-sm font-medium text-gray-700">{loadingLabel}</p>
+              <p className="text-xs text-gray-400 mt-0.5">This usually takes 10–20 seconds</p>
             </div>
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+const TAG_STYLES: Record<string, string> = {
+  stated:    'bg-green-100 text-green-700',
+  obvious:   'bg-blue-100 text-blue-700',
+  generated: 'bg-purple-100 text-purple-700',
+  custom:    'bg-orange-100 text-orange-700',
+}
+
+function L1aPanel({ reqs }: { reqs: ConfirmedRequirement[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <button
+        className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-gray-50 transition-colors"
+        onClick={() => setOpen(v => !v)}
+      >
+        <span className="text-sm font-semibold text-gray-800">L1a — Confirmed Functions</span>
+        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{reqs.length}</span>
+        <span className="ml-auto text-xs text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <table className="w-full text-left border-t border-gray-100">
+          <thead>
+            <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
+              <th className="px-4 py-2">ID</th>
+              <th className="px-4 py-2">Function</th>
+              <th className="px-4 py-2">Tag</th>
+              <th className="px-4 py-2 text-right">Priority</th>
+              <th className="px-4 py-2 text-right">Wt</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reqs.map(r => (
+              <tr key={r.req_id} className="border-t border-gray-50 hover:bg-gray-50">
+                <td className="px-4 py-2 text-xs font-mono text-gray-400 whitespace-nowrap">{r.req_id}</td>
+                <td className="px-4 py-2 text-sm text-gray-800">{r.description}</td>
+                <td className="px-4 py-2">
+                  <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${TAG_STYLES[r.tag] ?? 'bg-gray-100 text-gray-500'}`}>{r.tag}</span>
+                </td>
+                <td className="px-4 py-2 text-xs text-gray-500 text-right whitespace-nowrap">{r.priority}</td>
+                <td className="px-4 py-2 text-xs text-gray-500 text-right">{r.weight.toFixed(1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+function L1bPanel({ reqs }: { reqs: Step3Requirement[] }) {
+  const [open, setOpen] = useState(false)
+  if (reqs.length === 0) return null
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <button
+        className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-gray-50 transition-colors"
+        onClick={() => setOpen(v => !v)}
+      >
+        <span className="text-sm font-semibold text-gray-800">L1b — Advisory Functions</span>
+        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{reqs.length}</span>
+        <span className="ml-auto text-xs text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <table className="w-full text-left border-t border-gray-100">
+          <thead>
+            <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
+              <th className="px-4 py-2">ID</th>
+              <th className="px-4 py-2">Function</th>
+              <th className="px-4 py-2">Category</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reqs.map(r => (
+              <tr key={r.req_id} className="border-t border-gray-50 hover:bg-gray-50">
+                <td className="px-4 py-2 text-xs font-mono text-gray-400 whitespace-nowrap">{r.req_id}</td>
+                <td className="px-4 py-2 text-sm text-gray-700">{r.description}</td>
+                <td className="px-4 py-2">
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${r.category === 'sop' ? 'bg-blue-50 text-blue-500' : 'bg-purple-50 text-purple-500'}`}>{r.category?.toUpperCase()}</span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   )
 }
@@ -122,41 +184,52 @@ function TopBar({
   isTerminated,
   onTerminate,
   onNewSession,
+  projectName,
+  jobId,
 }: {
   canTerminate: boolean
   isTerminated: boolean
   onTerminate: () => void
   onNewSession: () => void
+  projectName?: string
+  jobId?: string
 }) {
   return (
-    <div className="sticky top-0 z-20 flex items-center justify-end gap-2 px-4 py-2 bg-white/90 backdrop-blur border-b border-gray-200">
-      <button
-        onClick={onTerminate}
-        disabled={!canTerminate || isTerminated}
-        className={
-          isTerminated
-            ? 'text-sm font-medium px-3 py-1.5 rounded-lg border text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed opacity-60'
-            : 'text-sm font-medium px-3 py-1.5 rounded-lg border text-red-600 border-red-300 hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent'
-        }
-      >
-        {isTerminated ? 'Terminated' : 'Terminate'}
-      </button>
-      <button
-        onClick={onNewSession}
-        className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-      >
-        New session
-      </button>
+    <div className="relative flex items-center px-4 py-2 bg-red-50 border-b border-red-200 z-20">
+      <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center">
+        {projectName && (
+          <span className="text-sm font-medium text-gray-800">{projectName}</span>
+        )}
+        {jobId && (
+          <span className="text-[10px] font-mono text-gray-300">{jobId}</span>
+        )}
+      </div>
+      <div className="ml-auto flex items-center gap-2">
+        <button
+          onClick={onTerminate}
+          disabled={!canTerminate || isTerminated}
+          className={
+            isTerminated
+              ? 'text-sm font-medium px-3 py-1.5 rounded-lg border text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed opacity-60'
+              : 'text-sm font-medium px-3 py-1.5 rounded-lg border text-red-800 border-red-500 bg-red-100 hover:bg-red-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-100'
+          }
+        >
+          {isTerminated ? 'Terminated' : 'Terminate job'}
+        </button>
+        <button
+          onClick={onNewSession}
+          className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          New session
+        </button>
+      </div>
     </div>
   )
 }
 
 
-function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () => void; onTriggerSandbox: () => void }) {
+function ResultPage({ job, onTriggerSandbox }: { job: Job; onTriggerSandbox: () => void }) {
   const step0 = job.step_results.step_0!
-  const step1 = job.step_results.step_1!
-  const step2 = job.step_results.step_2!
-  const step3 = job.step_results.step_3
   const step35 = job.step_results.step_3_5
   const step4 = job.step_results.step_4
   const step5 = job.step_results.step_5
@@ -175,72 +248,35 @@ function ResultPage({ job, onReset, onTriggerSandbox }: { job: Job; onReset: () 
   const showSandbox = job.status === 'step_11_running' || !!job.step_results.step_11
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-12">
+    <div className="min-h-screen bg-gray-50 px-4 pt-6 pb-12">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">Requirements Analysis</h1>
-            {job.project_name && (
-              <p className="text-sm font-medium text-gray-600 mt-0.5">{job.project_name}</p>
-            )}
-            <p className="text-xs text-gray-400 mt-0.5">
-              {job.status === 'step_7_5_complete' ? 'Steps 0–7.5 complete'
-            : job.status === 'step_7_complete' || job.status === 'step_7_5_running' ? 'Steps 0–7 complete'
-            : job.status === 'step_6_complete' || job.status === 'step_7_running' ? 'Steps 0–6 complete'
-            : job.status === 'step_5_complete' || job.status === 'step_6_running' ? 'Steps 0–5 complete'
-            : job.status === 'step_4_complete' || job.status === 'step_5_running' ? 'Steps 0–4 complete'
-            : 'Steps 0–3.5 complete'}
-            </p>
-            <p className="text-[10px] text-gray-300 mt-0.5 font-mono">{job.job_id}</p>
-          </div>
-          <button
-            onClick={onReset}
-            className="text-sm text-gray-500 hover:text-gray-700 border border-gray-300 hover:border-gray-400 px-3 py-1.5 rounded-lg transition-colors"
-          >
-            New analysis
-          </button>
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-gray-500 text-center">
+            {job.status === 'step_7_5_complete' ? 'Steps 0–7.5 complete'
+          : job.status === 'step_7_complete' || job.status === 'step_7_5_running' ? 'Steps 0–7 complete'
+          : job.status === 'step_6_complete' || job.status === 'step_7_running' ? 'Steps 0–6 complete'
+          : job.status === 'step_5_complete' || job.status === 'step_6_running' ? 'Steps 0–5 complete'
+          : job.status === 'step_4_complete' || job.status === 'step_5_running' ? 'Steps 0–4 complete'
+          : job.status === 'terminated' && job.step_results?.step_7_5 ? 'Steps 0–7.5 complete — terminated'
+          : job.status === 'terminated' && job.step_results?.step_7   ? 'Steps 0–7 complete — terminated'
+          : job.status === 'terminated' && job.step_results?.step_6   ? 'Steps 0–6 complete — terminated'
+          : job.status === 'terminated' && job.step_results?.step_5   ? 'Steps 0–5 complete — terminated'
+          : job.status === 'terminated' && job.step_results?.step_4   ? 'Steps 0–4 complete — terminated'
+          : 'Steps 0–3.5 complete'}
+          </p>
         </div>
 
         <ClassificationResult result={step0} />
 
-        <div className="mt-6">
-          <RequirementsResult result={step1} />
-        </div>
-
-        <div className="mt-6">
-          <ObviousRequirementsResult result={step2} />
-        </div>
-
-        {step3 && (
-          <div className="mt-6">
-            <GeneratedRequirementsResult result={step3} />
-          </div>
-        )}
-
         {step35 && (
-          <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm font-semibold text-green-800">Requirements Confirmed</span>
-              {step35.skipped && (
-                <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">skipped</span>
-              )}
+          <>
+            <div className="mt-4">
+              <L1aPanel reqs={step35.confirmed_requirements} />
             </div>
-            <div className="flex flex-wrap gap-3 text-xs text-green-700">
-              <span><span className="font-medium">{step35.l1a_count}</span> requirements confirmed</span>
-              {step35.promoted_count > 0 && (
-                <span><span className="font-medium">{step35.promoted_count}</span> promoted from generated</span>
-              )}
-              {step35.deleted_count > 0 && (
-                <span><span className="font-medium">{step35.deleted_count}</span> removed</span>
-              )}
-              {step35.added_count > 0 && (
-                <span><span className="font-medium">{step35.added_count}</span> custom added</span>
-              )}
-              <span className="text-green-500">
-                {new Date(step35.confirmed_at).toLocaleTimeString()}
-              </span>
+            <div className="mt-3">
+              <L1bPanel reqs={step35.advisory_requirements} />
             </div>
-          </div>
+          </>
         )}
 
         <div className="mt-6">
@@ -391,7 +427,7 @@ export default function App() {
   }
 
   function reset() {
-    window.location.hash = ''
+    history.replaceState(null, '', window.location.pathname)
     setStage('upload')
     setJob(null)
     setError(null)
@@ -407,11 +443,10 @@ export default function App() {
     try {
       const updated = await getJob(job.job_id)
       setJob(updated)
-      // During confirming, all of steps 0–3 are present so ResultPage renders safely.
-      // Transition away from the confirmation table to show those results read-only.
-      if (stage === 'confirming') {
-        setStage('step_3_complete')
-      }
+      // Intentionally NOT transitioning away from 'confirming' here.
+      // ConfirmationTable renders with job.status === 'terminated' and replaces
+      // the action bar with a terminated notice — user stays on the page they
+      // were reviewing (steps 0–3) rather than landing on an empty ResultPage.
     } catch {
       /* ignore */
     }
@@ -431,29 +466,27 @@ export default function App() {
   const isTerminated = job?.status === 'terminated'
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      <Sidebar stage={stage} currentStep={job?.current_step} jobStatus={job?.status} />
-      <main className="flex-1 overflow-y-auto flex flex-col">
-        {stage !== 'upload' && (
-          <TopBar
-            canTerminate={!!job && !isTerminated}
-            isTerminated={isTerminated}
-            onTerminate={handleTerminate}
-            onNewSession={handleNewSession}
-          />
-        )}
-        <div className="flex-1">
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
+      {stage !== 'upload' && (
+        <TopBar
+          canTerminate={!!job && !isTerminated}
+          isTerminated={isTerminated}
+          onTerminate={handleTerminate}
+          onNewSession={handleNewSession}
+          projectName={job?.project_name}
+          jobId={job?.job_id}
+        />
+      )}
+      <div className="flex flex-1 overflow-hidden">
+        {stage !== 'upload' && <Sidebar stage={stage} currentStep={job?.current_step} jobStatus={job?.status} />}
+        <main className="flex-1 overflow-y-auto">
           {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
-          {stage === 'loading' && (
-            job?.step_results?.step_2
-              ? <EarlyResultsView job={job} isTerminated={isTerminated} />
-              : <LoadingView job={job} isTerminated={isTerminated} />
-          )}
+          {stage === 'loading' && <EarlyResultsView job={job} isTerminated={isTerminated} />}
           {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
-          {stage === 'step_3_complete' && job && <ResultPage job={job} onReset={reset} onTriggerSandbox={handleTriggerSandbox} />}
+          {stage === 'step_3_complete' && job && <ResultPage job={job} onTriggerSandbox={handleTriggerSandbox} />}
           {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
-        </div>
-      </main>
+        </main>
+      </div>
     </div>
   )
 }
