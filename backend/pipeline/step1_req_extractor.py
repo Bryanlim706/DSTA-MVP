@@ -34,13 +34,21 @@ LLM_SYSTEM_PROMPT = """You are a requirements analyst. Extract stated requiremen
 
 EXTRACTION GATE
 
-A requirement qualifies only if the user is the actor performing a deliberate action they initiate in the UI (an active verb: log in, add, delete, navigate). The user must be doing something — not merely observing a result, receiving a message, or having the system act on their behalf.
+A requirement qualifies only when it passes all three checks. Skip anything that fails.
 
-Test: "Is the user the subject, and are they choosing to do this?" If the real subject is the system/app/database, it fails.
-YES → extract as a function.
-NO → skip entirely.
+CHECK A — USER IS THE ACTOR
+The user (or a named role: admin, manager, guest) is the grammatical subject performing a deliberate action.
+Fail if the real subject is the system, app, or database — including any behavior that is automatic or passive (auto-generates, auto-assigns, enforces, validates, hashes, calculates, restricts).
 
-Role conditions ("Admins can edit products") and trigger phrasings ("click edit to modify") are still user goals — extract them.
+CHECK B — USER INITIATES THE ACTION
+The user deliberately chooses to do something via a UI control (log in, add, delete, upload, navigate, filter, view).
+Fail if the user is merely observing an automatic outcome, receiving a notification, or if the system acts on their behalf without explicit user initiation.
+
+CHECK C — IT IS AN INVOKABLE ACTION, NOT A VISUAL DESCRIPTION
+Fail if the text describes the UI's appearance, layout format, or styling rather than an action the user performs.
+"User can view [named content]" passes — it describes what the user can access. "[Layout format] displays [content]" fails — it describes visual presentation, not a user action.
+
+Role conditions ("Admins can edit products") and trigger phrasings ("click edit to modify") qualify — they are still user-initiated goals.
 
 ---
 
@@ -214,13 +222,14 @@ def _build_user_message(requirements_text: str, spec_docs: dict[str, str]) -> st
         parts.append(f"=== user_input ===\n{requirements_text}")   # same neutral format as docs
     instruction = (
         "Extract all explicitly stated functional requirements from ALL sections above. "
-        "Every section is an equal source — do not skip content in one section because "
-        "another section covers a similar topic. Set source to the section name the requirement came from."
+        "The full set of requirements may span multiple sections — process every section before writing your output. "
+        "A requirement in one section never justifies skipping content in another. "
+        "Set source to the section name the requirement came from. "
+        "If the same user action appears in multiple sections, include it once."
     )
     if requirements_text.strip() and spec_docs:
         instruction += (
-            " IMPORTANT: the user_input section is a partial list and does NOT represent all requirements. "
-            "You must also extract every additional requirement found in the other sections that is not already covered by user_input."
+            " In addition to user_input, you must also process each README section independently and extract from it fully."
         )
     parts.append(instruction)
     return "\n\n".join(parts)
