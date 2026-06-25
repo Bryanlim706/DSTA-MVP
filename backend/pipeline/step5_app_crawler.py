@@ -209,6 +209,21 @@ async def _npm_install_if_needed(cwd: Path) -> None:
 # Port readiness poll
 # ─────────────────────────────────────────────────────────────
 
+async def _port_already_listening(port: int) -> bool:
+    """Return True if something is ALREADY responding on this port before we start our process.
+
+    Used to detect port conflicts (e.g. DSTA's own dev server on 5174) so we don't
+    accidentally crawl a pre-existing server instead of the evaluated app.
+    """
+    try:
+        import httpx
+        async with httpx.AsyncClient(verify=False, timeout=httpx.Timeout(1.5)) as client:
+            r = await client.get(f"http://localhost:{port}/")
+            return r.status_code < 500
+    except Exception:
+        return False
+
+
 async def _wait_for_port(port: int, timeout: float = 60.0) -> bool:
     try:
         import httpx
@@ -503,6 +518,14 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
     if not bootstrap:
         return _full_static(routes)
 
+    crawl_port = bootstrap[-1][1]
+
+    # Abort if the crawl port is already occupied by another server (e.g. DSTA's own
+    # frontend bumped from 5173→5174 due to port collision).  Crawling a pre-existing
+    # server would return that server's elements, not the evaluated app's.
+    if await _port_already_listening(crawl_port):
+        return _full_static(routes, reason="port_conflict")
+
     processes: list[_subprocess.Popen] = []
     try:
         for cmd, _port, cwd in bootstrap:
@@ -522,7 +545,6 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
             except Exception:
                 continue
 
-        crawl_port = bootstrap[-1][1]
         app_started = bool(processes) and await _wait_for_port(crawl_port)
 
         if not app_started:
