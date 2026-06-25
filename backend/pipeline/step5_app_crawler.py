@@ -255,14 +255,18 @@ def _find_frontend_dir(root: Path) -> Path | None:
 
 
 async def _npm_install_if_needed(cwd: Path) -> None:
-    """Run `npm install` when node_modules is absent (project zips rarely include it)."""
+    """Run npm install/ci when node_modules is absent (project zips rarely include it)."""
     if (cwd / "node_modules").exists():
         return
     npm = shutil.which("npm") or "npm"
-    cmd = _wrap_npm_cmd([npm, "install", "--prefer-offline", "--no-audit", "--loglevel=error", "--strict-ssl=false"])
+    # `npm ci` requires a lockfile but is ~50% faster (skips dependency resolution).
+    # Fall back to `npm install` when no lockfile is present.
+    has_lockfile = (cwd / "package-lock.json").exists() or (cwd / "yarn.lock").exists()
+    if has_lockfile:
+        cmd = _wrap_npm_cmd([npm, "ci", "--prefer-offline", "--no-audit", "--loglevel=error", "--strict-ssl=false"])
+    else:
+        cmd = _wrap_npm_cmd([npm, "install", "--prefer-offline", "--no-audit", "--loglevel=error", "--strict-ssl=false"])
     try:
-        # asyncio.create_subprocess_exec is unreliable in some server event-loop contexts on
-        # Windows; subprocess.run via to_thread is simpler and always works.
         await asyncio.wait_for(
             asyncio.to_thread(
                 _subprocess.run, cmd,
@@ -270,7 +274,7 @@ async def _npm_install_if_needed(cwd: Path) -> None:
                 stdout=_subprocess.DEVNULL,
                 stderr=_subprocess.DEVNULL,
             ),
-            timeout=180.0,
+            timeout=90.0,
         )
     except Exception:
         pass
@@ -295,12 +299,16 @@ async def _port_already_listening(port: int) -> bool:
         return False
 
 
-async def _wait_for_port(port: int, timeout: float = 60.0) -> bool:
+async def _wait_for_port(port: int, timeout: float = 60.0,
+                        proc: _subprocess.Popen | None = None) -> bool:
+    """Poll until port responds or timeout.  If proc is supplied and exits early, fail fast."""
     try:
         import httpx
         deadline = asyncio.get_running_loop().time() + timeout
         async with httpx.AsyncClient(verify=False, timeout=httpx.Timeout(2.0)) as client:
             while asyncio.get_running_loop().time() < deadline:
+                if proc is not None and proc.poll() is not None:
+                    return False   # process already exited — it's not coming up
                 try:
                     r = await client.get(f"http://localhost:{port}/")
                     if r.status_code < 500:
@@ -621,7 +629,10 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
             except Exception:
                 continue
 
-        app_started = bool(processes) and await _wait_for_port(crawl_port)
+        # processes[-1] is always the frontend (crawl target); pass it so the poll
+        # loop exits immediately if npm run dev crashes rather than burning 60s.
+        frontend_proc = processes[-1] if processes else None
+        app_started = bool(processes) and await _wait_for_port(crawl_port, proc=frontend_proc)
 
         if not app_started:
             return _full_static(routes, reason="boot_failed")
@@ -631,7 +642,8 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
         # Non-fatal: crawl continues even if the backend never responds (e.g. needs a DB).
         # 20s is enough for H2/in-memory Spring Boot; DB-requiring apps won't start regardless.
         if len(bootstrap) > 1:
-            await _wait_for_port(bootstrap[0][1], timeout=20.0)
+            backend_proc = processes[0] if len(processes) > 1 else None
+            await _wait_for_port(bootstrap[0][1], timeout=20.0, proc=backend_proc)
 
         playwright_pages, playwright_unvisitable = await _crawl_routes(routes, crawl_port)
 
