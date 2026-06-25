@@ -52,9 +52,6 @@ Stated node type → Generate these functions (confidence):
 - Create / add stated for an entity type:
     edit item (~0.85), delete item (~0.82)
 
-VAGUE FUNCTION UNPACKING:
-Functions marked vague: true in Step 1 are priority unpack targets. Apply applicable patterns against their node and generate specific child functions, each with unpacks: "<parent_req_id>".
-
 category: "sop"
 
 ---
@@ -113,14 +110,12 @@ OUTPUT SCHEMA — emit ONLY these fields. req_id, source, tag, placement, streng
   "confidence_score": 0.88,
   "reasoning": "Login stated (REQ-001); account management is a standard paired function in authenticated apps, absent from stated and obvious reqs",
   "priority": "high",
-  "unpacks": null,
   "depends_on": ["REQ-001"],
   "functional_area": "auth"
 }]
 
 - reasoning: ONE concise sentence covering both why the function belongs and why the confidence level.
 - priority: critical / high / medium / low — only needed when confidence_score ≥ 0.80.
-- unpacks: parent REQ-xxx id if this decomposes a vague Step 1 function; null otherwise.
 - depends_on: REQ-xxx ids of stated functions this builds on; [] if none.
 
 Output ONLY a JSON array (no markdown fences, no preamble)."""
@@ -155,8 +150,7 @@ def _build_user_message(
             return "(none)"
         lines = []
         for i, r in enumerate(reqs, start=1):
-            vague_tag = " [VAGUE — priority unpack target]" if r.get("vague") else ""
-            lines.append(f"{i}. [{r.get('req_id', f'{prefix}-{i:03d}')}] {r['description']}{vague_tag}")
+            lines.append(f"{i}. [{r.get('req_id', f'{prefix}-{i:03d}')}] {r['description']}")
         return "\n".join(lines)
 
     return (
@@ -214,7 +208,6 @@ def _validate_and_normalise(
     step2_requirements: list,
 ) -> tuple[list, int]:
     valid_step1_ids = {r.get("req_id", "") for r in step1_requirements}
-    vague_step1_ids = {r.get("req_id", "") for r in step1_requirements if r.get("vague")}
     valid = []
     dropped = 0
 
@@ -290,13 +283,6 @@ def _validate_and_normalise(
             if isinstance(d, str) and d in valid_step1_ids
         ]
 
-        # Validate unpacks pointer — must be a string and must point to a vague stated function.
-        # Non-vague stated functions cannot have children; reject the pointer if the target is non-vague.
-        unpacks = item.get("unpacks")
-        if not isinstance(unpacks, str):
-            unpacks = None
-        item["unpacks"] = unpacks if unpacks and unpacks in vague_step1_ids else None
-
         valid.append(item)
 
     for i, item in enumerate(valid, start=1):
@@ -322,6 +308,8 @@ DROP it if ANY holds:
 1. SAME CAPABILITY as a STATED or OBVIOUS function — judged by meaning, not words. Ignore verb synonyms (edit = update = modify, delete = remove, view = see = browse) and location/container phrasing ("on a page", "from the detail page", "in a modal", "via a form"). "Navigate to X section" equals an obvious "navigate to X page".
 2. PART OF a stated/obvious function's flow — opening, filling, or submitting a form, confirming, cancelling, or navigating back are STEPS, not standalone functions. If "add employee" is stated, "submit employee form" is a step of it — drop.
 3. REDUNDANT with another GENERATED function — keep the single clearest one, drop the rest.
+
+Drop repeated requirements; keep unique ones.
 
 KEEP it only if it adds a genuinely new, independent capability not covered by, and not a sub-step of, any stated/obvious function or any generated function you keep. When two features are genuinely distinct (e.g. an attendance report vs a payroll report), keep both.
 

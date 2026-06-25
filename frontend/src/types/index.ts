@@ -33,7 +33,6 @@ export interface Step1Requirement {
   req_id: string
   description: string
   path: PathEntity[]
-  vague: boolean
   source: string
   source_quote: string
   tag: 'stated'
@@ -84,7 +83,6 @@ export interface Step3Requirement {
   tag: 'generated'
   category: 'sop' | 'inf'
   reasoning: string
-  unpacks: string | null
   depends_on: string[]
   confidence_score: number
   confidence_reason: string
@@ -110,7 +108,6 @@ export interface ConfirmedRequirement {
   req_id: string
   description: string
   path: PathEntity[]
-  vague: boolean
   tag: 'stated' | 'obvious' | 'generated' | 'custom'
   priority: 'critical' | 'high' | 'medium' | 'low'
   weight: number
@@ -118,7 +115,6 @@ export interface ConfirmedRequirement {
   testable: boolean
   source: string
   promoted?: boolean
-  unpacks?: string | null
   depends_on: string[]
   source_quote: string | null
 }

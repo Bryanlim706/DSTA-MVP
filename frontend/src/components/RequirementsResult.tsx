@@ -33,11 +33,7 @@ function RequirementRow({ req }: { req: Step1Requirement }) {
           <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide ${PRIORITY_STYLES[req.priority] ?? PRIORITY_STYLES.medium}`}>
             {req.priority}
           </span>
-          {req.vague && (
-            <span className="ml-1 inline-block text-[10px] px-1.5 py-0.5 rounded bg-orange-50 text-orange-600">
-              vague
-            </span>
-          )}
+
         </td>
         <td className="px-4 py-2.5 text-sm text-gray-800">{req.description}</td>
         <td className="px-4 py-2.5 text-center">
@@ -74,8 +70,6 @@ function RequirementRow({ req }: { req: Step1Requirement }) {
 }
 
 export default function RequirementsResult({ result }: { result: Step1Result }) {
-  const vagueCount = result.requirements.filter(r => r.vague).length
-
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
@@ -83,11 +77,6 @@ export default function RequirementsResult({ result }: { result: Step1Result }) 
         <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
           {result.total_count} extracted
         </span>
-        {vagueCount > 0 && (
-          <span className="text-xs bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full" title="Vague functions will be decomposed by Step 3">
-            {vagueCount} vague
-          </span>
-        )}
         {result.docs_used.map((doc) => (
           <span key={doc} className="text-xs bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full">
             {doc}

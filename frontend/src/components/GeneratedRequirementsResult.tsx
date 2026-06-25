@@ -54,11 +54,7 @@ function RequirementRow({ req }: { req: Step3Requirement }) {
                   {req.strength}
                 </span>
               )}
-              {req.unpacks && (
-                <span className="inline-block text-[10px] bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded">
-                  unpacks {req.unpacks}
-                </span>
-              )}
+
             </div>
             <p className="text-xs text-gray-500 font-medium">Traversal path</p>
             <PathDisplay path={req.path} />

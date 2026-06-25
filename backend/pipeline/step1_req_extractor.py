@@ -73,11 +73,8 @@ PRIMARY ENTITY RULES:
 - Exception: if the function has no element or edge (sole purpose is asserting a page exists), the node is primary: true.
 - State-variant nodes ("Task List Page (filtered)", "Task List Page (updated)"): OMIT entirely — they are not scored. End the path at the last interaction element or edge.
 
-VAGUE REQUIREMENTS:
-Broad statements must be decomposed before resorting to vague. If the text implies multiple sub-actions (e.g. "users can manage their tasks"), generate one specific function per inferred sub-action (view list, create, edit, delete) — all sharing the same source_quote. Only mark vague: true if the text remains too broad to identify any specific interaction even after attempting decomposition (e.g. "the system supports task operations"). A vague function uses a minimal single-node path; Step 3 will further decompose it.
-
 SCREENSHOT PAGES:
-A markdown section heading (`###`) immediately followed by a screenshot image (`![...](...)`), with no other requirement text, documents that a page exists. Extract it as a vague function: "User can access [Page Name]" with `vague: true` and `source_quote` set to the heading text (e.g. "Welcome Page"). Extract one function per page heading. Do NOT extract the image line itself as the quote.
+A markdown section heading (`###`) immediately followed by a screenshot image (`![...](...)`), with no other requirement text, documents that a page exists. Extract it as: "User can access [Page Name]" with a single-node path `[{"type": "node", "label": "[Page Name]", "primary": true}]` and `source_quote` set to the heading text. Extract one function per page heading. Do NOT extract the image line itself as the quote.
 
 ---
 
@@ -104,17 +101,13 @@ path: [
   "User can edit a task"  → path: [node: Task List Page (false), element: edit task form (true), edge: save changes (true)]
   "User can delete a task"→ path: [node: Task List Page (false), element: delete button (true), edge: confirm delete (true)]
 
-"The system supports task operations" — still too broad after decomposition attempt, use vague:
-path: [{"type": "node", "label": "Task Management Page", "primary": true}]
-vague: true
-
 ---
 
 RULES
 
 1. source_quote: one verbatim sentence from the source. Must appear verbatim in the source text (whitespace differences OK).
 2. One function per user goal. "Register and log in" = two functions.
-3. No inference: path must be derivable from source_quote alone. If path requires invention, set vague: true.
+3. No inference: path must be derivable from source_quote alone. If you cannot build a specific path, decompose or skip.
 4. Decompose compound items: "register and log in" = Register function + Login function.
 5. priority: critical = foundational (1–2 max); high = core; medium = supporting; low = minor
 6. weight = critical 4.0 | high 3.0 | medium 2.0 | low 1.0
@@ -135,7 +128,6 @@ Return ONLY a valid JSON object (no markdown fences, no explanation):
       {"type": "edge",    "label": "submit credentials", "primary": true, "from": "Login Page", "to": "Dashboard"},
       {"type": "node",    "label": "Dashboard",          "primary": true}
     ],
-    "vague": false,
     "source": "README.md",
     "source_quote": "users should be able to log in",
     "tag": "stated",
@@ -277,14 +269,9 @@ def _validate_and_normalise(items: list) -> tuple[list, int]:
 
         path = _validate_path(item.get("path"))
         if path is None:
-            # Don't drop — fall back to a single vague node so the requirement survives
-            desc = str(item.get("description", "")).strip()
-            label = desc.removeprefix("User can ").removeprefix("System must ").strip() or "Unknown"
-            path = [{"type": "node", "label": label, "primary": True}]
-            item["vague"] = True
+            dropped += 1
+            continue
         item["path"] = path
-
-        item["vague"] = bool(item.get("vague", False))
 
         priority = item.get("priority", "medium")
         if priority not in WEIGHT_MAP:

@@ -144,9 +144,8 @@ def _build_user_message(step0_result: dict, step1_requirements: list) -> str:
     if step1_requirements:
         func_lines = []
         for i, r in enumerate(step1_requirements, start=1):
-            vague_tag = " [VAGUE]" if r.get("vague") else ""
             func_lines.append(
-                f"{i}. [{r.get('req_id', f'REQ-{i:03d}')}] {r['description']}{vague_tag}"
+                f"{i}. [{r.get('req_id', f'REQ-{i:03d}')}] {r['description']}"
             )
         stated = "\n".join(func_lines)
 

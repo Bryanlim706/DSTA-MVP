@@ -42,7 +42,6 @@ class ConfirmedRequirement(BaseModel):
     req_id: str
     description: str
     path: list[PathEntity] = []
-    vague: bool = False
     tag: str
     priority: str = "medium"
     weight: float = 2.0
@@ -50,7 +49,6 @@ class ConfirmedRequirement(BaseModel):
     testable: bool = True
     source: str
     promoted: bool = False
-    unpacks: str | None = None
     depends_on: list[str] = []
     source_quote: str | None = None
 
