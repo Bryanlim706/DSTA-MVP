@@ -307,7 +307,7 @@ async def _wait_for_port(port: int, timeout: float = 60.0) -> bool:
                         return True
                 except Exception:
                     pass
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(1.0)
     except Exception:
         pass
     return False
@@ -474,9 +474,9 @@ def _crawl_routes_sync(routes: list[str], port: int) -> tuple[list[dict], list[d
                 # networkidle may not fire for apps with continuous polling/websockets —
                 # the inner timeout is intentionally short; we proceed with whatever rendered.
                 try:
-                    page.wait_for_load_state("networkidle", timeout=5_000)
+                    page.wait_for_load_state("networkidle", timeout=3_000)
                 except Exception:
-                    page.wait_for_timeout(500)
+                    page.wait_for_timeout(300)
             except Exception as exc:
                 reason = "timeout" if "timeout" in str(exc).lower() else "error"
                 if reason == "timeout":
@@ -597,7 +597,7 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
     # the finally-block cleanup could fire.
     if await _port_already_listening(crawl_port):
         await asyncio.to_thread(_kill_process_on_port, crawl_port)
-        await asyncio.sleep(1.5)   # give the OS time to release the port
+        await asyncio.sleep(1.0)   # give the OS time to release the port
         if await _port_already_listening(crawl_port):
             # Eviction failed — something we don't own is there; abort.
             return _full_static(routes, reason="port_conflict")
@@ -629,8 +629,9 @@ async def run(step3_5_result: dict, step4_result: dict, extract_to: Path) -> dic
         # If a backend was also started (multi-process bootstrap), wait for it before crawling
         # so API-populated elements appear in the Playwright DOM snapshot.
         # Non-fatal: crawl continues even if the backend never responds (e.g. needs a DB).
+        # 20s is enough for H2/in-memory Spring Boot; DB-requiring apps won't start regardless.
         if len(bootstrap) > 1:
-            await _wait_for_port(bootstrap[0][1], timeout=45.0)
+            await _wait_for_port(bootstrap[0][1], timeout=20.0)
 
         playwright_pages, playwright_unvisitable = await _crawl_routes(routes, crawl_port)
 
