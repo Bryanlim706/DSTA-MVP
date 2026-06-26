@@ -182,41 +182,45 @@ export default function Sidebar({
             const open = openGroups.has(group.id)
             const isCorrectnessGroup = group.id === 'fcor'
             const isFcomGroup = group.id === 'fcom_fa'
-            const glowing = isCorrectnessGroup && canRunCorrectness && stage !== 'correctness'
-            const navClickable = (isFcomGroup && stage === 'correctness' && !!onNavPresence)
-              || (isCorrectnessGroup && canRunCorrectness && stage === 'step_3_complete' && !!onNavCorrectness)
 
             return (
               <div key={group.id}>
-                <div className="px-2 pt-2 pb-0.5 flex items-center gap-1">
-                  {/* Group header — always button-shaped; state changes colour */}
-                  <button
-                    onClick={() => handleGroupHeaderClick(group.id)}
-                    disabled={!navClickable && !glowing}
-                    title={
-                      glowing ? 'Test for correctness' :
-                      isFcomGroup && stage === 'correctness' ? 'Back to completeness results' :
-                      undefined
-                    }
-                    className={[
-                      'flex-1 px-3 py-1.5 rounded-lg text-[10px] font-semibold uppercase tracking-wider transition-colors text-left leading-tight',
-                      glowing
-                        ? 'bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer animate-pulse'
-                        : navClickable
-                        ? 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer'
-                        : 'bg-gray-50 border border-gray-100 text-gray-400 cursor-default',
-                    ].join(' ')}
-                  >
-                    {group.label}
-                  </button>
-                  {/* Chevron toggle — separate hitbox */}
-                  <button
-                    onClick={(e) => toggleGroup(group.id, e)}
-                    className="w-6 h-6 flex items-center justify-center text-gray-300 hover:text-gray-500 hover:bg-gray-50 rounded transition-colors flex-shrink-0"
-                  >
-                    <span className={`inline-block transition-transform duration-150 text-[10px] ${open ? '' : '-rotate-90'}`}>▼</span>
-                  </button>
-                </div>
+                {(() => {
+                  // Active = you are currently inside this section
+                  const isActive = isFcomGroup ? stage !== 'correctness' : isCorrectnessGroup && stage === 'correctness'
+                  // Clickable = you are outside but can navigate in
+                  const isClickable = isFcomGroup
+                    ? (stage === 'correctness' && !!onNavPresence)
+                    : (isCorrectnessGroup && !!canRunCorrectness && stage !== 'correctness' && !!onNavCorrectness)
+
+                  const btnCls = isActive
+                    ? 'bg-blue-600 text-white border-2 border-blue-600 animate-pulse cursor-default'
+                    : isClickable
+                    ? 'bg-white border-2 border-gray-400 text-gray-600 hover:bg-gray-100 cursor-pointer'
+                    : 'bg-gray-50 border-2 border-gray-200 text-gray-400 cursor-default'
+
+                  return (
+                    <div className="px-2 pt-2 pb-0.5 flex items-center gap-1">
+                      <button
+                        onClick={() => isClickable && handleGroupHeaderClick(group.id)}
+                        title={
+                          isCorrectnessGroup && isClickable ? 'Test for correctness' :
+                          isFcomGroup && isClickable ? 'Back to completeness results' :
+                          undefined
+                        }
+                        className={`flex-1 px-3 py-1.5 rounded-lg text-[10px] font-semibold uppercase tracking-wider transition-colors text-left leading-tight ${btnCls}`}
+                      >
+                        {group.label}
+                      </button>
+                      <button
+                        onClick={(e) => toggleGroup(group.id, e)}
+                        className="w-6 h-6 flex items-center justify-center text-gray-300 hover:text-gray-500 hover:bg-gray-50 rounded transition-colors flex-shrink-0"
+                      >
+                        <span className={`inline-block transition-transform duration-150 text-[10px] ${open ? '' : '-rotate-90'}`}>▼</span>
+                      </button>
+                    </div>
+                  )
+                })()}
 
                 {open && group.steps.map(step => {
                   const done = isComplete(step.id, stage, currentStep, jobStatus)
