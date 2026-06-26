@@ -97,11 +97,15 @@ export async function generateBehavioral(jobId: string): Promise<void> {
   }
 }
 
-export async function generateACs(jobId: string, selectedIds: string[]): Promise<void> {
+export async function generateACs(
+  jobId: string,
+  selectedIds: string[],
+  weightOverrides: Record<string, number> = {},
+): Promise<void> {
   const res = await fetch(`${API_BASE}/jobs/${jobId}/acs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ selected_ids: selectedIds }),
+    body: JSON.stringify({ selected_ids: selectedIds, weight_overrides: weightOverrides }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))

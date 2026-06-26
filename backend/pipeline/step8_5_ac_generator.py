@@ -287,8 +287,12 @@ async def run(
     step8: dict,
     client: anthropic.AsyncAnthropic,
     existing_step8_5: dict | None = None,
+    weight_overrides: dict[str, float] | None = None,
 ) -> dict:
-    """Generate ACs for selected_ids. Skips req_ids already cached in existing_step8_5."""
+    """Generate ACs for selected_ids. Skips req_ids already cached in existing_step8_5.
+
+    weight_overrides: req_id → weight from UI priority selector; applied before acw math.
+    """
     test_strategy = (step3_5.get("project_context") or {}).get("test_strategy") or {}
 
     # Build lookup of all selectable requirements
@@ -308,12 +312,14 @@ async def run(
 
     to_generate = [rid for rid in selected_ids if rid not in cached]
 
-    # Build per-req metadata for generation
+    # Build per-req metadata for generation; apply weight overrides from UI
     tasks = []
     for rid in to_generate:
         req = all_reqs.get(rid)
         if not req:
             continue
+        if weight_overrides and rid in weight_overrides:
+            req = {**req, "weight": weight_overrides[rid]}
         is_behavioral = rid.startswith("BEH-")
         goal_kind = "behavioral" if is_behavioral else _classify_goal_kind(req.get("path", []))
         data_verb = _classify_data_verb(req.get("path", [])) if goal_kind == "data" else None

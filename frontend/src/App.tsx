@@ -511,9 +511,9 @@ export default function App() {
     setStage('step_3_complete')
   }
 
-  async function handleGenerateACs(selectedIds: string[]) {
+  async function handleGenerateACs(selectedIds: string[], weightOverrides: Record<string, number>) {
     if (!job) return
-    await generateACs(job.job_id, selectedIds)
+    await generateACs(job.job_id, selectedIds, weightOverrides)
     const updated = await getJob(job.job_id)
     setJob(updated)
   }

@@ -188,22 +188,23 @@ export default function Sidebar({
 
             return (
               <div key={group.id}>
-                <div className="flex items-stretch">
-                  {/* Group header label — clickable for navigation when applicable */}
+                <div className="px-2 pt-2 pb-0.5 flex items-center gap-1">
+                  {/* Group header — always button-shaped; state changes colour */}
                   <button
                     onClick={() => handleGroupHeaderClick(group.id)}
+                    disabled={!navClickable && !glowing}
                     title={
                       glowing ? 'Test for correctness' :
                       isFcomGroup && stage === 'correctness' ? 'Back to completeness results' :
                       undefined
                     }
                     className={[
-                      'flex-1 flex items-start px-4 py-2 text-[10px] font-semibold uppercase tracking-wider transition-colors text-left leading-tight',
+                      'flex-1 px-3 py-1.5 rounded-lg text-[10px] font-semibold uppercase tracking-wider transition-colors text-left leading-tight',
                       glowing
-                        ? 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 animate-pulse'
+                        ? 'bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer animate-pulse'
                         : navClickable
-                        ? 'text-gray-500 hover:text-gray-800 hover:bg-gray-50 cursor-pointer'
-                        : 'text-gray-400 cursor-default',
+                        ? 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer'
+                        : 'bg-gray-50 border border-gray-100 text-gray-400 cursor-default',
                     ].join(' ')}
                   >
                     {group.label}
@@ -211,7 +212,7 @@ export default function Sidebar({
                   {/* Chevron toggle — separate hitbox */}
                   <button
                     onClick={(e) => toggleGroup(group.id, e)}
-                    className="px-2 py-2 text-gray-300 hover:text-gray-500 hover:bg-gray-50 transition-colors"
+                    className="w-6 h-6 flex items-center justify-center text-gray-300 hover:text-gray-500 hover:bg-gray-50 rounded transition-colors flex-shrink-0"
                   >
                     <span className={`inline-block transition-transform duration-150 text-[10px] ${open ? '' : '-rotate-90'}`}>▼</span>
                   </button>

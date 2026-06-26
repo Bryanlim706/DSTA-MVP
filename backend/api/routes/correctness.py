@@ -48,7 +48,11 @@ async def _run_step8(job_id: str) -> None:
         update_job(job_id, {"status": "step_8_error"})
 
 
-async def _run_step8_5(job_id: str, selected_ids: list[str]) -> None:
+async def _run_step8_5(
+    job_id: str,
+    selected_ids: list[str],
+    weight_overrides: dict[str, float] | None = None,
+) -> None:
     if is_terminated(job_id):
         return
     try:
@@ -67,6 +71,7 @@ async def _run_step8_5(job_id: str, selected_ids: list[str]) -> None:
             step8=step8,
             client=client,
             existing_step8_5=existing_step8_5,
+            weight_overrides=weight_overrides,
         )
 
         if is_terminated(job_id):
@@ -124,6 +129,7 @@ async def trigger_behavioral(job_id: str, background_tasks: BackgroundTasks):
 
 class ACSRequest(BaseModel):
     selected_ids: list[str]
+    weight_overrides: dict[str, float] | None = None
 
 
 @router.post("/jobs/{job_id}/acs")
@@ -131,6 +137,7 @@ async def generate_acs(job_id: str, body: ACSRequest, background_tasks: Backgrou
     """Generate acceptance criteria for the selected requirement IDs (Step 8.5).
 
     Called once on Confirm. Per-req caching means already-generated req_ids are skipped.
+    weight_overrides maps req_id → weight, applied when the user changed priorities in the UI.
     """
     job = get_job(job_id)
     if not job:
@@ -143,5 +150,5 @@ async def generate_acs(job_id: str, body: ACSRequest, background_tasks: Backgrou
         raise HTTPException(status_code=409, detail="AC generation already running")
 
     update_job(job_id, {"status": "step_8_5_running"})
-    background_tasks.add_task(_run_step8_5, job_id, body.selected_ids)
+    background_tasks.add_task(_run_step8_5, job_id, body.selected_ids, body.weight_overrides)
     return {"status": "step_8_5_running", "job_id": job_id}
