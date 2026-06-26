@@ -1,3 +1,23 @@
+import re
+
+_DATA_KEYWORDS = frozenset([
+    "submit", "add", "create", "delete", "remove", "update", "save", "mark",
+    "complete", "pause", "resume", "sync", "upload", "download", "move",
+    "configure", "change", "reset", "toggle",
+])
+_STRUCTURAL_KEYWORDS = frozenset(["filter", "search", "sort", "drag", "drop", "reorder"])
+
+
+def _classify_edge_kind(label: str) -> str:
+    """Classify an edge label as data / structural / navigation (default)."""
+    words = set(re.findall(r"\b\w+\b", label.lower()))
+    if words & _DATA_KEYWORDS:
+        return "data"
+    if words & _STRUCTURAL_KEYWORDS:
+        return "structural"
+    return "navigation"
+
+
 def _is_state_variant(label: str) -> bool:
     return "(" in label and label.rstrip().endswith(")")
 

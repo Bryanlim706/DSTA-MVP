@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-type Stage = 'upload' | 'loading' | 'confirming' | 'step_3_complete' | 'error'
+type Stage = 'upload' | 'loading' | 'confirming' | 'step_3_complete' | 'correctness' | 'error'
 
 type Step = { id: number; label: string; sub?: boolean }
 
@@ -26,7 +26,8 @@ const GROUPS: { id: string; label: string; steps: Step[] }[] = [
     id: 'fcor',
     label: 'Correctness',
     steps: [
-      { id: 8,   label: 'AC Generator' },
+      { id: 8,   label: 'Requirement Confirmation' },
+      { id: 8.5, label: 'AC Generation', sub: true },
       { id: 9,   label: 'Test Generator' },
       { id: 10,  label: 'Oracle Validator' },
       { id: 11,  label: 'Test Sandbox' },
@@ -40,7 +41,7 @@ const GROUPS: { id: string; label: string; steps: Step[] }[] = [
   },
 ]
 
-const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4, 5, 6, 7, 7.5, 11])
+const BUILT = new Set([-1, 0, 1, 2, 3, 3.5, 4, 5, 6, 7, 7.5, 8, 8.5, 11])
 
 // Ordered pipeline statuses — a step is "complete" when the job status is at or past it
 const STATUS_ORDER = [
@@ -50,6 +51,8 @@ const STATUS_ORDER = [
   'step_6_running', 'step_6_complete', 'step_6_error',
   'step_7_running', 'step_7_complete', 'step_7_error',
   'step_7_5_running', 'step_7_5_complete', 'step_7_5_error',
+  'step_8_running', 'step_8_complete', 'step_8_error',
+  'step_8_5_running', 'step_8_5_complete', 'step_8_5_error',
   'step_11_running', 'step_11_complete', 'step_11_error',
 ]
 
@@ -60,10 +63,15 @@ function statusIndex(s?: string): number {
 function activeStepId(stage: Stage, currentStep?: number, jobStatus?: string): number {
   if (stage === 'upload') return -1
   if (stage === 'loading') {
-    if (jobStatus === 'terminated') return -99  // terminated: no step is "in progress"
+    if (jobStatus === 'terminated') return -99
     return currentStep ?? 0
   }
   if (stage === 'confirming') return 3.5
+  if (stage === 'correctness') {
+    if (jobStatus === 'step_8_running') return 8
+    if (jobStatus === 'step_8_5_running') return 8.5
+    return 8
+  }
   if (stage !== 'step_3_complete') return -99
   if (jobStatus === 'step_4_running') return 4
   if (jobStatus === 'step_5_running') return 5
@@ -77,6 +85,18 @@ function activeStepId(stage: Stage, currentStep?: number, jobStatus?: string): n
 function isComplete(id: number, stage: Stage, currentStep?: number, jobStatus?: string): boolean {
   if (stage === 'confirming') return id === -1 || id === 0 || id === 1 || id === 2 || id === 3
   if (stage === 'loading')    return id === -1 || (id >= 0 && id < (currentStep ?? 0))
+  if (stage === 'correctness') {
+    if (id === -1 || id === 0 || id === 1 || id === 2 || id === 3 || id === 3.5) return true
+    const si = statusIndex(jobStatus)
+    if (id === 4)   return si >= statusIndex('step_4_complete')
+    if (id === 5)   return si >= statusIndex('step_5_complete')
+    if (id === 6)   return si >= statusIndex('step_6_complete')
+    if (id === 7)   return si >= statusIndex('step_7_complete')
+    if (id === 7.5) return si >= statusIndex('step_7_5_complete')
+    if (id === 8)   return si >= statusIndex('step_8_complete')
+    if (id === 8.5) return si >= statusIndex('step_8_5_complete')
+    return false
+  }
   if (stage !== 'step_3_complete') return false
 
   // Steps 0–3.5 always complete once we reach results stage
@@ -88,6 +108,8 @@ function isComplete(id: number, stage: Stage, currentStep?: number, jobStatus?: 
   if (id === 6)   return si >= statusIndex('step_6_complete')
   if (id === 7)   return si >= statusIndex('step_7_complete')
   if (id === 7.5) return si >= statusIndex('step_7_5_complete')
+  if (id === 8)   return si >= statusIndex('step_8_complete')
+  if (id === 8.5) return si >= statusIndex('step_8_5_complete')
   if (id === 11)  return si >= statusIndex('step_11_complete')
   return false
 }
@@ -97,18 +119,45 @@ function stepNumLabel(id: number): string {
   return String(id)
 }
 
-export default function Sidebar({ stage, currentStep, jobStatus }: { stage: Stage; currentStep?: number; jobStatus?: string }) {
+interface SidebarProps {
+  stage: Stage
+  currentStep?: number
+  jobStatus?: string
+  canRunCorrectness?: boolean
+  onNavPresence?: () => void
+  onNavCorrectness?: () => void
+}
+
+export default function Sidebar({
+  stage,
+  currentStep,
+  jobStatus,
+  canRunCorrectness,
+  onNavPresence,
+  onNavCorrectness,
+}: SidebarProps) {
   const active = activeStepId(stage, currentStep, jobStatus)
   const [collapsed, setCollapsed] = useState(false)
-  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set(['fcom_fa']))
+  const [openGroups, setOpenGroups] = useState<Set<string>>(
+    new Set(stage === 'correctness' ? ['fcor'] : ['fcom_fa'])
+  )
 
-  function toggleGroup(id: string) {
+  function toggleGroup(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
     setOpenGroups(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
+  }
+
+  function handleGroupHeaderClick(groupId: string) {
+    if (groupId === 'fcom_fa' && onNavPresence && stage === 'correctness') {
+      onNavPresence()
+    } else if (groupId === 'fcor' && onNavCorrectness && canRunCorrectness && stage === 'step_3_complete') {
+      onNavCorrectness()
+    }
   }
 
   return (
@@ -131,15 +180,42 @@ export default function Sidebar({ stage, currentStep, jobStatus }: { stage: Stag
         <nav className="flex-1 overflow-y-auto py-2">
           {GROUPS.map(group => {
             const open = openGroups.has(group.id)
+            const isCorrectnessGroup = group.id === 'fcor'
+            const isFcomGroup = group.id === 'fcom_fa'
+            const glowing = isCorrectnessGroup && canRunCorrectness && stage !== 'correctness'
+            const navClickable = (isFcomGroup && stage === 'correctness' && !!onNavPresence)
+              || (isCorrectnessGroup && canRunCorrectness && stage === 'step_3_complete' && !!onNavCorrectness)
+
             return (
               <div key={group.id}>
-                <button
-                  onClick={() => toggleGroup(group.id)}
-                  className="w-full flex items-start px-4 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-600 hover:bg-gray-50 transition-colors"
-                >
-                  <span className="flex-1 text-left leading-tight">{group.label}</span>
-                  <span className={`flex-shrink-0 text-gray-300 ml-1 mt-px inline-block transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>▼</span>
-                </button>
+                <div className="flex items-stretch">
+                  {/* Group header label — clickable for navigation when applicable */}
+                  <button
+                    onClick={() => handleGroupHeaderClick(group.id)}
+                    title={
+                      glowing ? 'Test for correctness' :
+                      isFcomGroup && stage === 'correctness' ? 'Back to completeness results' :
+                      undefined
+                    }
+                    className={[
+                      'flex-1 flex items-start px-4 py-2 text-[10px] font-semibold uppercase tracking-wider transition-colors text-left leading-tight',
+                      glowing
+                        ? 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 animate-pulse'
+                        : navClickable
+                        ? 'text-gray-500 hover:text-gray-800 hover:bg-gray-50 cursor-pointer'
+                        : 'text-gray-400 cursor-default',
+                    ].join(' ')}
+                  >
+                    {group.label}
+                  </button>
+                  {/* Chevron toggle — separate hitbox */}
+                  <button
+                    onClick={(e) => toggleGroup(group.id, e)}
+                    className="px-2 py-2 text-gray-300 hover:text-gray-500 hover:bg-gray-50 transition-colors"
+                  >
+                    <span className={`inline-block transition-transform duration-150 text-[10px] ${open ? '' : '-rotate-90'}`}>▼</span>
+                  </button>
+                </div>
 
                 {open && group.steps.map(step => {
                   const done = isComplete(step.id, stage, currentStep, jobStatus)

@@ -89,6 +89,26 @@ export async function stopSandbox(jobId: string): Promise<void> {
   }
 }
 
+export async function generateBehavioral(jobId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/behavioral`, { method: 'POST' })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'Behavioral generation failed')
+  }
+}
+
+export async function generateACs(jobId: string, selectedIds: string[]): Promise<void> {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/acs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selected_ids: selectedIds }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail ?? 'AC generation failed')
+  }
+}
+
 export async function confirmRequirements(
   jobId: string,
   requirements: ConfirmedRequirement[],

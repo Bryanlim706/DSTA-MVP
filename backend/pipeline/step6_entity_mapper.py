@@ -4,14 +4,9 @@ import re
 
 import anthropic
 
-MODEL = "claude-haiku-4-5-20251001"
+from pipeline.utils import _classify_edge_kind  # noqa: F401 — re-exported for callers
 
-_DATA_KEYWORDS = frozenset([
-    "submit", "add", "create", "delete", "remove", "update", "save", "mark",
-    "complete", "pause", "resume", "sync", "upload", "download", "move",
-    "configure", "change", "reset", "toggle",
-])
-_STRUCTURAL_KEYWORDS = frozenset(["filter", "search", "sort", "drag", "drop", "reorder"])
+MODEL = "claude-haiku-4-5-20251001"
 
 LLM_SYSTEM_PROMPT = """You are a requirement-to-implementation matcher.
 
@@ -45,15 +40,6 @@ Matching rules:
 6. edge/structural: find a triggering element (filter input, search box, sort button, etc.) in the element inventory. Copy the inventory source into match_source.
 7. Always output exactly N objects, one per entity, maintaining index order.
 8. Display-only entities — statistics panels, count badges, summary info, read-only text, charts, progress indicators, data tables showing fetched content — have no interactive counterpart in the element inventory. Return null for these. Never match a display entity to a navigation link, button, or form input just because they share a word."""
-
-
-def _classify_edge_kind(label: str) -> str:
-    words = set(re.findall(r"\b\w+\b", label.lower()))
-    if words & _DATA_KEYWORDS:
-        return "data"
-    if words & _STRUCTURAL_KEYWORDS:
-        return "structural"
-    return "navigation"
 
 
 # --- Deterministic node-to-route fallback (used when LLM returns null for a node) ---

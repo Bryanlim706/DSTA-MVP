@@ -1,19 +1,48 @@
 import { useEffect, useRef, useState } from 'react'
-import { confirmRequirements, getJob, pollJob, terminateJob, triggerSandbox } from './api/client'
+import {
+  confirmRequirements,
+  generateACs,
+  generateBehavioral,
+  getJob,
+  pollJob,
+  terminateJob,
+  triggerSandbox,
+} from './api/client'
+import ACResult from './components/ACResult'
+import AppCrawlerResult from './components/AppCrawlerResult'
 import ClassificationResult from './components/ClassificationResult'
 import ConfirmationTable from './components/ConfirmationTable'
-import ObviousRequirementsResult from './components/ObviousRequirementsResult'
-import AppCrawlerResult from './components/AppCrawlerResult'
+import CorrectnessConfirmation from './components/CorrectnessConfirmation'
 import FA75AdvisorResult from './components/FA75AdvisorResult'
-import SandboxResult from './components/SandboxResult'
+import ObviousRequirementsResult from './components/ObviousRequirementsResult'
 import RepoParserResult from './components/RepoParserResult'
-import ScoringResult from './components/ScoringResult'
 import RequirementsResult from './components/RequirementsResult'
+import SandboxResult from './components/SandboxResult'
+import ScoringResult from './components/ScoringResult'
 import Sidebar from './components/Sidebar'
 import UploadPage from './pages/UploadPage'
 import type { ConfirmedRequirement, Job, Step3Requirement } from './types'
 
-type Stage = 'upload' | 'loading' | 'confirming' | 'step_3_complete' | 'error'
+type Stage = 'upload' | 'loading' | 'confirming' | 'step_3_complete' | 'correctness' | 'error'
+
+// ---------------------------------------------------------------------------
+// Hash helpers — "#<jobId>" vs "#<jobId>/correctness"
+// ---------------------------------------------------------------------------
+
+function parseHash(): { jobId: string; view: 'presence' | 'correctness' } {
+  const hash = window.location.hash.slice(1)
+  const [jobId, view] = hash.split('/')
+  return { jobId: jobId ?? '', view: view === 'correctness' ? 'correctness' : 'presence' }
+}
+
+function setHashView(jobId: string, view: 'presence' | 'correctness') {
+  const next = view === 'correctness' ? `#${jobId}/correctness` : `#${jobId}`
+  history.replaceState(null, '', next)
+}
+
+// ---------------------------------------------------------------------------
+// Early results view (steps 0–3)
+// ---------------------------------------------------------------------------
 
 function EarlyResultsView({ job, isTerminated }: { job: Job | null; isTerminated?: boolean }) {
   const step0 = job?.step_results?.step_0
@@ -335,28 +364,32 @@ export default function App() {
 
   // On mount: restore job from URL hash if present
   useEffect(() => {
-    const jobId = window.location.hash.slice(1)
+    const { jobId, view } = parseHash()
     if (!jobId) return
     getJob(jobId)
       .then((j) => {
         setJob(j)
-        // Terminated without step_3_5 → stay in loading so LoadingView/EarlyResultsView
-        // shows the terminated state. Terminated with step_3_5 → show results normally.
         if (j.status === 'terminated' && !j.step_results?.step_3_5) {
           setStage('loading')
+        } else if (view === 'correctness' && j.step_results?.step_7_5) {
+          setStage('correctness')
         } else {
           setStage(stageFromStatus(j.status))
         }
       })
       .catch(() => {
-        window.location.hash = ''
+        history.replaceState(null, '', window.location.pathname)
       })
   }, [])
 
   // Poll whenever stage is step_3_complete and status is non-terminal
   useEffect(() => {
     if (stage !== 'step_3_complete' || !job || pollingStep4.current) return
-    const terminalStatuses = ['step_7_5_complete', 'step_7_5_error', 'step_7_error', 'step_6_error', 'step_5_error', 'step_4_error', 'step_11_complete', 'step_11_error', 'error', 'complete', 'terminated']
+    const terminalStatuses = [
+      'step_7_5_complete', 'step_7_5_error', 'step_7_error', 'step_6_error',
+      'step_5_error', 'step_4_error', 'step_11_complete', 'step_11_error',
+      'error', 'complete', 'terminated',
+    ]
     if (terminalStatuses.includes(job.status)) return
 
     pollingStep4.current = true
@@ -381,6 +414,39 @@ export default function App() {
     return () => { cancelled = true; pollingStep4.current = false }
   }, [stage, job?.status])
 
+  // Poll during correctness stage while step_8 or step_8_5 is running
+  useEffect(() => {
+    if (stage !== 'correctness' || !job) return
+    const terminalStatuses = [
+      'step_8_complete', 'step_8_error', 'step_8_5_complete', 'step_8_5_error',
+      'step_7_5_complete', 'terminated', 'error',
+    ]
+    if (terminalStatuses.includes(job.status) &&
+        job.status !== 'step_8_running' && job.status !== 'step_8_5_running') return
+
+    let cancelled = false
+    const jobId = job.job_id
+
+    const poll = async () => {
+      while (!cancelled) {
+        await new Promise((r) => setTimeout(r, 2000))
+        if (cancelled) break
+        try {
+          const updated = await getJob(jobId)
+          if (!cancelled) setJob(updated)
+          if (!cancelled && updated.status !== 'step_8_running' && updated.status !== 'step_8_5_running') break
+        } catch {
+          break
+        }
+      }
+    }
+
+    if (job.status === 'step_8_running' || job.status === 'step_8_5_running') {
+      poll()
+    }
+    return () => { cancelled = true }
+  }, [stage, job?.status])
+
   async function handleUploadComplete(jobId: string) {
     window.location.hash = jobId
     setStage('loading')
@@ -390,8 +456,7 @@ export default function App() {
       if (completed.status === 'waiting_for_confirmation') {
         setStage('confirming')
       } else if (completed.status === 'terminated') {
-        // Stay in loading — LoadingView/EarlyResultsView renders the terminated state
-        // without requiring all step results to be present.
+        // Stay in loading
       } else {
         setStage('step_3_complete')
       }
@@ -426,6 +491,33 @@ export default function App() {
     }
   }
 
+  async function handleNavCorrectness() {
+    if (!job) return
+    setHashView(job.job_id, 'correctness')
+    setStage('correctness')
+    // Trigger behavioral generation (cached on second call)
+    try {
+      await generateBehavioral(job.job_id)
+      const updated = await getJob(job.job_id)
+      setJob(updated)
+    } catch {
+      // Non-fatal — screen shows the skeleton while polling
+    }
+  }
+
+  function handleNavPresence() {
+    if (!job) return
+    setHashView(job.job_id, 'presence')
+    setStage('step_3_complete')
+  }
+
+  async function handleGenerateACs(selectedIds: string[]) {
+    if (!job) return
+    await generateACs(job.job_id, selectedIds)
+    const updated = await getJob(job.job_id)
+    setJob(updated)
+  }
+
   function reset() {
     history.replaceState(null, '', window.location.pathname)
     setStage('upload')
@@ -438,15 +530,11 @@ export default function App() {
     try {
       await terminateJob(job.job_id)
     } catch {
-      /* best-effort — still reflect terminated state locally */
+      /* best-effort */
     }
     try {
       const updated = await getJob(job.job_id)
       setJob(updated)
-      // Intentionally NOT transitioning away from 'confirming' here.
-      // ConfirmationTable renders with job.status === 'terminated' and replaces
-      // the action bar with a terminated notice — user stays on the page they
-      // were reviewing (steps 0–3) rather than landing on an empty ResultPage.
     } catch {
       /* ignore */
     }
@@ -464,6 +552,7 @@ export default function App() {
   }
 
   const isTerminated = job?.status === 'terminated'
+  const canRunCorrectness = !!(job?.step_results?.step_7_5)
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
@@ -478,12 +567,24 @@ export default function App() {
         />
       )}
       <div className="flex flex-1 overflow-hidden">
-        {stage !== 'upload' && <Sidebar stage={stage} currentStep={job?.current_step} jobStatus={job?.status} />}
+        {stage !== 'upload' && (
+          <Sidebar
+            stage={stage}
+            currentStep={job?.current_step}
+            jobStatus={job?.status}
+            canRunCorrectness={canRunCorrectness}
+            onNavPresence={handleNavPresence}
+            onNavCorrectness={handleNavCorrectness}
+          />
+        )}
         <main className="flex-1 overflow-y-auto">
           {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
           {stage === 'loading' && <EarlyResultsView job={job} isTerminated={isTerminated} />}
           {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
           {stage === 'step_3_complete' && job && <ResultPage job={job} onTriggerSandbox={handleTriggerSandbox} />}
+          {stage === 'correctness' && job && (
+            <CorrectnessConfirmation job={job} onGenerateACs={handleGenerateACs} />
+          )}
           {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
         </main>
       </div>

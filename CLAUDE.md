@@ -235,10 +235,65 @@ suggestions[] (suggestion_id, description, grounded_in{models[], endpoints[], ra
 total_count, llm_model, error
 ```
 
+### Step 8 — Behavioral Requirement Generator (COMPLETE)
+- Triggered manually: `POST /api/jobs/{job_id}/behavioral` — requires `step_7_5` complete; caches on hit (re-POST returns existing result); status `step_8_running` → `step_8_complete` | `step_8_error`
+- LLM (claude-haiku) — one call; reads raw requirements text + `step_3_5` + `step_4`
+- **Orphan autonomous behaviors:** extracts state changes or triggered actions that occur WITHOUT any user-initiated UI action (auto-reset, scheduled notifications, session/cache expiry, background sync). These correctly fail Step 1's actor+action gate (real subject is the system/scheduler/timer), and live here as `BEH-xxx` requirements for correctness testing.
+- **Negative grounding:** prompt includes all confirmed + advisory requirements and all `api_endpoints` from `step_4.implementation_units` — LLM skips any behavior that has a matching user-triggerable endpoint
+- **`_parse_response`:** JSON array parse with truncation recovery; `req_id` counter uses `len(results)+1` (not enumerate) so invalid/skipped items do not offset BEH numbering; `priority` validated against `{critical, high, medium, low}` (defaults to `medium`); `source_quote` coerced: empty/whitespace-only → `None`
+- **Path:** every behavioral requirement gets a fixed path `[{type: "node", label: "System", primary: True}]` — no traversal, scored separately from FCom
+- **`_PRIORITY_WEIGHT`:** critical=4.0, high=3.0, medium=2.0, low=1.0 (same scale as L1a)
+- Frontend: loading skeleton in `CorrectnessConfirmation.tsx` while `step_8_running`; items appear un-ticked by default in the Behavioral section
+- Tests: `backend/tests/test_step8_behavioral_gen.py` — 17 tests, all passing
+
+**Step 8 output fields** (stored in `step_results.step_8`):
+```
+behavioral_requirements[] (req_id, description, path, priority, weight, source_quote),
+llm_model, error
+```
+
+### Step 8.5 — AC Generator (COMPLETE)
+- Triggered manually: `POST /api/jobs/{job_id}/acs` body `{selected_ids: [...]}` — status `step_8_5_running` → `step_8_5_complete` | `step_8_5_error`
+- **Hybrid deterministic + concurrent LLM:** deterministic classification of goal kind, slot set, and weight fractions; LLM (claude-haiku) fills only the Given/When/Then prose; one LLM call per selected requirement via `asyncio.gather`
+- **FCor orthogonality:** Step 8.5 reads only `step_3_5` + `step_8` — never reads Step 6 `e_score`. FCom and FCor are independent and cannot be mixed.
+- **Per-req caching:** req_ids already present in `step_8_5.acceptance_criteria` are skipped on re-POST; new selections are merged and returned in `selected_ids` order
+- **Goal kind classification (`_classify_goal_kind`):** scans all `edge` entities in path by keyword precedence: data > structural > navigation > presence (presence = no edges at all). behavioral = BEH-xxx req_id prefix (separate slot set).
+- **Data verb sub-classification (`_classify_data_verb`):** delete > create > update keyword precedence on edge labels; default = create.
+- **AC slot sets (`_ac_slots`):**
+  - `data` → [happy_path 0.5, persistence 0.3, edge_case 0.2]
+  - `structural` → [happy_path 0.7, edge_case 0.3]
+  - `navigation` → [happy_path 1.0]
+  - `presence` → [happy_path 1.0]
+  - `behavioral` → [fires_when_due 0.6, not_before_due 0.4]
+- **`_compute_acws`:** `acw_i = round(frac_i × W, 2)`; last AC absorbs rounding remainder so `Σacw == W` exactly
+- **`_ac_id` format:** REQ-001 → AC-001-1; OBV-001 → AC-OBV-001-1; GEN-005 → AC-GEN-005-3; BEH-001 → AC-BEH-001-1; CUSTOM-001 → AC-CUSTOM-001-1
+- **`_test_type` rule:** behavioral goal → `"behavioral"`; data goal + API-only test strategy (primary contains "api" or "supertest" case-insensitive, no "e2e") → `"api"`; all other combinations → `"e2e"`
+- **`_classify_edge_kind` shared:** extracted from `step6_entity_mapper.py` to `pipeline/utils.py`; Step 6 imports from there (`_DATA_KEYWORDS`, `_STRUCTURAL_KEYWORDS`, `_classify_edge_kind`)
+- **`run()`:** builds lookup dict of all reqs (confirmed L1a + advisory L1b + behavioral BEH), skips cached, fires concurrent LLM calls, merges cached+new in `selected_ids` order
+- **Placeholder GWT:** if LLM returns fewer AC items than slots, missing slots are filled with placeholder text (`"[LLM did not generate this AC]"`) so output length always matches slot count
+- Frontend: `ACResult.tsx` — per-req collapsible cards with goal_kind / type / test_type badges; per-AC cards with given/when/then prose, acw, type badge; loading skeleton
+- Tests: `backend/tests/test_step8_5_ac_generator.py` — 46 tests, all passing
+
+**Step 8.5 output fields** (stored in `step_results.step_8_5`):
+```
+acceptance_criteria[] (req_id, description, type, goal_kind, l1cx, test_type,
+  acceptance_criteria[]: {ac_id, given, when, then, acw, type}),
+selected_ids, total_acs, llm_model, error
+```
+
+**Correctness screen navigation (frontend):**
+- Hash routing: `#<jobId>` = presence view (Steps 0–7.5); `#<jobId>/correctness` = correctness screen (Steps 8/8.5)
+- `canRunCorrectness = !!(step_results.step_7_5)` — sidebar FCor header glows (`animate-pulse`, indigo) when true and not already on correctness screen
+- Sidebar FCor group header: label button navigates to correctness screen; separate chevron button toggles the group dropdown. Presence header becomes clickable to navigate back when on correctness screen.
+- `handleNavCorrectness()` in App.tsx: sets hash, sets stage to `'correctness'`, fires `generateBehavioral()` (POST behavioral endpoint)
+- `handleNavPresence()`: sets hash back to `#<jobId>`, sets stage to `'step_3_complete'`
+- Correctness polling effect: polls while `step_8_running` or `step_8_5_running`
+- Hash restore on mount: if view==='correctness' and `step_7_5` present → sets stage to `'correctness'`
+
 ## What has NOT been built yet
 
-- Steps 8–10, 12–17 (see PLAN.md for full pipeline)
-- Step 11 test execution (Docker boot is complete; test scripts require Steps 8–10)
+- Steps 9–10, 12–17 (see PLAN.md for full pipeline)
+- Step 11 test execution (Docker boot is complete; test scripts require Steps 9–10)
 
 ---
 
@@ -255,6 +310,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       routes/
         upload.py                    # POST /api/upload
         jobs.py                      # GET /api/jobs, GET /api/jobs/{job_id}
+        correctness.py               # POST /api/jobs/{job_id}/behavioral, /acs
     pipeline/
       step0_classifier.py            # Project type + framework classifier
       step1_req_extractor.py         # Stated requirement extractor
@@ -262,12 +318,15 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       step3_implied_generator.py     # Two-pass SOP/INF confidence-scored generator
       step4_repo_parser.py           # L3 repo parser (languages/endpoints/routes/models, tree-sitter)
       step5_app_crawler.py           # L2 app crawler (Playwright live crawl only; L3 elements owned by Step 4)
+      step8_behavioral_gen.py        # Orphan autonomous behavior extractor (BEH-xxx)
+      step8_5_ac_generator.py        # Hybrid deterministic+LLM AC generator (Given/When/Then, acw math)
+      utils.py                       # Shared: _classify_edge_kind, _validate_path, etc.
     storage/
       job_store.py                   # JSON file job persistence + list_jobs()
   frontend/
     src/
-      api/client.ts                  # uploadProject(), getJob(), pollJob()
-      types/index.ts                 # Job, Step0Result, Step1Result, Step2Result, etc.
+      api/client.ts                  # uploadProject(), getJob(), pollJob(), generateBehavioral(), generateACs()
+      types/index.ts                 # Job, Step0Result…Step85Result, BehavioralRequirement, ACRequirementResult, etc.
       pages/UploadPage.tsx           # Upload form
       components/
         ClassificationResult.tsx     # Step 0 result display
@@ -278,7 +337,10 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
         ObviousRequirementsResult.tsx # Step 2 result display (navigation gap functions)
         GeneratedRequirementsResult.tsx # Step 3 result display (L1a/L1b panels + path expand)
         ConfirmationTable.tsx        # Step 3.5 review/edit table (promote/demote/add/delete)
-      App.tsx                        # Stage state machine
+        CorrectnessConfirmation.tsx  # Step 8/8.5 correctness screen (selection + AC display)
+        ACResult.tsx                 # Step 8.5 AC display (per-req collapsible cards + GWT prose)
+        Sidebar.tsx                  # Stage-aware sidebar (FCor group header nav + glow)
+      App.tsx                        # Stage state machine (correctness stage + hash routing)
   uploads/                           # Runtime — gitignored
   jobs/                              # Runtime — gitignored
   docs/
@@ -431,9 +493,8 @@ Both files must be in the same commit as the code — not a follow-up commit. Th
 
 ## Next steps
 
-1. Build Step 8 — Acceptance Criteria Generator (for each L1a requirement with E()≥0.5, LLM generates Given/When/Then ACs that sum to the requirement's weight)
-2. Build Step 9 — Test Generator (LLM converts ACs into Playwright/Pytest scripts in Step 11's test_results schema)
-3. Complete Step 11 — wire test execution once Step 9 output is available
+1. Build Step 9 — Test Generator (LLM converts Step 8.5 ACs into Playwright/Pytest scripts in Step 11's test_results schema)
+2. Complete Step 11 — wire test execution once Step 9 output is available
 
 ---
 

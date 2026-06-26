@@ -32,12 +32,13 @@ async def startup():
     app.state.anthropic_client = anthropic.AsyncAnthropic(api_key=api_key, http_client=http_client)
 
 
-from api.routes import confirm, jobs, sandbox, upload  # noqa: E402
+from api.routes import confirm, correctness, jobs, sandbox, upload  # noqa: E402
 
 app.include_router(upload.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(confirm.router, prefix="/api")
 app.include_router(sandbox.router, prefix="/api")
+app.include_router(correctness.router, prefix="/api")
 
 
 @app.get("/health")

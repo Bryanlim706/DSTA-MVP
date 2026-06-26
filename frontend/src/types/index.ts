@@ -290,6 +290,48 @@ export interface Step75Result {
   error: string | null
 }
 
+export interface BehavioralRequirement {
+  req_id: string
+  description: string
+  path: PathEntity[]
+  priority: 'critical' | 'high' | 'medium' | 'low'
+  weight: number
+  source_quote: string | null
+}
+
+export interface Step8Result {
+  behavioral_requirements: BehavioralRequirement[]
+  llm_model: string | null
+  error: string | null
+}
+
+export interface AcceptanceCriterion {
+  ac_id: string
+  given: string
+  when: string
+  then: string
+  acw: number
+  type: 'happy_path' | 'persistence' | 'edge_case' | 'fires_when_due' | 'not_before_due'
+}
+
+export interface ACRequirementResult {
+  req_id: string
+  description: string
+  type: 'l1a' | 'l1b' | 'behavioral'
+  goal_kind: 'data' | 'structural' | 'navigation' | 'presence' | 'behavioral'
+  l1cx: number
+  test_type: 'e2e' | 'api' | 'behavioral'
+  acceptance_criteria: AcceptanceCriterion[]
+}
+
+export interface Step85Result {
+  acceptance_criteria: ACRequirementResult[]
+  selected_ids: string[]
+  total_acs: number
+  llm_model: string | null
+  error: string | null
+}
+
 export interface Step11TestResult {
   req_id: string
   ac_id: string
@@ -327,6 +369,8 @@ export interface StepResults {
   step_6?: Step6Result
   step_7?: Step7Result
   step_7_5?: Step75Result
+  step_8?: Step8Result
+  step_8_5?: Step85Result
   step_11?: Step11Result
 }
 
@@ -352,6 +396,12 @@ export type JobStatus =
   | 'step_7_5_running'
   | 'step_7_5_complete'
   | 'step_7_5_error'
+  | 'step_8_running'
+  | 'step_8_complete'
+  | 'step_8_error'
+  | 'step_8_5_running'
+  | 'step_8_5_complete'
+  | 'step_8_5_error'
   | 'step_11_running'
   | 'step_11_complete'
   | 'step_11_error'
