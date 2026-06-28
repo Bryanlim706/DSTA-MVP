@@ -582,8 +582,12 @@ _ROUTE_COMPONENT_RE = re.compile(
     r"""path\s*=\s*["']([^"']+)["'](?:[^>]*?\n?)*?element\s*=\s*\{[^<]*<(\w+)""",
     re.DOTALL,
 )
-# Import statement: import Name from "path"
+# Import statements
 _IMPORT_NAME_RE = re.compile(r"""import\s+(\w+)\s+from\s+['"]([^'"]+)['"]""")
+_IMPORT_NAMED_RE = re.compile(r"""import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]""")
+# Barrel re-export patterns
+_REEXPORT_NAMED_RE = re.compile(r"""export\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]""")
+_REEXPORT_STAR_RE = re.compile(r"""export\s+\*\s+from\s+['"]([^'"]+)['"]""")
 _VUE_ROUTE_PATH = re.compile(r"""path\s*:\s*['"]([^'"]*)['"]""")
 _DYNAMIC_SEGMENT = re.compile(r'(:\w+|\{\w+\}|\[[^\]]+\]|<\w+>)')
 
@@ -807,6 +811,59 @@ def _identify_important_files(
 # ─────────────────────────────────────────────────────────────
 
 
+_IMPORT_EXT_ORDER = ("", ".jsx", ".tsx", ".js", ".ts", "/index.jsx", "/index.tsx", "/index.js", "/index.ts")
+
+
+def _resolve_named_import(resolved: Path, name: str, root: Path) -> str:
+    """Given a file (which may be a barrel/index) and a named export name, return the
+    actual component file's relative path.  Handles three barrel patterns:
+      A) import X from './X'; export { X }   (import-then-re-export)
+      B) export { X } from './X'             (direct named re-export)
+      C) export * from './X'                 (star re-export, matched by stem)
+    Falls back to the resolved file itself when none match."""
+    root_r = root.resolve()
+    fallback = _rel(resolved.resolve(), root_r)
+    try:
+        text = resolved.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return fallback
+
+    def _try_exts(base: Path) -> Path | None:
+        for ext in ("", ".tsx", ".jsx", ".ts", ".js"):
+            c = Path(str(base) + ext)
+            if c.is_file():
+                return c
+        return None
+
+    # Pattern A: barrel imports X as default then re-exports it
+    for m in _IMPORT_NAME_RE.finditer(text):
+        bname, bpath = m.group(1), m.group(2)
+        if bname == name and bpath.startswith("."):
+            f = _try_exts(resolved.parent / bpath)
+            if f:
+                return _rel(f.resolve(), root_r)
+
+    # Pattern B: export { X } from './X'
+    for m in _REEXPORT_NAMED_RE.finditer(text):
+        names = [n.strip().split(" as ")[0].strip() for n in m.group(1).split(",")]
+        bpath = m.group(2)
+        if name in names and bpath.startswith("."):
+            f = _try_exts(resolved.parent / bpath)
+            if f:
+                return _rel(f.resolve(), root_r)
+
+    # Pattern C: export * from './ComponentName'  (stem == name)
+    for m in _REEXPORT_STAR_RE.finditer(text):
+        bpath = m.group(1)
+        if not bpath.startswith("."):
+            continue
+        f = _try_exts(resolved.parent / bpath)
+        if f and f.stem == name:
+            return _rel(f.resolve(), root_r)
+
+    return fallback
+
+
 def _route_component_files(router_file: Path, root: Path) -> dict[str, str]:
     """Given a React Router file, return {route: component_file_rel_path} by parsing
     element={<ComponentName />} attributes and resolving imports."""
@@ -817,17 +874,40 @@ def _route_component_files(router_file: Path, root: Path) -> dict[str, str]:
 
     # Build import map: ComponentName → resolved relative path
     imports: dict[str, str] = {}
+
+    # Default imports: import X from './path'
     for m in _IMPORT_NAME_RE.finditer(text):
         name = m.group(1)
         import_path = m.group(2)
         if not import_path.startswith("."):
             continue
         base = router_file.parent / import_path
-        for ext in ("", ".jsx", ".tsx", ".js", ".ts", "/index.jsx", "/index.tsx", "/index.js"):
+        for ext in _IMPORT_EXT_ORDER:
             candidate = Path(str(base) + ext) if ext and not ext.startswith("/") else base / ext.lstrip("/")
             if candidate.is_file():
                 imports[name] = _rel(candidate, root)
                 break
+
+    # Named imports: import { A, B as C } from './path'
+    # Resolves through barrel files (import X from './X'; export { X }) to actual component files.
+    for m in _IMPORT_NAMED_RE.finditer(text):
+        names_str, import_path = m.group(1), m.group(2)
+        if not import_path.startswith("."):
+            continue
+        base = router_file.parent / import_path
+        resolved = None
+        for ext in _IMPORT_EXT_ORDER:
+            candidate = Path(str(base) + ext) if ext and not ext.startswith("/") else base / ext.lstrip("/")
+            if candidate.is_file():
+                resolved = candidate
+                break
+        if resolved is None:
+            continue
+        for part in names_str.split(","):
+            name = part.strip().split(" as ")[0].strip()
+            if not name or name in imports:
+                continue
+            imports[name] = _resolve_named_import(resolved, name, root)
 
     # Map route → component file
     result: dict[str, str] = {}
@@ -851,12 +931,14 @@ def _shallow_component_imports(component_rel: str, root: Path) -> list[str]:
         return []
     results: list[str] = []
     seen: set[str] = set()
+
+    # Default imports: import X from './path'
     for m in _IMPORT_NAME_RE.finditer(text):
         import_path = m.group(2)
         if not import_path.startswith("."):
             continue
         base = abs_path.parent / import_path
-        for ext in ("", ".jsx", ".tsx", ".js", ".ts", "/index.jsx", "/index.tsx", "/index.js"):
+        for ext in _IMPORT_EXT_ORDER:
             candidate = (
                 Path(str(base) + ext) if ext and not ext.startswith("/")
                 else base / ext.lstrip("/")
@@ -868,6 +950,34 @@ def _shallow_component_imports(component_rel: str, root: Path) -> list[str]:
                     seen.add(rel)
                     results.append(rel)
                 break
+
+    # Named imports: import { A, B } from './path'
+    # Traces through barrel files so child components (not just the barrel) are returned.
+    for m in _IMPORT_NAMED_RE.finditer(text):
+        names_str, import_path = m.group(1), m.group(2)
+        if not import_path.startswith("."):
+            continue
+        base = abs_path.parent / import_path
+        resolved = None
+        for ext in _IMPORT_EXT_ORDER:
+            candidate = (
+                Path(str(base) + ext) if ext and not ext.startswith("/")
+                else base / ext.lstrip("/")
+            )
+            if candidate.is_file():
+                resolved = candidate
+                break
+        if resolved is None:
+            continue
+        for part in names_str.split(","):
+            name = part.strip().split(" as ")[0].strip()
+            if not name:
+                continue
+            target = _resolve_named_import(resolved, name, root)
+            if target not in seen:
+                seen.add(target)
+                results.append(target)
+
     return results
 
 

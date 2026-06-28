@@ -1373,10 +1373,10 @@ def test_expand_with_shallow_imports_nextjs_page(tmp_path):
     """Next.js page file's child components are included via shallow expansion."""
     root = make_project(tmp_path, {
         "pages/dashboard.tsx": (
-            'import StatsCard from "./StatsCard";\n'
+            'import StatsCard from "../components/StatsCard";\n'
             "export default function Dashboard() { return <StatsCard />; }\n"
         ),
-        "pages/StatsCard.tsx": (
+        "components/StatsCard.tsx": (
             "export default function StatsCard() { return <div><button>Refresh</button></div>; }\n"
         ),
     })
@@ -1384,4 +1384,134 @@ def test_expand_with_shallow_imports_nextjs_page(tmp_path):
     result = _build_route_to_files(files, "next", root, [], [])
     mapped = result.get("/dashboard", [])
     assert "pages/dashboard.tsx" in mapped
-    assert "pages/StatsCard.tsx" in mapped
+    assert "components/StatsCard.tsx" in mapped
+
+
+# ─── Named import / barrel file tests ────────────────────────────────────────
+
+def test_named_import_direct_file(tmp_path):
+    """import { Login } from './Login' resolves to Login.tsx directly (named export, not a barrel)."""
+    root = make_project(tmp_path, {
+        "src/App.tsx": (
+            'import { Routes, Route } from "react-router-dom";\n'
+            'import { Login } from "./screens/Login";\n'
+            "export function App() {\n"
+            "  return (\n"
+            "    <Routes>\n"
+            '      <Route path="/login" element={<Login />} />\n'
+            "    </Routes>\n"
+            "  );\n"
+            "}\n"
+        ),
+        "src/screens/Login.tsx": (
+            "export function Login() { return <form><input type='text' /><button>Submit</button></form>; }\n"
+        ),
+    })
+    files = _walk_files(root)
+    result = _build_route_to_files(files, "react", root, [], [])
+    mapped = result.get("/login", [])
+    assert "src/screens/Login.tsx" in mapped
+
+
+def test_named_import_barrel_pattern_a(tmp_path):
+    """import { A } from './barrel' where barrel does: import A from './A'; export { A }"""
+    root = make_project(tmp_path, {
+        "src/App.tsx": (
+            'import { Routes, Route } from "react-router-dom";\n'
+            'import { AdminPage, AnalyticsPage } from "./screens/admin";\n'
+            "export function App() {\n"
+            "  return (\n"
+            "    <Routes>\n"
+            '      <Route path="/admin" element={<AdminPage />} />\n'
+            '      <Route path="/analytics" element={<AnalyticsPage />} />\n'
+            "    </Routes>\n"
+            "  );\n"
+            "}\n"
+        ),
+        "src/screens/admin/index.ts": (
+            'import AdminPage from "./AdminPage";\n'
+            'import AnalyticsPage from "./AnalyticsPage";\n'
+            "export { AdminPage, AnalyticsPage };\n"
+        ),
+        "src/screens/admin/AdminPage.tsx": (
+            "export default function AdminPage() { return <div><button>Go</button></div>; }\n"
+        ),
+        "src/screens/admin/AnalyticsPage.tsx": (
+            "export default function AnalyticsPage() { return <div><input /></div>; }\n"
+        ),
+    })
+    files = _walk_files(root)
+    result = _build_route_to_files(files, "react", root, [], [])
+    assert "src/screens/admin/AdminPage.tsx" in result.get("/admin", [])
+    assert "src/screens/admin/AnalyticsPage.tsx" in result.get("/analytics", [])
+    # Cross-contamination guard: each route gets only its own component, not the other's
+    assert "src/screens/admin/AnalyticsPage.tsx" not in result.get("/admin", [])
+    assert "src/screens/admin/AdminPage.tsx" not in result.get("/analytics", [])
+
+
+def test_named_import_barrel_pattern_b(tmp_path):
+    """import { A } from './barrel' where barrel does: export { A } from './A'"""
+    root = make_project(tmp_path, {
+        "src/App.tsx": (
+            'import { Routes, Route } from "react-router-dom";\n'
+            'import { LoginPage } from "./screens";\n'
+            "export function App() {\n"
+            "  return (\n"
+            "    <Routes>\n"
+            '      <Route path="/login" element={<LoginPage />} />\n'
+            "    </Routes>\n"
+            "  );\n"
+            "}\n"
+        ),
+        "src/screens/index.ts": (
+            'export { LoginPage } from "./LoginPage";\n'
+        ),
+        "src/screens/LoginPage.tsx": (
+            "export function LoginPage() { return <form><input /><button>Log in</button></form>; }\n"
+        ),
+    })
+    files = _walk_files(root)
+    result = _build_route_to_files(files, "react", root, [], [])
+    assert "src/screens/LoginPage.tsx" in result.get("/login", [])
+
+
+def test_named_import_barrel_pattern_c(tmp_path):
+    """import { A } from './barrel' where barrel does: export * from './A'"""
+    root = make_project(tmp_path, {
+        "src/App.tsx": (
+            'import { Routes, Route } from "react-router-dom";\n'
+            'import { HomePage } from "./screens";\n'
+            "export function App() {\n"
+            "  return (\n"
+            "    <Routes>\n"
+            '      <Route path="/home" element={<HomePage />} />\n'
+            "    </Routes>\n"
+            "  );\n"
+            "}\n"
+        ),
+        "src/screens/index.ts": (
+            'export * from "./HomePage";\n'
+        ),
+        "src/screens/HomePage.tsx": (
+            "export function HomePage() { return <div><button>Start</button></div>; }\n"
+        ),
+    })
+    files = _walk_files(root)
+    result = _build_route_to_files(files, "react", root, [], [])
+    assert "src/screens/HomePage.tsx" in result.get("/home", [])
+
+
+def test_shallow_named_import_direct_component(tmp_path):
+    """_shallow_component_imports follows named imports to direct component files."""
+    root = make_project(tmp_path, {
+        "src/screens/ProfilePage.tsx": (
+            'import { AvatarWidget } from "../components/AvatarWidget";\n'
+            "export default function ProfilePage() { return <AvatarWidget />; }\n"
+        ),
+        "src/components/AvatarWidget.tsx": (
+            "export function AvatarWidget() { return <img />; }\n"
+        ),
+    })
+    from pipeline.step4_repo_parser import _shallow_component_imports
+    results = _shallow_component_imports("src/screens/ProfilePage.tsx", root)
+    assert "src/components/AvatarWidget.tsx" in results
