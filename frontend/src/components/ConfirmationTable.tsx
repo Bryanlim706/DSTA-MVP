@@ -101,7 +101,6 @@ function IncludedRow({
             {PRIORITY_OPTS.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </td>
-        <td className="px-4 py-2 text-xs text-gray-500 text-right whitespace-nowrap">{req.weight.toFixed(1)}</td>
         <td className="px-4 py-2 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
           {isL1aGen && onDemote && (
             <button
@@ -122,7 +121,7 @@ function IncludedRow({
       </tr>
       {expanded && (req.path.length > 0 || req.source_quote) && (
         <tr className="bg-gray-50 border-t border-gray-100">
-          <td colSpan={6} className="px-4 pb-3 pt-1 space-y-2">
+          <td colSpan={5} className="px-4 pb-3 pt-1 space-y-2">
             {req.path.length > 0 && (
               <div>
                 <p className="text-xs text-gray-500 font-medium mb-1">Traversal path</p>
@@ -174,7 +173,7 @@ function AdvisoryRow({
       </tr>
       {expanded && (
         <tr className="bg-yellow-50 border-t border-yellow-100">
-          <td colSpan={6} className="px-4 pb-3 pt-1 space-y-1.5">
+          <td colSpan={5} className="px-4 pb-3 pt-1 space-y-1.5">
             <p className="text-xs text-gray-500 font-medium mb-1">Traversal path</p>
             <PathDisplay path={req.path} />
             <p className="text-xs text-gray-500 font-medium mt-1.5">Reasoning</p>
@@ -334,7 +333,6 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
                       </span>
                     </span>
                   </th>
-                  <th className="px-4 py-2 text-right">Wt</th>
                   <th className="px-4 py-2"></th>
                   <th className="px-4 py-2"></th>
                 </tr>
