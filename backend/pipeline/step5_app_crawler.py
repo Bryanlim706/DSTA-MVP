@@ -128,7 +128,7 @@ def _bootstrap_commands(ctx: dict, root: Path) -> list[_BootSpec]:
         spec = _backend_spec(root, backend_fw)
         return [spec] if spec else []
 
-    if project_type == "full_stack_web_app":
+    if project_type in ("full_stack_web_app", "full_stack_js"):
         if service_layout == "separate_frontend_backend":
             frontend_dir = _find_frontend_dir(root) or root
             cmd, port = _npm_cmd(frontend_dir, tooling, frontend_fw)
@@ -157,6 +157,14 @@ def _bootstrap_commands(ctx: dict, root: Path) -> list[_BootSpec]:
                     cmd, port = _npm_cmd(frontend_dir, tooling, frontend_fw)
                     return [(cmd, port, frontend_dir)]
             return []
+
+    if project_type == "electron_app":
+        # Most modern Electron apps (Electron Forge + Vite, electron-vite) run the renderer
+        # as a regular dev server on a port. Try booting from root; falls back to boot_failed
+        # static mode if the app doesn't expose a port.
+        frontend_dir = _find_frontend_dir(root) or root
+        cmd, port = _npm_cmd(frontend_dir, tooling, frontend_fw)
+        return [(cmd, port, frontend_dir)]
 
     return []
 
