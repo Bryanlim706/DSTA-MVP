@@ -2,8 +2,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import asyncio
-
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -80,8 +78,6 @@ async def _run_step4(job_id: str, extract_to: Path) -> None:
         if is_terminated(job_id):
             return
         update_job(job_id, {"status": "step_4_error", "errors": [str(exc)]})
-    finally:
-        task_registry.remove(job_id)
 
 
 async def _run_step5(job_id: str, extract_to: Path) -> None:
@@ -249,7 +245,6 @@ async def confirm_requirements(
     update_job(job_id, {"status": "confirmed", "current_step": 4})
 
     extract_to = Path(job.get("extracted_path", f"./uploads/{job_id}/extracted")).resolve()
-    task = asyncio.create_task(_run_step4(job_id, extract_to))
-    task_registry.register(job_id, task)
+    task_registry.launch(job_id, _run_step4(job_id, extract_to))
 
     return {"status": "confirmed", "l1a_count": l1a_count}

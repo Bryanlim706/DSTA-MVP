@@ -14,9 +14,9 @@ const GROUPS: { id: string; label: string; steps: Step[] }[] = [
       { id: 1,   label: 'Stated Requirements' },
       { id: 2,   label: 'Obvious Requirements' },
       { id: 3,   label: 'Implied Functions' },
-      { id: 3.5, label: 'Requirement Review', sub: true },
+      { id: 3.5, label: 'Requirements Review', sub: true },
       { id: 4,   label: 'Repo Parser' },
-      { id: 5,   label: 'UI/API Inventory' },
+      { id: 5,   label: 'App Crawler' },
       { id: 6,   label: 'Mapper' },
       { id: 7,   label: 'Completeness + Appropriateness' },
       { id: 7.5, label: 'FA Advisor', sub: true },
@@ -194,10 +194,10 @@ export default function Sidebar({
                     : (isCorrectnessGroup && !!canRunCorrectness && stage !== 'correctness' && !!onNavCorrectness)
 
                   const btnCls = isActive
-                    ? 'bg-blue-600 text-white border-2 border-blue-600 animate-pulse cursor-default'
+                    ? 'bg-indigo-600 text-white cursor-default'
                     : isClickable
-                    ? 'bg-white border-2 border-gray-400 text-gray-600 hover:bg-gray-100 cursor-pointer'
-                    : 'bg-gray-50 border-2 border-gray-200 text-gray-400 cursor-default'
+                    ? 'bg-white border border-indigo-400 text-indigo-600 hover:bg-indigo-50 cursor-pointer'
+                    : 'text-gray-400 cursor-default'
 
                   return (
                     <div className="px-2 pt-2 pb-0.5 flex items-center gap-1">
@@ -230,9 +230,9 @@ export default function Sidebar({
                   return (
                     <div
                       key={step.id}
-                      className={`flex items-center gap-2.5 px-4 py-1.5 text-xs ${step.sub ? 'pl-7' : ''} ${
+                      className={`flex items-center gap-2.5 px-4 py-1.5 text-xs ${
                         current
-                          ? 'bg-blue-50 text-blue-700 font-medium'
+                          ? 'bg-blue-50 text-blue-700 font-medium animate-pulse-strong'
                           : done
                           ? 'text-gray-700'
                           : built

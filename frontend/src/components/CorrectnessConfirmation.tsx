@@ -12,9 +12,10 @@ const PRIORITY_OPTS = ['critical', 'high', 'medium', 'low'] as const
 function eBarColor(e: number) {
   return e >= 0.8 ? 'bg-green-500' : e >= 0.5 ? 'bg-amber-400' : 'bg-red-400'
 }
+
 function EBar({ e }: { e: number }) {
   return (
-    <div className="w-14 h-1.5 bg-gray-100 rounded-full overflow-hidden flex-shrink-0">
+    <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden flex-shrink-0">
       <div className={`h-full rounded-full ${eBarColor(e)}`} style={{ width: `${Math.round(e * 100)}%` }} />
     </div>
   )
@@ -63,52 +64,51 @@ interface SelectionRowProps {
   reqId: string
   description: string
   overridePriority: string
-  overrideWeight: number
   onPriority: (id: string, p: string) => void
   eScore: number | null
   checked: boolean
   onToggle: (id: string) => void
 }
 
-function SelectionRow({ reqId, description, overridePriority, overrideWeight, onPriority, eScore, checked, onToggle }: SelectionRowProps) {
+function SelectionRow({ reqId, description, overridePriority, onPriority, eScore, checked, onToggle }: SelectionRowProps) {
   return (
     <label className="flex items-center gap-3 px-4 py-2.5 border-t border-gray-100 hover:bg-gray-50 cursor-pointer">
       <input
         type="checkbox"
         checked={checked}
         onChange={() => onToggle(reqId)}
-        className="w-4 h-4 rounded text-indigo-600 accent-indigo-600 flex-shrink-0"
+        className="w-4 h-4 rounded-md text-indigo-600 accent-indigo-600 flex-shrink-0"
       />
-      <span className="text-xs font-mono text-gray-400 whitespace-nowrap w-24 flex-shrink-0">{reqId}</span>
+      <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono font-semibold flex-shrink-0 min-w-[72px] text-center">{reqId}</span>
       <span className="flex-1 text-sm text-gray-800 min-w-0">{description}</span>
-      <div className="flex-shrink-0" onClick={e => e.preventDefault()}>
+      <div className="flex-shrink-0 w-20" onClick={e => e.preventDefault()}>
         <select
           value={overridePriority}
           onChange={e => onPriority(reqId, e.target.value)}
           onClick={e => e.stopPropagation()}
-          className="text-xs border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+          className="w-full text-xs border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
         >
           {PRIORITY_OPTS.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
       </div>
-      <span className="text-[10px] font-medium text-gray-500 bg-gray-100 rounded px-1.5 py-0.5 flex-shrink-0 min-w-[2rem] text-center">
-        {overrideWeight.toFixed(1)}
-      </span>
-      {eScore != null ? <EBar e={eScore} /> : <div className="w-14 flex-shrink-0" />}
+      {eScore != null ? <EBar e={eScore} /> : <div className="w-20 flex-shrink-0" />}
+      {eScore != null
+        ? <span className={`text-sm font-semibold w-6 text-center flex-shrink-0 ${eScore >= 0.8 ? 'text-green-700' : 'text-red-600'}`}>{eScore >= 0.8 ? '✓' : '✗'}</span>
+        : <div className="w-6 flex-shrink-0" />}
     </label>
   )
 }
 
+
 interface ConfirmedRowProps {
   reqId: string
   description: string
-  weight: number
   eScore: number | null
   acResult?: ACRequirementResult
   acGenerating: boolean
 }
 
-function ConfirmedRow({ reqId, description, weight, eScore, acResult, acGenerating }: ConfirmedRowProps) {
+function ConfirmedRow({ reqId, description, eScore, acResult, acGenerating }: ConfirmedRowProps) {
   const [open, setOpen] = useState(false)
   const hasACs = (acResult?.acceptance_criteria?.length ?? 0) > 0
   const acCount = acResult?.acceptance_criteria?.length ?? 0
@@ -116,25 +116,25 @@ function ConfirmedRow({ reqId, description, weight, eScore, acResult, acGenerati
   return (
     <div className="border-t border-gray-100">
       <div className="flex items-center gap-3 px-4 py-2.5">
-        <span className="text-xs font-mono text-gray-400 whitespace-nowrap w-24 flex-shrink-0">{reqId}</span>
+        <span className="inline-block px-2 py-0.5 rounded bg-gray-100 text-gray-600 text-[10px] font-mono font-semibold flex-shrink-0 min-w-[72px] text-center">{reqId}</span>
         <span className="flex-1 text-sm text-gray-800 min-w-0">{description}</span>
-        <span className="text-[10px] font-medium text-gray-500 bg-gray-100 rounded px-1.5 py-0.5 flex-shrink-0 min-w-[2rem] text-center">
-          {weight.toFixed(1)}
-        </span>
-        {eScore != null ? <EBar e={eScore} /> : <div className="w-14 flex-shrink-0" />}
-        {/* AC toggle */}
+        {eScore != null ? <EBar e={eScore} /> : <div className="w-20 flex-shrink-0" />}
+        {eScore != null
+          ? <span className={`text-sm font-semibold w-6 text-center flex-shrink-0 ${eScore >= 0.8 ? 'text-green-700' : 'text-red-600'}`}>{eScore >= 0.8 ? '✓' : '✗'}</span>
+          : <div className="w-6 flex-shrink-0" />}
+        {/* AC toggle — fixed w-16 so EBar stays aligned across all rows */}
         {acGenerating && !hasACs ? (
-          <div className="w-16 h-4 bg-gray-100 rounded animate-pulse flex-shrink-0" />
+          <div className="ml-3 w-16 h-4 bg-gray-100 rounded animate-pulse flex-shrink-0" />
         ) : hasACs ? (
           <button
             onClick={() => setOpen(o => !o)}
-            className="flex-shrink-0 flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-700 transition-colors"
+            className="ml-3 w-16 flex-shrink-0 flex items-center justify-end gap-1 text-[10px] text-gray-400 hover:text-gray-700 transition-colors"
           >
             <span>{acCount} AC{acCount !== 1 ? 's' : ''}</span>
             <span className={`inline-block transition-transform duration-150 ${open ? '' : '-rotate-90'}`}>▼</span>
           </button>
         ) : (
-          <div className="w-16 flex-shrink-0" />
+          <div className="ml-3 w-16 flex-shrink-0" />
         )}
       </div>
       {open && hasACs && (
@@ -293,7 +293,6 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
               key={r.req_id}
               reqId={r.req_id}
               description={r.description}
-              weight={getEffectiveWeight(r.req_id, r.defaultP)}
               eScore={eScoreMap[r.req_id] ?? null}
               acResult={acMap.get(r.req_id)}
               acGenerating={acGenerating}
@@ -302,6 +301,8 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
         </div>
       )
     }
+
+    const acError = job.status === 'step_8_5_error' ? (step85?.error ?? 'AC generation failed') : null
 
     return (
       <div className="min-h-screen bg-gray-50 px-4 pt-6 pb-12">
@@ -315,14 +316,12 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
             </p>
           </div>
 
-          {/* Column labels for confirmed view */}
-          <div className="flex items-center gap-3 px-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-            <div className="w-24 flex-shrink-0">ID</div>
-            <div className="flex-1">Description</div>
-            <div className="flex-shrink-0 min-w-[2rem] text-center">W</div>
-            <div className="flex-shrink-0 w-14 text-center">E</div>
-            <div className="flex-shrink-0 w-16 text-right">ACs</div>
-          </div>
+          {acError && (
+            <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+              AC generation failed: {acError}
+            </div>
+          )}
+
 
           {renderConfirmedSection(
             'FCom — Confirmed L1a',
@@ -361,16 +360,6 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
           </p>
         </div>
 
-        {/* Column headers */}
-        <div className="flex items-center gap-3 px-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-          <div className="w-4 flex-shrink-0" />
-          <div className="w-24 flex-shrink-0">ID</div>
-          <div className="flex-1">Description</div>
-          <div className="flex-shrink-0 w-[5.5rem] text-center">Priority</div>
-          <div className="flex-shrink-0 min-w-[2rem] text-center">W</div>
-          <div className="flex-shrink-0 w-14 text-center">E</div>
-        </div>
-
         {/* FCom L1a */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
@@ -378,7 +367,6 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
             <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
               {step35?.confirmed_requirements.length ?? 0}
             </span>
-            <span className="ml-auto text-[10px] text-gray-400">All pre-ticked</span>
           </div>
           {step35?.confirmed_requirements.map(r => (
             <SelectionRow
@@ -386,7 +374,6 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
               reqId={r.req_id}
               description={r.description}
               overridePriority={getEffectivePriority(r.req_id, r.priority)}
-              overrideWeight={getEffectiveWeight(r.req_id, r.priority)}
               onPriority={setPriority}
               eScore={eScoreMap[r.req_id] ?? null}
               checked={selected.has(r.req_id)}
@@ -406,7 +393,6 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
               <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
                 {step35?.advisory_requirements.length}
               </span>
-              <span className="ml-auto text-[10px] text-gray-400">Green E-bar pre-ticked</span>
             </div>
             {(step35?.advisory_requirements ?? []).map(r => {
               const defaultP = r.strength === 'strongly_implied' ? 'high' : r.strength === 'weak' ? 'low' : 'medium'
@@ -436,7 +422,6 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
                 {step8.behavioral_requirements.length}
               </span>
             )}
-            <span className="ml-auto text-[10px] text-gray-400">Un-ticked by default</span>
           </div>
           {behavioralLoading ? (
             <><SkeletonRow /><SkeletonRow /></>
@@ -447,8 +432,7 @@ export default function CorrectnessConfirmation({ job, onGenerateACs }: Props) {
                 reqId={r.req_id}
                 description={r.description}
                 overridePriority={getEffectivePriority(r.req_id, r.priority)}
-                overrideWeight={getEffectiveWeight(r.req_id, r.priority)}
-                onPriority={setPriority}
+                  onPriority={setPriority}
                 eScore={null}
                 checked={selected.has(r.req_id)}
                 onToggle={toggle}

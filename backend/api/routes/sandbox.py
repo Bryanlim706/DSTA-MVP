@@ -1,8 +1,8 @@
 import asyncio
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from pathlib import Path
 
-from pipeline import step11_sandbox
+from pipeline import step11_sandbox, task_registry
 from storage.job_store import get_job, is_terminated, update_job
 
 router = APIRouter()
@@ -57,7 +57,7 @@ async def stop_sandbox(job_id: str):
 
 
 @router.post("/jobs/{job_id}/sandbox")
-async def trigger_sandbox(job_id: str, background_tasks: BackgroundTasks):
+async def trigger_sandbox(job_id: str):
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -68,5 +68,5 @@ async def trigger_sandbox(job_id: str, background_tasks: BackgroundTasks):
 
     job["status"] = "step_11_running"
     update_job(job_id, job)
-    background_tasks.add_task(_run_step11, job_id)
+    task_registry.launch(job_id, _run_step11(job_id))
     return {"status": "step_11_running", "job_id": job_id}

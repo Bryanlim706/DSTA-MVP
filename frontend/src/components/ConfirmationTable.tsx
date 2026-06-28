@@ -92,11 +92,6 @@ function IncludedRow({
             </span>
           )}
         </td>
-        <td className="px-4 py-2">
-          <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${TAG_STYLES[req.tag] ?? 'bg-gray-100 text-gray-500'}`}>
-            {req.tag}
-          </span>
-        </td>
         <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
           <select
             value={req.priority}
@@ -109,17 +104,25 @@ function IncludedRow({
         <td className="px-4 py-2 text-xs text-gray-500 text-right whitespace-nowrap">{req.weight.toFixed(1)}</td>
         <td className="px-4 py-2 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
           {isL1aGen && onDemote && (
-            <button onClick={() => onDemote(req.req_id)} className="text-[10px] text-yellow-600 hover:text-yellow-800 mr-2">
+            <button
+              onClick={() => onDemote(req.req_id)}
+              title="demote to advisory only"
+              className="text-[10px] text-yellow-600 hover:text-yellow-800 mr-2"
+            >
               ↓ advisory
             </button>
           )}
-          <button onClick={() => onDelete(req.req_id)} className="text-[10px] text-red-400 hover:text-red-600">×</button>
+          <button
+            onClick={() => onDelete(req.req_id)}
+            title="delete requirement"
+            className="text-lg font-bold leading-none text-red-400 hover:text-red-600 px-0.5"
+          >×</button>
         </td>
         <td className="px-4 py-2 text-xs text-gray-400 text-right">{expanded ? '▲' : '▼'}</td>
       </tr>
       {expanded && (req.path.length > 0 || req.source_quote) && (
         <tr className="bg-gray-50 border-t border-gray-100">
-          <td colSpan={7} className="px-4 pb-3 pt-1 space-y-2">
+          <td colSpan={6} className="px-4 pb-3 pt-1 space-y-2">
             {req.path.length > 0 && (
               <div>
                 <p className="text-xs text-gray-500 font-medium mb-1">Traversal path</p>
@@ -162,13 +165,6 @@ function AdvisoryRow({
           </span>
         </td>
         <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{confPct}%</td>
-        <td className="px-4 py-2">
-          {req.strength && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded ${STRENGTH_STYLES[req.strength] ?? ''}`}>
-              {req.strength}
-            </span>
-          )}
-        </td>
         <td className="px-4 py-2 text-right" onClick={e => e.stopPropagation()}>
           <button onClick={() => onPromote(req.req_id)} className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">
             + Promote
@@ -178,7 +174,7 @@ function AdvisoryRow({
       </tr>
       {expanded && (
         <tr className="bg-yellow-50 border-t border-yellow-100">
-          <td colSpan={7} className="px-4 pb-3 pt-1 space-y-1.5">
+          <td colSpan={6} className="px-4 pb-3 pt-1 space-y-1.5">
             <p className="text-xs text-gray-500 font-medium mb-1">Traversal path</p>
             <PathDisplay path={req.path} />
             <p className="text-xs text-gray-500 font-medium mt-1.5">Reasoning</p>
@@ -295,9 +291,9 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
   const orderedIncluded = [...includedStated, ...includedObvious, ...includedGen]
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 pt-6 pb-12">
-      <div className="max-w-4xl mx-auto">
-        <div className="mb-6">
+    <div className="px-6 pt-6 pb-8">
+      <div>
+        <div className="mb-4">
           <p className="text-sm text-gray-500">
             Confirm what goes into the L1a scoring pool. Edit priorities, remove items, promote generated suggestions, or add your own.
           </p>
@@ -318,8 +314,26 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
                 <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
                   <th className="px-4 py-2">ID</th>
                   <th className="px-4 py-2">Function</th>
-                  <th className="px-4 py-2">Tag</th>
-                  <th className="px-4 py-2">Priority</th>
+                  <th className="px-4 py-2">
+                    <span className="flex items-center gap-1">
+                      Priority
+                      <span className="relative group">
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-gray-500 text-xs font-bold cursor-default select-none">?</span>
+                        <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 hidden group-hover:flex flex-col gap-1 bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 z-50 min-w-max">
+                          {([
+                            { label: 'critical', weight: 4.0, color: 'bg-red-50 text-red-600' },
+                            { label: 'high',     weight: 3.0, color: 'bg-orange-50 text-orange-600' },
+                            { label: 'medium',   weight: 2.0, color: 'bg-yellow-50 text-yellow-700' },
+                            { label: 'low',      weight: 1.0, color: 'bg-gray-100 text-gray-500' },
+                          ] as const).map(({ label, weight, color }) => (
+                            <span key={label} className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${color}`}>
+                              {label} = {weight.toFixed(1)}
+                            </span>
+                          ))}
+                        </div>
+                      </span>
+                    </span>
+                  </th>
                   <th className="px-4 py-2 text-right">Wt</th>
                   <th className="px-4 py-2"></th>
                   <th className="px-4 py-2"></th>
@@ -366,7 +380,6 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
                     <th className="px-4 py-2">Function</th>
                     <th className="px-4 py-2">Category</th>
                     <th className="px-4 py-2">Confidence</th>
-                    <th className="px-4 py-2">Strength</th>
                     <th className="px-4 py-2"></th>
                     <th className="px-4 py-2"></th>
                   </tr>

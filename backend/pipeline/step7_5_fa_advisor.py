@@ -109,22 +109,72 @@ def _build_user_message(step3_5: dict, step4: dict, step5: dict) -> str:
     return "\n".join(lines)
 
 
-def _parse_response(text: str) -> list[dict]:
-    bracket_pos = text.find("[")
-    if bracket_pos == -1:
-        return []
-    raw = text[bracket_pos:]
-    try:
-        items = json.loads(raw)
-    except json.JSONDecodeError:
-        last = raw.rfind("},")
-        if last == -1:
-            return []
-        try:
-            items = json.loads(raw[: last + 1] + "]")
-        except json.JSONDecodeError:
-            return []
+def _recover_truncated(raw: str) -> list:
+    """Brace-aware recovery for a truncated/malformed JSON array.
 
+    Walks ``raw`` (which must start at ``[``) tracking string state and object
+    nesting depth, and truncates after the last *complete top-level* object.
+    Unlike ``rfind("},")``, this is not fooled by nested objects (e.g. the
+    ``grounded_in`` sub-object) that also end in ``},``.
+    """
+    depth = 0
+    in_str = False
+    escape = False
+    last_obj_end = -1
+    for i, ch in enumerate(raw):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = in_str
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                last_obj_end = i + 1
+    if last_obj_end == -1:
+        return []
+    try:
+        parsed = json.loads(raw[:last_obj_end] + "]")
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _extract_array(text: str) -> list:
+    """Extract a JSON array from an LLM response.
+
+    Tolerates markdown code fences and trailing prose by slicing from the first
+    ``[`` to the last ``]`` before parsing; falls back to the raw tail, then to
+    a brace-aware recovery for genuinely truncated responses.
+    """
+    start = text.find("[")
+    if start == -1:
+        return []
+    end = text.rfind("]")
+    candidates = []
+    if end > start:
+        candidates.append(text[start : end + 1])  # fence-/prose-stripped
+    candidates.append(text[start:])  # raw tail
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, list):
+            return parsed
+    return _recover_truncated(text[start:])
+
+
+def _parse_response(text: str) -> list[dict]:
+    items = _extract_array(text)
     if not isinstance(items, list):
         return []
 

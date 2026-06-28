@@ -139,7 +139,7 @@ export default function ScoringResult({ result, loading, step6Result, l1aIds }: 
       {/* FCom box */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-5">
         <div>
-          <p className="text-base font-semibold text-gray-900">Functional Completeness</p>
+          <p className="text-base font-semibold text-gray-900">Functional Completeness Result</p>
         </div>
 
         <div className="flex gap-4">
@@ -147,13 +147,13 @@ export default function ScoringResult({ result, loading, step6Result, l1aIds }: 
         </div>
 
         {hasFcomAdvisory && (
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div className="border border-yellow-200 rounded-lg overflow-hidden">
             <button
               onClick={() => setShowFcomAdvisory(o => !o)}
-              className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+              className="w-full flex items-center justify-between px-3 py-2 bg-yellow-50 hover:bg-yellow-100 text-left"
             >
-              <span className="text-xs font-semibold text-gray-700">Advisory</span>
-              <span className="text-xs text-gray-400">{showFcomAdvisory ? '▲' : '▼'}</span>
+              <span className="text-xs font-semibold text-yellow-800">Breakdown</span>
+              <span className="text-xs text-yellow-600">{showFcomAdvisory ? '▲' : '▼'}</span>
             </button>
             {showFcomAdvisory && (
               <div className="px-4 py-4 space-y-4">
@@ -171,17 +171,17 @@ export default function ScoringResult({ result, loading, step6Result, l1aIds }: 
       {/* FA box */}
       <div className="mt-6 bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-5">
         <div>
-          <p className="text-base font-semibold text-gray-900">Functional Appropriateness Advisory</p>
+          <p className="text-base font-semibold text-gray-900">Functional Appropriateness Result</p>
         </div>
 
         {hasFaAdvisory && (
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div className="border border-green-200 rounded-lg overflow-hidden">
             <button
               onClick={() => setShowFaAdvisory(o => !o)}
-              className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+              className="w-full flex items-center justify-between px-3 py-2 bg-green-50 hover:bg-green-100 text-left"
             >
-              <span className="text-xs font-semibold text-gray-700">Advisory</span>
-              <span className="text-xs text-gray-400">{showFaAdvisory ? '▲' : '▼'}</span>
+              <span className="text-xs font-semibold text-green-800">Breakdown</span>
+              <span className="text-xs text-green-600">{showFaAdvisory ? '▲' : '▼'}</span>
             </button>
             {showFaAdvisory && (
               <div className="px-4 py-4 space-y-4">

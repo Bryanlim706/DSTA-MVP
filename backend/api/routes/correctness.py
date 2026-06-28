@@ -1,10 +1,10 @@
 """Correctness phase endpoints — Step 8 (behavioral gen) + Step 8.5 (AC generation)."""
 import anthropic
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from pipeline import step8_behavioral_gen, step8_5_ac_generator
+from pipeline import step8_behavioral_gen, step8_5_ac_generator, task_registry
 from storage.job_store import add_step_result, get_job, is_terminated, update_job
 
 router = APIRouter()
@@ -98,7 +98,7 @@ async def _run_step8_5(
 # ---------------------------------------------------------------------------
 
 @router.post("/jobs/{job_id}/behavioral")
-async def trigger_behavioral(job_id: str, background_tasks: BackgroundTasks):
+async def trigger_behavioral(job_id: str):
     """Start behavioral requirement generation (Step 8).
 
     Requires step_7_5_complete. Returns immediately if step_8 already cached.
@@ -123,7 +123,7 @@ async def trigger_behavioral(job_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=409, detail="Behavioral generation already running")
 
     update_job(job_id, {"status": "step_8_running"})
-    background_tasks.add_task(_run_step8, job_id)
+    task_registry.launch(job_id, _run_step8(job_id))
     return {"status": "step_8_running", "job_id": job_id}
 
 
@@ -133,7 +133,7 @@ class ACSRequest(BaseModel):
 
 
 @router.post("/jobs/{job_id}/acs")
-async def generate_acs(job_id: str, body: ACSRequest, background_tasks: BackgroundTasks):
+async def generate_acs(job_id: str, body: ACSRequest):
     """Generate acceptance criteria for the selected requirement IDs (Step 8.5).
 
     Called once on Confirm. Per-req caching means already-generated req_ids are skipped.
@@ -150,5 +150,5 @@ async def generate_acs(job_id: str, body: ACSRequest, background_tasks: Backgrou
         raise HTTPException(status_code=409, detail="AC generation already running")
 
     update_job(job_id, {"status": "step_8_5_running"})
-    background_tasks.add_task(_run_step8_5, job_id, body.selected_ids, body.weight_overrides)
+    task_registry.launch(job_id, _run_step8_5(job_id, body.selected_ids, body.weight_overrides))
     return {"status": "step_8_5_running", "job_id": job_id}

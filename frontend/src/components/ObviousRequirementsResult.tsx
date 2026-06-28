@@ -25,16 +25,11 @@ function RequirementRow({ req }: { req: Step2Requirement }) {
           </span>
         </td>
         <td className="px-4 py-2.5 text-sm text-gray-800">{req.description}</td>
-        <td className="px-4 py-2.5 text-center">
-          {req.testable
-            ? <span className="text-green-500 text-xs">✓</span>
-            : <span className="text-gray-300 text-xs">—</span>}
-        </td>
         <td className="px-4 py-2.5 text-xs text-gray-400 text-right">{expanded ? '▲' : '▼'}</td>
       </tr>
       {expanded && (
         <tr className="bg-gray-50 border-t border-gray-100">
-          <td colSpan={5} className="px-4 pb-3 pt-2">
+          <td colSpan={3} className="px-4 pb-3 pt-2">
             {req.functional_area && (
               <span className="inline-block text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono mb-2">
                 {req.functional_area}
@@ -58,12 +53,9 @@ export default function ObviousRequirementsResult({ result }: { result: Step2Res
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
-        <h2 className="text-sm font-semibold text-gray-800">Navigation Gap Functions</h2>
+        <h2 className="text-sm font-semibold text-gray-800">Obvious Requirements</h2>
         <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
           {result.total_count} generated
-        </span>
-        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-          L1a
         </span>
         {result.dropped_count > 0 && (
           <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">
@@ -81,20 +73,11 @@ export default function ObviousRequirementsResult({ result }: { result: Step2Res
         <div className="px-5 py-10 text-center text-sm text-gray-400">
           {result.error
             ? `Generation failed: ${result.error}`
-            : 'No navigation gaps found — stated functions cover all connectivity.'}
+            : 'No navigation gaps found — stated requirements cover all connectivity.'}
         </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left">
-            <thead>
-              <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
-                <th className="px-4 py-2">ID</th>
-                <th className="px-4 py-2">Priority</th>
-                <th className="px-4 py-2">Function</th>
-                <th className="px-4 py-2 text-center">Testable</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
             <tbody>
               {result.requirements.map((req) => (
                 <RequirementRow key={req.req_id} req={req} />

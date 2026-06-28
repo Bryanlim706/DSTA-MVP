@@ -69,6 +69,43 @@ def test_parse_response_truncated_recovery():
     assert result[0]["description"] == "User can view team tasks"
 
 
+def test_parse_response_markdown_fenced_array():
+    # Real-world Haiku behaviour: the array is wrapped in a ```json fence despite
+    # the "no fences" instruction. Previously the trailing ``` made json.loads fail
+    # and the rfind("},") recovery was fooled by the nested grounded_in "}," — so
+    # the whole batch was silently dropped (total_count: 0 every run).
+    items = [
+        _make_item(suggestion_id="FA-POS-001", description="User can view dashboard"),
+        _make_item(suggestion_id="FA-POS-002", description="User can confirm delete"),
+    ]
+    fenced = "```json\n" + json.dumps(items, indent=2) + "\n```"
+    result = _parse_response(fenced)
+    assert len(result) == 2
+    assert result[0]["description"] == "User can view dashboard"
+    assert result[1]["description"] == "User can confirm delete"
+
+
+def test_parse_response_fenced_with_trailing_prose():
+    items = [_make_item(suggestion_id="FA-POS-001")]
+    text = "Here are my suggestions:\n```json\n" + json.dumps(items) + "\n```\nLet me know!"
+    result = _parse_response(text)
+    assert len(result) == 1
+    assert result[0]["description"] == "User can view team tasks"
+
+
+def test_parse_response_truncated_with_nested_grounded_in():
+    # Truncation cut off inside the last item's grounded_in sub-object. The recovery
+    # must keep the first (complete) item and not be fooled by the inner "}," braces.
+    first = json.dumps(_make_item(suggestion_id="FA-POS-001"))
+    truncated = (
+        "[" + first + ', {"suggestion_id": "FA-POS-002", "description": "cut",'
+        ' "grounded_in": {"models": ["Employee"], "rationale": "incomp'
+    )
+    result = _parse_response(truncated)
+    assert len(result) == 1
+    assert result[0]["suggestion_id"] == "FA-POS-001"
+
+
 def test_parse_response_fixes_invalid_suggestion_id():
     item = _make_item(suggestion_id="INVALID-001")
     result = _parse_response(json.dumps([item]))

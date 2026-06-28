@@ -187,19 +187,64 @@ def _build_req_message(req: dict, goal_kind: str, data_verb: str | None, slots: 
     return "\n".join(lines)
 
 
+def _extract_json_array(text: str) -> str | None:
+    """Return the first balanced top-level ``[...]`` substring, or None if it
+    never closes. Tracks string state so a ``]`` inside a value is not mistaken
+    for the array close. Lets us ignore markdown fences / trailing prose the
+    model may append after the array (Haiku does this despite instructions)."""
+    start = text.find("[")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None  # never closed → genuine truncation
+
+
 def _parse_gwt(text: str, slots: list[dict]) -> list[dict]:
-    bracket_pos = text.find("[")
-    if bracket_pos == -1:
-        return []
-    raw = text[bracket_pos:]
-    try:
-        items = json.loads(raw)
-    except json.JSONDecodeError:
-        last = raw.rfind("},")
+    items = None
+
+    # Primary: parse the first balanced [...] array, ignoring any markdown
+    # fence or trailing prose the model added after it. This is the common
+    # case — a complete array wrapped in ```json fences.
+    arr = _extract_json_array(text)
+    if arr is not None:
+        try:
+            items = json.loads(arr)
+        except json.JSONDecodeError:
+            items = None
+
+    # Fallback: array never cleanly closed (genuine max_tokens truncation).
+    # Recover every complete object present — rfind("}") (not "},") so a lone
+    # final/only object is kept, not dropped.
+    if items is None:
+        bracket_pos = text.find("[")
+        if bracket_pos == -1:
+            return []
+        frag = text[bracket_pos:]
+        last = frag.rfind("}")
         if last == -1:
             return []
         try:
-            items = json.loads(raw[: last + 1] + "]")
+            items = json.loads(frag[: last + 1] + "]")
         except json.JSONDecodeError:
             return []
 
@@ -244,7 +289,7 @@ async def _generate_acs_for_req(
         user_msg = _build_req_message(req, goal_kind, data_verb, slots)
         response = await client.messages.create(
             model=MODEL,
-            max_tokens=512,
+            max_tokens=1024,
             system=_AC_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}],
         )

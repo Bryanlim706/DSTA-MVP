@@ -57,25 +57,9 @@ function EarlyResultsView({ job, isTerminated }: { job: Job | null; isTerminated
     ? 'Extracting stated requirements…'
     : 'Classifying project type…'
 
-  const statusText = isTerminated
-    ? step2 ? 'Steps 0–2 complete — pipeline terminated'
-    : step1 ? 'Steps 0–1 complete — pipeline terminated'
-    : step0 ? 'Step 0 complete — pipeline terminated'
-    : 'Pipeline terminated'
-    : step2 ? 'Steps 0–2 complete'
-    : step1 ? 'Steps 0–1 complete'
-    : step0 ? 'Step 0 complete'
-    : ''
-
   return (
-    <div className="min-h-screen bg-gray-50 px-4 pt-6 pb-12">
+    <div className="min-h-screen bg-gray-100 px-4 pt-6 pb-12">
       <div className="max-w-3xl mx-auto">
-        {statusText && (
-          <div className="mb-4">
-            <p className="text-xs font-semibold text-gray-500 text-center">{statusText}</p>
-          </div>
-        )}
-
         {step0 && <ClassificationResult result={step0} />}
         {step1 && (
           <div className="mt-6">
@@ -109,82 +93,105 @@ const TAG_STYLES: Record<string, string> = {
   custom:    'bg-orange-100 text-orange-700',
 }
 
-function L1aPanel({ reqs }: { reqs: ConfirmedRequirement[] }) {
-  const [open, setOpen] = useState(false)
+function RequirementsPanel({ l1a, l1b }: { l1a: ConfirmedRequirement[]; l1b: Step3Requirement[] }) {
+  const [l1aOpen, setL1aOpen] = useState(false)
+  const [l1bOpen, setL1bOpen] = useState(false)
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <button
-        className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-gray-50 transition-colors"
-        onClick={() => setOpen(v => !v)}
-      >
-        <span className="text-sm font-semibold text-gray-800">L1a — Confirmed Functions</span>
-        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{reqs.length}</span>
-        <span className="ml-auto text-xs text-gray-400">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <table className="w-full text-left border-t border-gray-100">
-          <thead>
-            <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
-              <th className="px-4 py-2">ID</th>
-              <th className="px-4 py-2">Function</th>
-              <th className="px-4 py-2">Tag</th>
-              <th className="px-4 py-2 text-right">Priority</th>
-              <th className="px-4 py-2 text-right">Wt</th>
-            </tr>
-          </thead>
-          <tbody>
-            {reqs.map(r => (
-              <tr key={r.req_id} className="border-t border-gray-50 hover:bg-gray-50">
-                <td className="px-4 py-2 text-xs font-mono text-gray-400 whitespace-nowrap">{r.req_id}</td>
-                <td className="px-4 py-2 text-sm text-gray-800">{r.description}</td>
-                <td className="px-4 py-2">
-                  <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap ${TAG_STYLES[r.tag] ?? 'bg-gray-100 text-gray-500'}`}>{r.tag}</span>
-                </td>
-                <td className="px-4 py-2 text-xs text-gray-500 text-right whitespace-nowrap">{r.priority}</td>
-                <td className="px-4 py-2 text-xs text-gray-500 text-right">{r.weight.toFixed(1)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
-  )
-}
+      <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-3">
+        <span className="text-sm font-semibold text-gray-800">Requirements</span>
+        <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{l1a.length + l1b.length} total</span>
+      </div>
 
-function L1bPanel({ reqs }: { reqs: Step3Requirement[] }) {
-  const [open, setOpen] = useState(false)
-  if (reqs.length === 0) return null
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <button
-        className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-gray-50 transition-colors"
-        onClick={() => setOpen(v => !v)}
-      >
-        <span className="text-sm font-semibold text-gray-800">L1b — Advisory Functions</span>
-        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{reqs.length}</span>
-        <span className="ml-auto text-xs text-gray-400">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <table className="w-full text-left border-t border-gray-100">
-          <thead>
-            <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">
-              <th className="px-4 py-2">ID</th>
-              <th className="px-4 py-2">Function</th>
-              <th className="px-4 py-2">Category</th>
-            </tr>
-          </thead>
-          <tbody>
-            {reqs.map(r => (
-              <tr key={r.req_id} className="border-t border-gray-50 hover:bg-gray-50">
-                <td className="px-4 py-2 text-xs font-mono text-gray-400 whitespace-nowrap">{r.req_id}</td>
-                <td className="px-4 py-2 text-sm text-gray-700">{r.description}</td>
-                <td className="px-4 py-2">
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${r.category === 'sop' ? 'bg-blue-50 text-blue-500' : 'bg-purple-50 text-purple-500'}`}>{r.category?.toUpperCase()}</span>
-                </td>
+      {/* L1a — In Score */}
+      <div className="mx-3 mt-2 mb-2 rounded-lg overflow-hidden border border-green-200">
+        <button
+          className="w-full px-4 py-2 bg-green-50 flex items-center gap-3 text-left hover:bg-green-100 transition-colors"
+          onClick={() => setL1aOpen(v => !v)}
+        >
+          <span className="text-xs font-semibold text-green-800">In Score (L1a)</span>
+          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">{l1a.length} requirements</span>
+          <span className="ml-auto text-xs text-green-600">{l1aOpen ? '▲' : '▼'}</span>
+        </button>
+        {l1aOpen && (
+          <table className="w-full text-left">
+            <thead>
+              <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-t border-green-100 border-b border-green-100 bg-white">
+                <th className="px-4 py-2">ID</th>
+                <th className="px-4 py-2">Function</th>
+                <th className="px-4 py-2">
+                  <span className="flex items-center gap-1">
+                    Priority
+                    <span className="relative group">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-gray-500 text-xs font-bold cursor-default select-none">?</span>
+                      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1.5 hidden group-hover:flex flex-col gap-1 bg-white border border-gray-200 rounded-lg shadow-lg px-3 py-2 z-50 min-w-max">
+                        {([
+                          { label: 'critical', weight: 4.0, color: 'bg-red-50 text-red-600' },
+                          { label: 'high',     weight: 3.0, color: 'bg-orange-50 text-orange-600' },
+                          { label: 'medium',   weight: 2.0, color: 'bg-yellow-50 text-yellow-700' },
+                          { label: 'low',      weight: 1.0, color: 'bg-gray-100 text-gray-500' },
+                        ] as const).map(({ label, weight, color }) => (
+                          <span key={label} className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${color}`}>
+                            {label} = {weight.toFixed(1)}
+                          </span>
+                        ))}
+                      </div>
+                    </span>
+                  </span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {l1a.map(r => (
+                <tr key={r.req_id} className="border-t border-gray-50 hover:bg-gray-100">
+                  <td className="px-4 py-2 text-xs font-mono text-gray-400 whitespace-nowrap">{r.req_id}</td>
+                  <td className="px-4 py-2 text-sm text-gray-800">{r.description}</td>
+                  <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{r.priority}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* L1b — Advisory */}
+      {l1b.length > 0 && (
+        <div className="mx-3 mb-3 rounded-lg overflow-hidden border border-yellow-200">
+          <button
+            className="w-full px-4 py-2 bg-yellow-50 flex items-center gap-3 text-left hover:bg-yellow-100 transition-colors"
+            onClick={() => setL1bOpen(v => !v)}
+          >
+            <span className="text-xs font-semibold text-yellow-800">Advisory (L1b — not in score)</span>
+            <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">{l1b.length} requirements</span>
+            <span className="ml-auto text-xs text-yellow-600">{l1bOpen ? '▲' : '▼'}</span>
+          </button>
+          {l1bOpen && (
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider border-b border-yellow-100">
+                  <th className="px-4 py-2">ID</th>
+                  <th className="px-4 py-2">Function</th>
+                  <th className="px-4 py-2">Category</th>
+                  <th className="px-4 py-2">Confidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {l1b.map(r => (
+                  <tr key={r.req_id} className="border-t border-yellow-50 hover:bg-yellow-50">
+                    <td className="px-4 py-2 text-xs font-mono text-gray-400 whitespace-nowrap">{r.req_id}</td>
+                    <td className="px-4 py-2 text-sm text-gray-700">{r.description}</td>
+                    <td className="px-4 py-2">
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${r.category === 'sop' ? 'bg-blue-50 text-blue-500' : 'bg-purple-50 text-purple-500'}`}>
+                        {r.category?.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{Math.round(r.confidence_score * 100)}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
     </div>
   )
@@ -192,7 +199,7 @@ function L1bPanel({ reqs }: { reqs: Step3Requirement[] }) {
 
 function ErrorView({ error, onRetry }: { error: string | null; onRetry: () => void }) {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center px-4">
       <div className="max-w-md text-center">
         <div className="text-4xl mb-4">⚠️</div>
         <h2 className="text-lg font-semibold text-gray-900 mb-2">Analysis failed</h2>
@@ -227,30 +234,29 @@ function TopBar({
     <div className="relative flex items-center px-4 py-2 bg-red-50 border-b border-red-200 z-20">
       <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center">
         {projectName && (
-          <span className="text-sm font-medium text-gray-800">{projectName}</span>
+          <span className="text-sm font-medium text-gray-800 max-w-xs truncate" title={projectName}>{projectName}</span>
         )}
         {jobId && (
           <span className="text-[10px] font-mono text-gray-300">{jobId}</span>
         )}
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <button
-          onClick={onTerminate}
-          disabled={!canTerminate || isTerminated}
-          className={
-            isTerminated
-              ? 'text-sm font-medium px-3 py-1.5 rounded-lg border text-gray-400 border-gray-200 bg-gray-50 cursor-not-allowed opacity-60'
-              : 'text-sm font-medium px-3 py-1.5 rounded-lg border text-red-800 border-red-500 bg-red-100 hover:bg-red-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-100'
-          }
-        >
-          {isTerminated ? 'Terminated' : 'Terminate job'}
-        </button>
-        <button
-          onClick={onNewSession}
-          className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
-        >
-          New session
-        </button>
+        {isTerminated ? (
+          <button
+            onClick={onNewSession}
+            className="text-sm font-medium px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors"
+          >
+            New session
+          </button>
+        ) : (
+          <button
+            onClick={onTerminate}
+            disabled={!canTerminate}
+            className="text-sm font-medium px-3 py-1.5 rounded-lg border text-red-800 border-red-500 bg-red-100 hover:bg-red-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-100"
+          >
+            Terminate job
+          </button>
+        )}
       </div>
     </div>
   )
@@ -277,35 +283,14 @@ function ResultPage({ job, onTriggerSandbox }: { job: Job; onTriggerSandbox: () 
   const showSandbox = job.status === 'step_11_running' || !!job.step_results.step_11
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 pt-6 pb-12">
+    <div className="min-h-screen bg-gray-100 px-4 pt-6 pb-12">
       <div className="max-w-3xl mx-auto">
-        <div className="mb-4">
-          <p className="text-xs font-semibold text-gray-500 text-center">
-            {job.status === 'step_7_5_complete' ? 'Steps 0–7.5 complete'
-          : job.status === 'step_7_complete' || job.status === 'step_7_5_running' ? 'Steps 0–7 complete'
-          : job.status === 'step_6_complete' || job.status === 'step_7_running' ? 'Steps 0–6 complete'
-          : job.status === 'step_5_complete' || job.status === 'step_6_running' ? 'Steps 0–5 complete'
-          : job.status === 'step_4_complete' || job.status === 'step_5_running' ? 'Steps 0–4 complete'
-          : job.status === 'terminated' && job.step_results?.step_7_5 ? 'Steps 0–7.5 complete — terminated'
-          : job.status === 'terminated' && job.step_results?.step_7   ? 'Steps 0–7 complete — terminated'
-          : job.status === 'terminated' && job.step_results?.step_6   ? 'Steps 0–6 complete — terminated'
-          : job.status === 'terminated' && job.step_results?.step_5   ? 'Steps 0–5 complete — terminated'
-          : job.status === 'terminated' && job.step_results?.step_4   ? 'Steps 0–4 complete — terminated'
-          : 'Steps 0–3.5 complete'}
-          </p>
-        </div>
-
         <ClassificationResult result={step0} />
 
         {step35 && (
-          <>
-            <div className="mt-4">
-              <L1aPanel reqs={step35.confirmed_requirements} />
-            </div>
-            <div className="mt-3">
-              <L1bPanel reqs={step35.advisory_requirements} />
-            </div>
-          </>
+          <div className="mt-4">
+            <RequirementsPanel l1a={step35.confirmed_requirements} l1b={step35.advisory_requirements} />
+          </div>
         )}
 
         <div className="mt-6">
@@ -555,7 +540,7 @@ export default function App() {
   const canRunCorrectness = !!(job?.step_results?.step_7_5)
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-100">
       {stage !== 'upload' && (
         <TopBar
           canTerminate={!!job && !isTerminated}
@@ -577,16 +562,28 @@ export default function App() {
             onNavCorrectness={handleNavCorrectness}
           />
         )}
-        <main className="flex-1 overflow-y-auto">
-          {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
-          {stage === 'loading' && <EarlyResultsView job={job} isTerminated={isTerminated} />}
-          {stage === 'confirming' && job && <ConfirmationTable job={job} onConfirm={handleConfirm} />}
-          {stage === 'step_3_complete' && job && <ResultPage job={job} onTriggerSandbox={handleTriggerSandbox} />}
-          {stage === 'correctness' && job && (
-            <CorrectnessConfirmation job={job} onGenerateACs={handleGenerateACs} />
+        <div className="flex-1 overflow-hidden relative">
+          <main className="h-full overflow-y-auto">
+            {stage === 'upload' && <UploadPage onUploadComplete={handleUploadComplete} />}
+            {(stage === 'loading' || stage === 'confirming') && <EarlyResultsView job={job} isTerminated={isTerminated} />}
+            {stage === 'step_3_complete' && job && <ResultPage job={job} onTriggerSandbox={handleTriggerSandbox} />}
+            {stage === 'correctness' && job && (
+              <CorrectnessConfirmation job={job} onGenerateACs={handleGenerateACs} />
+            )}
+            {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
+          </main>
+
+          {/* Confirmation modal — centered over main content only */}
+          {stage === 'confirming' && job && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-black/50 backdrop-blur-sm">
+              <div className="rounded-2xl overflow-hidden shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+                <div className="overflow-y-auto bg-white">
+                  <ConfirmationTable job={job} onConfirm={handleConfirm} />
+                </div>
+              </div>
+            </div>
           )}
-          {stage === 'error' && <ErrorView error={error} onRetry={reset} />}
-        </main>
+        </div>
       </div>
     </div>
   )

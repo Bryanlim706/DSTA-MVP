@@ -1,3 +1,11 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@keyframes pulse-strong {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+.animate-pulse-strong {
+  animation: pulse-strong 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

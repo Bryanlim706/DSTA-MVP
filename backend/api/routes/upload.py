@@ -50,8 +50,7 @@ async def upload_project(
     )
 
     client = request.app.state.anthropic_client
-    task = asyncio.create_task(_run_pipeline(job_id, zip_path, job_dir / "extracted", client))
-    task_registry.register(job_id, task)
+    task_registry.launch(job_id, _run_pipeline(job_id, zip_path, job_dir / "extracted", client))
 
     return {"job_id": job_id, "status": "created"}
 
@@ -107,8 +106,6 @@ async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
         if is_terminated(job_id):
             return
         update_job(job_id, {"status": "error", "errors": [str(e)]})
-    finally:
-        task_registry.remove(job_id)
 
 
 def _extract_zip(zip_path: Path, extract_to: Path) -> None:
