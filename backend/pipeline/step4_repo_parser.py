@@ -1373,14 +1373,11 @@ def _elements_from_text(text: str) -> list[dict]:
         raw_text = m.group(2).strip()
         if '>' in raw_text:
             raw_text = raw_text.rsplit('>', 1)[1].strip()
-        if re.match(r'^[{}\s);\]]+$', raw_text):
-            raw_text = ''
-        elif raw_text.startswith('{') and not raw_text.strip('{}').strip():
+        if raw_text.startswith('{') and not raw_text.strip('{}').strip():
             raw_text = ''
         elif raw_text.startswith('{'):
-            # Take last quoted string — the default/non-loading branch of ternaries
-            all_quoted = re.findall(r'"([^"]{1,80})"', raw_text)
-            raw_text = all_quoted[-1] if all_quoted else re.sub(r'\{[^{}]*\}', '', raw_text).strip()
+            qm = re.search(r'"([^"]{1,80})"', raw_text)
+            raw_text = qm.group(1) if qm else re.sub(r'\{[^{}]*\}', '', raw_text).strip()
         type_m = _ATTR_TYPE.search(attrs)
         subtype = type_m.group(1) if type_m else None
         aria_m = _ATTR_ARIA.search(attrs)
