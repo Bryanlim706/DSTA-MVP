@@ -1296,6 +1296,41 @@ _ATTR_TYPE = re.compile(r"""\btype\s*=\s*["'`{]([^"'`}{]+)["'`}]""")
 _JSX_BLOCK_COMMENT_RE = re.compile(r'\{/\*.*?\*/\}', re.DOTALL)
 _LINE_COMMENT_ONLY_RE = re.compile(r'^\s*//.*$', re.MULTILINE)
 
+# ── Component-library interactive element patterns ────────────────────────────
+# Covers MUI, shadcn/ui, Ant Design, Chakra — interactive components only.
+# Non-interactive containers (Box, Grid, Card, Typography) are intentionally excluded.
+
+# Static-only label prop: label="..." or label='...' (rejects label={expr})
+_ATTR_LABEL_STATIC = re.compile(r"""\blabel\s*=\s*["']([^"']{1,80})["']""")
+
+# Safe JSX attribute span: allows {expr} blocks so > inside arrow functions doesn't terminate early
+_JSX_SAFE_ATTRS = r"((?:[^>{}]|\{(?:[^{}]|\{[^{}]*\})*\})*?)"
+
+# Group A — paired PascalCase button-like tags; text children extracted
+# Note: Button/_JSX_BUTTON_RE already handles <Button> and <button> — excluded here to avoid double extraction
+_LIB_BTN_NAMES = "IconButton|MenuItem|Fab|ListItemButton|ToggleButton"
+_JSX_LIB_BTN_RE = re.compile(
+    r"<(" + _LIB_BTN_NAMES + r")\b" + _JSX_SAFE_ATTRS + r">(.*?)</\1>",
+    re.DOTALL,
+)
+
+# Group B — self-closing PascalCase components with static label prop (Chip, Tab, etc.)
+_LIB_CHIP_NAMES = "Chip|Tab|Switch|FormControlLabel"
+_JSX_LIB_CHIP_RE = re.compile(
+    r"<(?:" + _LIB_CHIP_NAMES + r")\b" + _JSX_SAFE_ATTRS + r"(?:/>|>)",
+    re.DOTALL,
+)
+
+# Group C — PascalCase input-like; static label prop, then placeholder fallback
+_LIB_INPUT_NAMES = (
+    "TextField|OutlinedInput|FilledInput|StandardInput|Input"
+    "|Autocomplete|DatePicker|TimePicker|DateTimePicker"
+)
+_JSX_LIB_INPUT_RE = re.compile(
+    r"<(?:" + _LIB_INPUT_NAMES + r")\b" + _JSX_SAFE_ATTRS + r"(?:/>|>)",
+    re.DOTALL,
+)
+
 
 def _strip_comments(text: str) -> str:
     text = _JSX_BLOCK_COMMENT_RE.sub('', text)
@@ -1338,11 +1373,14 @@ def _elements_from_text(text: str) -> list[dict]:
         raw_text = m.group(2).strip()
         if '>' in raw_text:
             raw_text = raw_text.rsplit('>', 1)[1].strip()
-        if raw_text.startswith('{') and not raw_text.strip('{}').strip():
+        if re.match(r'^[{}\s);\]]+$', raw_text):
+            raw_text = ''
+        elif raw_text.startswith('{') and not raw_text.strip('{}').strip():
             raw_text = ''
         elif raw_text.startswith('{'):
-            qm = re.search(r'"([^"]{1,80})"', raw_text)
-            raw_text = qm.group(1) if qm else re.sub(r'\{[^{}]*\}', '', raw_text).strip()
+            # Take last quoted string — the default/non-loading branch of ternaries
+            all_quoted = re.findall(r'"([^"]{1,80})"', raw_text)
+            raw_text = all_quoted[-1] if all_quoted else re.sub(r'\{[^{}]*\}', '', raw_text).strip()
         type_m = _ATTR_TYPE.search(attrs)
         subtype = type_m.group(1) if type_m else None
         aria_m = _ATTR_ARIA.search(attrs)
@@ -1354,6 +1392,61 @@ def _elements_from_text(text: str) -> list[dict]:
             continue
         seen.add(key)
         elements.append({"type": "button", "subtype": subtype, "label": label})
+
+    # ── Component-library elements ─────────────────────────────────────────
+    # Group A: paired PascalCase button-like tags — same text-child logic as native <button>
+    for m in _JSX_LIB_BTN_RE.finditer(text):
+        attrs = m.group(2)
+        raw_text = m.group(3).strip()
+        if '>' in raw_text:
+            raw_text = raw_text.rsplit('>', 1)[1].strip()
+        # Drop stray closing braces left by icon-only buttons e.g. <IconButton><Icon /></IconButton>
+        if re.match(r'^[{}\s);\]]+$', raw_text):
+            raw_text = ''
+        elif raw_text.startswith('{') and not raw_text.strip('{}').strip():
+            raw_text = ''
+        elif raw_text.startswith('{'):
+            # Ternary: take the last quoted string (default/non-loading branch)
+            all_quoted = re.findall(r'"([^"]{1,80})"', raw_text)
+            raw_text = all_quoted[-1] if all_quoted else re.sub(r'\{[^{}]*\}', '', raw_text).strip()
+        aria_m = _ATTR_ARIA.search(attrs)
+        label = (aria_m.group(1) if aria_m else raw_text)[:80]
+        if not label:
+            continue
+        key = (label, None)
+        if key not in seen:
+            seen.add(key)
+            elements.append({"type": "button", "subtype": None, "label": label})
+
+    # Group B: self-closing PascalCase with static label prop (Chip, Tab, Switch, etc.)
+    for m in _JSX_LIB_CHIP_RE.finditer(text):
+        attrs = m.group(1)
+        label_m = _ATTR_LABEL_STATIC.search(attrs)
+        if not label_m:
+            continue
+        label = label_m.group(1).strip()
+        if not label:
+            continue
+        key = (label, None)
+        if key not in seen:
+            seen.add(key)
+            elements.append({"type": "button", "subtype": None, "label": label})
+
+    # Group C: PascalCase input-like — static label prop first, placeholder fallback
+    for m in _JSX_LIB_INPUT_RE.finditer(text):
+        attrs = m.group(1)
+        label_m = _ATTR_LABEL_STATIC.search(attrs)
+        ph_m = _ATTR_PH.search(attrs)
+        raw = label_m.group(1) if label_m else (ph_m.group(1) if ph_m else None)
+        if not raw:
+            continue
+        label = raw.strip()[:80]
+        if not label:
+            continue
+        key = (label, None)
+        if key not in seen:
+            seen.add(key)
+            elements.append({"type": "input", "subtype": None, "label": label})
 
     return elements
 

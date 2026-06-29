@@ -279,7 +279,7 @@ function ResultPage({ job, onTriggerSandbox }: { job: Job; onTriggerSandbox: () 
   const l1aIds = new Set(step35?.confirmed_requirements.map(r => r.req_id) ?? [])
   const step11Loading = job.status === 'step_11_running'
 
-  const showSandboxButton = job.status === 'step_7_5_complete' && !job.step_results.step_11
+  const showSandboxButton = !!job.step_results.step_7_5 && !job.step_results.step_11 && job.status !== 'step_11_running'
   const showSandbox = job.status === 'step_11_running' || !!job.step_results.step_11
 
   return (

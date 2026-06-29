@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { FA75Suggestion, Step75Result } from '../types'
 
 interface Props {
@@ -59,17 +60,14 @@ function SuggestionCard({ s }: { s: FA75Suggestion }) {
 }
 
 export default function FA75AdvisorResult({ result, loading }: Props) {
+  const [open, setOpen] = useState(false)
+
   if (loading && !result) {
     return (
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="h-4 w-4 rounded-full border-2 border-purple-500 border-t-transparent animate-spin" />
-          <div>
-            <p className="text-sm font-semibold text-gray-900">Appropriateness Advisor</p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Generating codebase-grounded improvement suggestions…
-            </p>
-          </div>
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <div className="w-full flex items-center justify-between px-3 py-2 bg-gray-50">
+          <span className="text-xs font-semibold text-gray-700">Additional codebase-grounded advisory</span>
+          <div className="h-3 w-3 rounded-full border-2 border-purple-500 border-t-transparent animate-spin" />
         </div>
       </div>
     )
@@ -79,42 +77,65 @@ export default function FA75AdvisorResult({ result, loading }: Props) {
 
   if (result.error) {
     return (
-      <div className="bg-white border border-red-200 rounded-xl p-6 shadow-sm">
-        <p className="text-sm font-semibold text-gray-900">Appropriateness Advisor</p>
-        <p className="text-xs text-red-600 mt-1">{result.error}</p>
+      <div className="border border-red-200 rounded-lg overflow-hidden">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="w-full flex items-center justify-between px-3 py-2 bg-red-50 hover:bg-red-100 text-left"
+        >
+          <span className="text-xs font-semibold text-red-800">Additional codebase-grounded advisory</span>
+          <span className="text-xs text-red-600">{open ? '▲' : '▼'}</span>
+        </button>
+        {open && (
+          <div className="px-3 py-2 bg-white">
+            <p className="text-xs text-red-600">{result.error}</p>
+          </div>
+        )}
       </div>
     )
   }
 
-  if (result.suggestions.length === 0) {
+  const count = result.suggestions.length
+
+  if (count === 0) {
     return (
-      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
-        <p className="text-sm font-semibold text-gray-900">Appropriateness Advisor</p>
-        <p className="text-xs text-gray-500 mt-1">
-          No codebase-grounded suggestions identified.
-        </p>
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+        >
+          <span className="text-xs font-semibold text-gray-700">Additional codebase-grounded advisory</span>
+          <span className="text-xs text-gray-500">{open ? '▲' : '▼'}</span>
+        </button>
+        {open && (
+          <div className="px-3 py-2 bg-white">
+            <p className="text-xs text-gray-500">No codebase-grounded suggestions identified.</p>
+          </div>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
-      <div>
-        <p className="text-base font-semibold text-gray-900">Appropriateness Advisor</p>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Codebase-grounded improvement suggestions —{' '}
-          <span className="font-medium text-gray-700">{result.total_count}</span> identified
-        </p>
-        <p className="text-xs text-gray-400 mt-0.5">
-          Type B: derived from actual schema, endpoints, and UI patterns (not generic domain inference)
-        </p>
-      </div>
-
-      <div className="space-y-3">
-        {result.suggestions.map((s) => (
-          <SuggestionCard key={s.suggestion_id} s={s} />
-        ))}
-      </div>
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+      >
+        <span className="text-xs font-semibold text-gray-700">
+          Additional codebase-grounded advisory
+        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">{count} suggestion{count !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-gray-500">{open ? '▲' : '▼'}</span>
+        </div>
+      </button>
+      {open && (
+        <div className="p-4 space-y-3 bg-white">
+          {result.suggestions.map((s) => (
+            <SuggestionCard key={s.suggestion_id} s={s} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
