@@ -15,7 +15,6 @@ export default function UploadPage({ onUploadComplete }: Props) {
 
   const [useRequirementsBox, setUseRequirementsBox] = useState(false)
   const [useReadme, setUseReadme] = useState(true)
-  const [useSpecFiles, setUseSpecFiles] = useState(false)
 
   function handleRequirementsChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const val = e.target.value
@@ -54,7 +53,6 @@ export default function UploadPage({ onUploadComplete }: Props) {
       const jobId = await uploadProject(zipFile, requirements, {
         useRequirementsBox,
         useReadme,
-        useSpecFiles,
       })
       onUploadComplete(jobId)
     } catch (err) {
@@ -119,20 +117,15 @@ export default function UploadPage({ onUploadComplete }: Props) {
               Project requirements are found in
             </p>
             <div className="mb-3 flex gap-5">
-              {([
-                { id: 'src-readme', label: 'README.md',        value: useReadme,    setter: setUseReadme },
-                { id: 'src-spec',   label: 'Other spec files', value: useSpecFiles, setter: setUseSpecFiles },
-              ] as const).map(({ id, label, value, setter }) => (
-                <label key={id} className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={value}
-                    onChange={(e) => setter(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-gray-500">{label}</span>
-                </label>
-              ))}
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={useReadme}
+                  onChange={(e) => setUseReadme(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-500">README.md</span>
+              </label>
             </div>
             <label className="mt-5 mb-2 flex items-center gap-2 cursor-pointer select-none">
               <input

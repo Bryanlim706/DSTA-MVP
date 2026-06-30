@@ -5,10 +5,9 @@ const API_BASE = 'http://localhost:8000/api'
 export async function uploadProject(
   zipFile: File,
   requirements: string,
-  sources: { useRequirementsBox: boolean; useReadme: boolean; useSpecFiles: boolean } = {
+  sources: { useRequirementsBox: boolean; useReadme: boolean } = {
     useRequirementsBox: true,
     useReadme: true,
-    useSpecFiles: false,
   },
 ): Promise<string> {
   const form = new FormData()
@@ -16,7 +15,6 @@ export async function uploadProject(
   form.append('requirements', requirements)
   form.append('use_requirements_box', String(sources.useRequirementsBox))
   form.append('use_readme', String(sources.useReadme))
-  form.append('use_spec_files', String(sources.useSpecFiles))
 
   const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: form })
   if (!res.ok) {

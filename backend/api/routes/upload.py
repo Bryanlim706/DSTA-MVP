@@ -21,11 +21,10 @@ async def upload_project(
     requirements: str = Form(""),
     use_requirements_box: bool = Form(True),
     use_readme: bool = Form(True),
-    use_spec_files: bool = Form(False),
 ):
     if not project_zip.filename or not project_zip.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="File must be a .zip archive")
-    if not use_requirements_box and not use_readme and not use_spec_files:
+    if not use_requirements_box and not use_readme:
         raise HTTPException(status_code=400, detail="At least one input source must be selected")
 
     job_id = str(uuid.uuid4())
@@ -45,7 +44,6 @@ async def upload_project(
             "extracted_path": str(job_dir / "extracted"),
             "use_requirements_box": use_requirements_box,
             "use_readme": use_readme,
-            "use_spec_files": use_spec_files,
         },
     )
 
@@ -76,7 +74,6 @@ async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
             job["requirements_text"], extract_to, client,
             use_requirements_box=job.get("use_requirements_box", True),
             use_readme=job.get("use_readme", True),
-            use_spec_files=job.get("use_spec_files", False),
         )
         if is_terminated(job_id):
             return

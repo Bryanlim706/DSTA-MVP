@@ -308,23 +308,19 @@ async def run(
     client: anthropic.AsyncAnthropic,
     use_requirements_box: bool = True,
     use_readme: bool = True,
-    use_spec_files: bool = False,
 ) -> dict:
     model = "claude-haiku-4-5-20251001"
     spec_docs: dict[str, str] = {}
     truncated_docs: list[str] = []
     excluded_docs_count: int = 0
 
-    if use_readme or use_spec_files:
+    if use_readme:
         try:
             root = _find_project_root(extract_to)
             all_docs, truncated_docs, excluded_docs_count = _find_spec_docs(root)
             for key, content in all_docs.items():
                 name_lower = Path(key).name.lower()
-                is_readme = name_lower in README_NAMES
-                if is_readme and use_readme:
-                    spec_docs[key] = content
-                elif not is_readme and use_spec_files:
+                if name_lower in README_NAMES:
                     spec_docs[key] = content
         except Exception:
             pass
