@@ -33,3 +33,27 @@ frontend/.cache/
 # OS
 .DS_Store
 Thumbs.db
+
+# Planning docs and Word files
+docs/
+*.docx
+
+# Debug / diagnostic / scratch scripts (backend root-level one-offs)
+backend/debug_*.py
+backend/diag*.py
+backend/dump_*.py
+backend/rerun_*.py
+backend/show_*.py
+backend/list_*.py
+backend/analyze_*.py
+backend/gen_playwright_selectors.py
+backend/test_fallback*.py
+backend/test_sandbox*.py
+
+# Step output dumps and ad-hoc test results
+backend/step*.json
+backend/req_test_*.json
+backend/req_test_*.md
+backend/test_results_*.json
+backend/test_suite_*.json
+backend/test_suite_*.md
