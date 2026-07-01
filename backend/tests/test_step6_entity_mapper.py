@@ -8,59 +8,10 @@ from pipeline.step6_entity_mapper import (
     _build_nav_inventory,
     _build_page_inventory,
     _candidate_routes,
-    _classify_edge_kind,
     _compute_unlinked,
     _parse_grounding_response,
     _score_entity,
 )
-
-
-# ---------------------------------------------------------------------------
-# _classify_edge_kind
-# ---------------------------------------------------------------------------
-
-def test_classify_data_submit():
-    assert _classify_edge_kind("submit order") == "data"
-
-def test_classify_data_delete():
-    assert _classify_edge_kind("delete item") == "data"
-
-def test_classify_data_create():
-    assert _classify_edge_kind("create account") == "data"
-
-def test_classify_data_update():
-    assert _classify_edge_kind("update profile") == "data"
-
-def test_classify_data_save():
-    assert _classify_edge_kind("save changes") == "data"
-
-def test_classify_structural_filter():
-    assert _classify_edge_kind("filter by status") == "structural"
-
-def test_classify_structural_search():
-    assert _classify_edge_kind("search results") == "structural"
-
-def test_classify_structural_sort():
-    assert _classify_edge_kind("sort by date") == "structural"
-
-def test_classify_navigation_navigate():
-    assert _classify_edge_kind("navigate to dashboard") == "navigation"
-
-def test_classify_navigation_go_to():
-    assert _classify_edge_kind("go to cart") == "navigation"
-
-def test_classify_navigation_open():
-    assert _classify_edge_kind("open details page") == "navigation"
-
-def test_classify_unknown_defaults_navigation():
-    assert _classify_edge_kind("proceed") == "navigation"
-
-def test_classify_empty_defaults_navigation():
-    assert _classify_edge_kind("") == "navigation"
-
-def test_classify_case_insensitive():
-    assert _classify_edge_kind("DELETE record") == "data"
-    assert _classify_edge_kind("FILTER items") == "structural"
 
 
 # ---------------------------------------------------------------------------
@@ -297,78 +248,55 @@ def test_score_entity_element_not_found():
 
 
 def test_score_entity_data_edge_both_found():
-    entity = {"type": "edge", "label": "submit login", "primary": True}
+    entity = {"type": "data_edge", "label": "submit login", "primary": True}
     grounding = {
         "matched_endpoint": "POST /api/auth/login",
         "trigger_element_label": "Login button",
     }
     e, extra = _score_entity(entity, grounding, _PAGE_INV)
     assert e == 1.0
-    assert extra["edge_kind"] == "data"
     assert extra["matched_endpoint"] == "POST /api/auth/login"
 
 
 def test_score_entity_data_edge_endpoint_only():
-    entity = {"type": "edge", "label": "submit login", "primary": True}
+    entity = {"type": "data_edge", "label": "submit login", "primary": True}
     grounding = {"matched_endpoint": "POST /api/auth/login", "trigger_element_label": None}
     e, _ = _score_entity(entity, grounding, _PAGE_INV)
     assert e == 0.75
 
 
 def test_score_entity_data_edge_trigger_only():
-    entity = {"type": "edge", "label": "delete item", "primary": True}
+    entity = {"type": "data_edge", "label": "delete item", "primary": True}
     grounding = {"matched_endpoint": None, "trigger_element_label": "Delete"}
     e, _ = _score_entity(entity, grounding, _PAGE_INV)
     assert e == 0.4
 
 
 def test_score_entity_data_edge_neither():
-    entity = {"type": "edge", "label": "create order", "primary": True}
+    entity = {"type": "data_edge", "label": "create order", "primary": True}
     grounding = {"matched_endpoint": None, "trigger_element_label": None}
     e, _ = _score_entity(entity, grounding, _PAGE_INV)
     assert e == 0.0
 
 
 def test_score_entity_navigation_playwright_element():
-    entity = {"type": "edge", "label": "navigate to dashboard", "primary": True}
+    entity = {"type": "navigation_edge", "label": "navigate to dashboard", "primary": True}
     grounding = {"matched_nav_target": "/dashboard", "match_source": "playwright_element"}
     e, extra = _score_entity(entity, grounding, _PAGE_INV)
     assert e == 1.0
-    assert extra["edge_kind"] == "navigation"
+    assert extra["matched_nav_target"] == "/dashboard"
 
 
 def test_score_entity_navigation_graph():
-    entity = {"type": "edge", "label": "go to home", "primary": True}
+    entity = {"type": "navigation_edge", "label": "go to home", "primary": True}
     grounding = {"matched_nav_target": "/", "match_source": "navigation_graph"}
     e, _ = _score_entity(entity, grounding, _PAGE_INV)
     assert e == 0.75
 
 
 def test_score_entity_navigation_not_found():
-    entity = {"type": "edge", "label": "open cart", "primary": True}
+    entity = {"type": "navigation_edge", "label": "open cart", "primary": True}
     grounding = {"matched_nav_target": None, "match_source": None}
-    e, _ = _score_entity(entity, grounding, _PAGE_INV)
-    assert e == 0.0
-
-
-def test_score_entity_structural_playwright():
-    entity = {"type": "edge", "label": "filter by category", "primary": True}
-    grounding = {"trigger_element_label": "Category filter", "match_source": "playwright"}
-    e, extra = _score_entity(entity, grounding, _PAGE_INV)
-    assert e == 1.0
-    assert extra["edge_kind"] == "structural"
-
-
-def test_score_entity_structural_route_elements():
-    entity = {"type": "edge", "label": "search products", "primary": True}
-    grounding = {"trigger_element_label": "Search box", "match_source": "route_elements"}
-    e, _ = _score_entity(entity, grounding, _PAGE_INV)
-    assert e == 0.75
-
-
-def test_score_entity_structural_not_found():
-    entity = {"type": "edge", "label": "sort items", "primary": True}
-    grounding = {"trigger_element_label": None, "match_source": None}
     e, _ = _score_entity(entity, grounding, _PAGE_INV)
     assert e == 0.0
 
@@ -461,7 +389,7 @@ def test_compute_unlinked_l3_endpoint_not_matched():
     mapped = [{
         "req_id": "REQ-001",
         "entity_scores": [
-            {"type": "edge", "edge_kind": "data", "matched_endpoint": "POST /api/login"},
+            {"type": "data_edge", "matched_endpoint": "POST /api/login"},
         ],
     }]
     impl_units = [

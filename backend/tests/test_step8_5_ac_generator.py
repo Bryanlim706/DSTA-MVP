@@ -15,36 +15,46 @@ from pipeline.step8_5_ac_generator import (
 # _classify_goal_kind — precedence: data > structural > navigation > presence
 # ---------------------------------------------------------------------------
 
-def _edge(label: str, **kwargs) -> dict:
-    return {"type": "edge", "label": label, "primary": True, **kwargs}
+def _data_edge(label: str, **kwargs) -> dict:
+    return {"type": "data_edge", "label": label, "primary": True, **kwargs}
+
+def _nav_edge(label: str, **kwargs) -> dict:
+    return {"type": "navigation_edge", "label": label, "primary": True, **kwargs}
 
 
 def _node(label: str) -> dict:
     return {"type": "node", "label": label, "primary": True}
 
 
+def _elem(label: str) -> dict:
+    return {"type": "element", "label": label, "primary": True}
+
+
 def test_classify_data_wins_over_structural():
-    path = [_edge("submit and filter"), _edge("filter results")]
+    # data_edge + structural element → data takes precedence
+    path = [_data_edge("submit form"), _elem("filter input")]
     assert _classify_goal_kind(path) == "data"
 
 
 def test_classify_data_wins_over_navigation():
-    path = [_edge("create task"), _edge("navigate to dashboard")]
+    path = [_data_edge("create task"), _nav_edge("navigate to dashboard")]
     assert _classify_goal_kind(path) == "data"
 
 
 def test_classify_structural_wins_over_navigation():
-    path = [_edge("filter by status"), _edge("navigate to list")]
+    # structural detected from element label; navigation_edge present too
+    path = [_elem("filter by status"), _nav_edge("navigate to list")]
     assert _classify_goal_kind(path) == "structural"
 
 
 def test_classify_navigation_when_no_data_or_structural():
-    path = [_edge("navigate to dashboard"), _node("Dashboard")]
+    # no structural elements — falls through to navigation_edge
+    path = [_nav_edge("navigate to dashboard"), _node("Dashboard")]
     assert _classify_goal_kind(path) == "navigation"
 
 
 def test_classify_presence_when_no_edges():
-    path = [_node("Login Page"), {"type": "element", "label": "email input", "primary": True}]
+    path = [_node("Login Page"), _elem("email input")]
     assert _classify_goal_kind(path) == "presence"
 
 
@@ -53,27 +63,29 @@ def test_classify_presence_empty_path():
 
 
 def test_classify_data_create():
-    path = [_edge("add task")]
+    path = [_data_edge("add task")]
     assert _classify_goal_kind(path) == "data"
 
 
 def test_classify_data_delete():
-    path = [_edge("delete task")]
+    path = [_data_edge("delete task")]
     assert _classify_goal_kind(path) == "data"
 
 
 def test_classify_data_update():
-    path = [_edge("update status")]
+    path = [_data_edge("update status")]
     assert _classify_goal_kind(path) == "data"
 
 
 def test_classify_structural_search():
-    path = [_edge("search employees")]
+    # structural detected from element label containing "search"
+    path = [_elem("search employees")]
     assert _classify_goal_kind(path) == "structural"
 
 
 def test_classify_structural_sort():
-    path = [_edge("sort by date")]
+    # structural detected from element label containing "sort"
+    path = [_elem("sort by date")]
     assert _classify_goal_kind(path) == "structural"
 
 
@@ -82,38 +94,38 @@ def test_classify_structural_sort():
 # ---------------------------------------------------------------------------
 
 def test_data_verb_delete():
-    path = [_edge("delete task")]
+    path = [_data_edge("delete task")]
     assert _classify_data_verb(path) == "delete"
 
 
 def test_data_verb_delete_beats_create():
     # delete keyword takes precedence (checked first in function)
-    path = [_edge("delete and create")]
+    path = [_data_edge("delete and create")]
     assert _classify_data_verb(path) == "delete"
 
 
 def test_data_verb_create():
-    path = [_edge("add task")]
+    path = [_data_edge("add task")]
     assert _classify_data_verb(path) == "create"
 
 
 def test_data_verb_update():
-    path = [_edge("update task")]
+    path = [_data_edge("update task")]
     assert _classify_data_verb(path) == "update"
 
 
 def test_data_verb_save():
-    path = [_edge("save changes")]
+    path = [_data_edge("save changes")]
     assert _classify_data_verb(path) == "update"
 
 
 def test_data_verb_submit_is_create():
-    path = [_edge("submit form")]
+    path = [_data_edge("submit form")]
     assert _classify_data_verb(path) == "create"
 
 
 def test_data_verb_defaults_create_when_unknown():
-    path = [_edge("toggle switch")]
+    path = [_data_edge("toggle switch")]
     assert _classify_data_verb(path) == "create"
 
 

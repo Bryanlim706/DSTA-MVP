@@ -16,9 +16,9 @@ import re
 
 import anthropic
 
-from pipeline.utils import _classify_edge_kind
-
 MODEL = "claude-haiku-4-5-20251001"
+
+_STRUCTURAL_ELEMENT_KEYWORDS = frozenset(["filter", "search", "sort", "drag", "drop", "reorder"])
 
 _CREATE_KEYWORDS = frozenset(["create", "add", "new", "insert", "register", "submit", "upload"])
 _UPDATE_KEYWORDS = frozenset(["update", "edit", "change", "save", "modify", "rename", "set"])
@@ -55,15 +55,16 @@ Return JSON only — no markdown fences."""
 
 def _classify_goal_kind(path: list[dict]) -> str:
     """Precedence: data > structural > navigation > presence."""
-    edges = [e for e in path if e.get("type") == "edge"]
-    for edge in edges:
-        if _classify_edge_kind(edge.get("label", "")) == "data":
+    for e in path:
+        if e.get("type") == "data_edge":
             return "data"
-    for edge in edges:
-        if _classify_edge_kind(edge.get("label", "")) == "structural":
-            return "structural"
-    for edge in edges:
-        if _classify_edge_kind(edge.get("label", "")) == "navigation":
+    for e in path:
+        if e.get("type") == "element":
+            words = set(re.findall(r"\b\w+\b", e.get("label", "").lower()))
+            if words & _STRUCTURAL_ELEMENT_KEYWORDS:
+                return "structural"
+    for e in path:
+        if e.get("type") == "navigation_edge":
             return "navigation"
     return "presence"
 
@@ -71,7 +72,7 @@ def _classify_goal_kind(path: list[dict]) -> str:
 def _classify_data_verb(path: list[dict]) -> str:
     """Sub-classify data goal as create / update / delete."""
     for entity in path:
-        if entity.get("type") == "edge":
+        if entity.get("type") == "data_edge":
             words = set(re.findall(r"\b\w+\b", entity.get("label", "").lower()))
             if words & _DELETE_KEYWORDS:
                 return "delete"

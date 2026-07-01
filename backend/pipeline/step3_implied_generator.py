@@ -78,22 +78,28 @@ category: "inf"
 
 PATH CONSTRUCTION RULES (both passes):
 
+Entity types:
+  node            — a page or screen
+  element         — a UI control within a page: button, input, form, filter input, search bar, sort control. Structural interactions (filter, search, sort, drag) are always element — never navigation_edge.
+  navigation_edge — a user-initiated page transition ("go to", "open", "navigate to")
+  data_edge       — a user-initiated backend mutation ("submit", "save", "delete", "create")
+
 PRIMARY flag — one rule for all functions:
-- element, edge → always primary: true
+- element, navigation_edge, data_edge → always primary: true
 - node → always primary: false
 - Exception: if the function has no element or edge (sole purpose is asserting a page exists), the node is primary: true
 
 Page scope — two cases:
 
 A. EXISTING PAGE (page already in Step 1):
-   node (primary: false) → element(s) (primary: true) → submit edge if applicable (primary: true)
+   node (primary: false) → element(s) (primary: true) → data_edge if applicable (primary: true)
    Do NOT add entry or exit navigation edges — navigation to/from existing pages is already covered by stated and obvious functions.
 
 B. NEW PAGE (page not in Step 1):
-   entry edge (primary: true, from: existing stated page) → new page node (primary: false) → body elements (primary: true) → exit edge (primary: true, to: existing stated page)
-   The entry edge must reference a real existing stated page — never null, never fabricated.
+   navigation_edge (primary: true, from: existing stated page) → new page node (primary: false) → body elements (primary: true) → navigation_edge (primary: true, to: existing stated page)
+   The entry navigation_edge must reference a real existing stated page — never null, never fabricated.
 
-State-variant or result-state trailing entities: OMIT entirely. Path terminates at the last interaction element or submit edge — never at a post-interaction result state (no "Filtered List", no "Page (updated)").
+State-variant or result-state trailing entities: OMIT entirely. Path terminates at the last interaction element or edge — never at a post-interaction result state (no "Filtered List", no "Page (updated)").
 
 ---
 
@@ -102,9 +108,9 @@ OUTPUT SCHEMA — emit ONLY these fields. req_id, source, tag, placement, streng
 [{
   "description": "User can [action]",
   "path": [
-    {"type": "node",    "label": "Task Page",   "primary": false},
-    {"type": "element", "label": "merge button", "primary": true,  "ui_node": "Task Page"},
-    {"type": "edge",    "label": "submit merge", "primary": true,  "from": "Task Page", "to": "Task Page"}
+    {"type": "node",      "label": "Task Page",   "primary": false},
+    {"type": "element",   "label": "merge button", "primary": true,  "ui_node": "Task Page"},
+    {"type": "data_edge", "label": "submit merge", "primary": true,  "from": "Task Page", "to": "Task Page"}
   ],
   "category": "sop",
   "confidence_score": 0.88,
@@ -304,14 +310,14 @@ DEDUP_SYSTEM_PROMPT = """You are a deduplication filter for generated requiremen
 
 For EACH generated function output "keep" or "drop".
 
-DROP it if ANY holds:
-1. SAME CAPABILITY as a STATED or OBVIOUS function — judged by meaning, not words. Ignore verb synonyms (edit = update = modify, delete = remove, view = see = browse) and location/container phrasing ("on a page", "from the detail page", "in a modal", "via a form"). "Navigate to X section" equals an obvious "navigate to X page".
+CRITICAL: Generated functions exist precisely to identify capabilities NOT in the stated requirements. "Not in stated requirements" is a KEEP signal, not a drop reason. Only drop when there is genuine semantic overlap with something already listed.
+
+DROP it ONLY if:
+1. SAME CAPABILITY as a STATED or OBVIOUS function — judged by meaning, not words. Ignore verb synonyms (edit = update = modify, delete = remove, view = see = browse) and location/container phrasing ("on a page", "from the detail page", "in a modal", "via a form"). "Navigate to X section" equals an obvious "navigate to X page". A refinement of a capability (filter/search/sort) is NOT the same capability as the base list view — "view all products" and "filter products" are distinct.
 2. PART OF a stated/obvious function's flow — opening, filling, or submitting a form, confirming, cancelling, or navigating back are STEPS, not standalone functions. If "add employee" is stated, "submit employee form" is a step of it — drop.
 3. REDUNDANT with another GENERATED function — keep the single clearest one, drop the rest.
 
-Drop repeated requirements; keep unique ones.
-
-KEEP it only if it adds a genuinely new, independent capability not covered by, and not a sub-step of, any stated/obvious function or any generated function you keep. When two features are genuinely distinct (e.g. an attendance report vs a payroll report), keep both.
+KEEP anything that adds a genuinely new, independent capability — even if the app does not currently implement it and even if it seems unlikely. The purpose of this pass is to surface coverage gaps, not to validate what exists. When two features are genuinely distinct (e.g. an attendance report vs a payroll report), keep both.
 
 Output ONLY a JSON array, one object per generated function in the same order:
 [{"id": "GEN-001", "decision": "keep", "duplicate_of": null, "reason": "<short>"}]

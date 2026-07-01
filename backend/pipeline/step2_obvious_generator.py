@@ -24,7 +24,7 @@ From the stated functions, collect every unique page/screen label from path enti
 CHECK 2 — ENTRY PATHS (how does the user GET to each node?)
 
 For each node EXCEPT the root/home page:
-Does any stated function's path contain an edge (type: "edge") whose "to" field names this node?
+Does any stated function's path contain a navigation_edge whose "to" field names this node?
 → YES: skip — entry already stated
 → NO: generate a navigation function
 
@@ -32,7 +32,7 @@ Navigation function for CHECK 2:
 {
   "description": "User can navigate to [Node]",
   "path": [
-    {"type": "edge", "label": "navigation link", "primary": true, "from": null, "to": "[Node]"},
+    {"type": "navigation_edge", "label": "navigation link", "primary": true, "from": null, "to": "[Node]"},
     {"type": "node", "label": "[Node]", "primary": false}
   ],
   "reasoning": "CHECK 2 — [Node] has no stated inbound navigation"
@@ -48,7 +48,7 @@ STRICT FORMAT RULES for CHECK 2:
 CHECK 3 — EXIT PATHS (how does the user LEAVE each node?)
 
 For each node:
-Does any stated function's path contain an edge (type: "edge") whose "from" field names this node?
+Does any stated function's path contain a navigation_edge whose "from" field names this node?
 → YES: skip
 → NO: generate a navigation function
 
@@ -57,7 +57,7 @@ Navigation function for CHECK 3:
   "description": "User can leave [Node]",
   "path": [
     {"type": "node", "label": "[Node]", "primary": false},
-    {"type": "edge", "label": "exit path", "primary": true, "from": "[Node]", "to": null}
+    {"type": "navigation_edge", "label": "exit path", "primary": true, "from": "[Node]", "to": null}
   ],
   "reasoning": "CHECK 3 — [Node] has no stated exit path"
 }
@@ -90,7 +90,7 @@ Output ONLY a JSON array (no markdown fences, no preamble):
   "req_id": "OBV-001",
   "description": "User can navigate to Profile Page",
   "path": [
-    {"type": "edge", "label": "navigation link", "primary": true, "from": null, "to": "Profile Page"},
+    {"type": "navigation_edge", "label": "navigation link", "primary": true, "from": null, "to": "Profile Page"},
     {"type": "node", "label": "Profile Page", "primary": false}
   ],
   "source": "obvious",
@@ -105,11 +105,11 @@ Output ONLY a JSON array (no markdown fences, no preamble):
 
 
 def _extract_edges_from_paths(step1_requirements: list) -> list[dict]:
-    """Return all edge entities from Step 1 function paths."""
+    """Return all navigation_edge entities from Step 1 function paths."""
     edges = []
     for func in step1_requirements:
         for entity in func.get("path", []):
-            if entity.get("type") == "edge":
+            if entity.get("type") == "navigation_edge":
                 edges.append(entity)
     return edges
 
@@ -234,10 +234,10 @@ def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list
         for entity in path:
             if not isinstance(entity, dict):
                 continue
-            if entity.get("type") not in {"node", "element", "edge"}:
+            if entity.get("type") not in {"node", "element", "navigation_edge", "data_edge"}:
                 continue
             # Default primary: edges are primary, nodes are context in nav functions
-            entity.setdefault("primary", entity.get("type") == "edge")
+            entity.setdefault("primary", entity.get("type") in {"navigation_edge", "data_edge"})
             clean_path.append(entity)
         if not clean_path:
             dropped += 1
@@ -249,17 +249,17 @@ def _validate_and_normalise(items: list, step1_requirements: list) -> tuple[list
         is_check3 = reasoning_up.startswith("CHECK 3")
         if is_check2:
             # Entry gap: source unknown → from must be null; rebuild description from destination
-            dest_node = next((e.get("to") for e in clean_path if e.get("type") == "edge" and e.get("to")), None)
+            dest_node = next((e.get("to") for e in clean_path if e.get("type") == "navigation_edge" and e.get("to")), None)
             for entity in clean_path:
-                if entity.get("type") == "edge":
+                if entity.get("type") == "navigation_edge":
                     entity["from"] = None
             if dest_node:
                 desc = f"User can navigate to {dest_node}"
         elif is_check3:
             # Exit gap: destination unknown → to must be null; rebuild description from source
-            src_node = next((e.get("from") for e in clean_path if e.get("type") == "edge" and e.get("from")), None)
+            src_node = next((e.get("from") for e in clean_path if e.get("type") == "navigation_edge" and e.get("from")), None)
             for entity in clean_path:
-                if entity.get("type") == "edge":
+                if entity.get("type") == "navigation_edge":
                     entity["to"] = None
             if src_node:
                 desc = f"User can leave {src_node}"

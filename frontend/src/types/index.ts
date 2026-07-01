@@ -21,7 +21,7 @@ export interface Step0Result {
 }
 
 export interface PathEntity {
-  type: 'node' | 'element' | 'edge'
+  type: 'node' | 'element' | 'navigation_edge' | 'data_edge'
   label: string
   primary: boolean
   ui_node?: string
@@ -213,7 +213,7 @@ export interface Step5ElementDetail {
 
 export interface EntityScore {
   label: string
-  type: 'node' | 'element' | 'edge'
+  type: 'node' | 'element' | 'navigation_edge' | 'data_edge'
   primary: boolean
   e: number | null
   evidence?: string
@@ -222,7 +222,6 @@ export interface EntityScore {
   matched_selector?: string | null
   match_source?: string | null
   step5_element?: Step5ElementDetail | null
-  edge_kind?: 'data' | 'navigation' | 'structural'
   matched_endpoint?: string | null
   trigger_element_label?: string | null
   matched_nav_target?: string | null

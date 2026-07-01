@@ -1,13 +1,14 @@
 import type { PathEntity } from '../types'
 
 const ENTITY_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  node:    { bg: 'bg-sky-50',    text: 'text-sky-700',    label: 'page' },
-  element: { bg: 'bg-violet-50', text: 'text-violet-700', label: 'ctrl' },
-  edge:    { bg: 'bg-amber-50',  text: 'text-amber-700',  label: 'nav'  },
+  node:            { bg: 'bg-sky-50',    text: 'text-sky-700',    label: 'page'   },
+  element:         { bg: 'bg-violet-50', text: 'text-violet-700', label: 'ctrl'   },
+  navigation_edge: { bg: 'bg-amber-50',  text: 'text-amber-700',  label: 'nav'    },
+  data_edge:       { bg: 'bg-orange-50', text: 'text-orange-700', label: 'action' },
 }
 
 function entityDetail(entity: PathEntity): string {
-  if (entity.type === 'edge') {
+  if (entity.type === 'navigation_edge' || entity.type === 'data_edge') {
     const from = entity.from ?? '?'
     const to   = entity.to   ?? '?'
     if (from === 'null' || from === '?') return `→ ${to}`

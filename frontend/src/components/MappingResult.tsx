@@ -7,15 +7,10 @@ interface Props {
 }
 
 const TYPE_STYLES: Record<string, string> = {
-  node: 'bg-sky-100 text-sky-700',
-  element: 'bg-violet-100 text-violet-700',
-  edge: 'bg-amber-100 text-amber-700',
-}
-
-const EDGE_KIND_STYLES: Record<string, string> = {
-  data: 'bg-red-100 text-red-700',
-  navigation: 'bg-green-100 text-green-700',
-  structural: 'bg-blue-100 text-blue-700',
+  node:            'bg-sky-100 text-sky-700',
+  element:         'bg-violet-100 text-violet-700',
+  navigation_edge: 'bg-amber-100 text-amber-700',
+  data_edge:       'bg-orange-100 text-orange-700',
 }
 
 function eColor(e: number): string {
@@ -32,7 +27,6 @@ function eBarColor(e: number): string {
 
 function EntityRow({ es }: { es: EntityScore }) {
   const typeStyle = TYPE_STYLES[es.type] ?? 'bg-gray-100 text-gray-700'
-  const ekStyle = es.edge_kind ? EDGE_KIND_STYLES[es.edge_kind] ?? '' : ''
   const opacity = es.primary ? '' : 'opacity-50'
   const eVal = es.e ?? 0
 
@@ -40,9 +34,8 @@ function EntityRow({ es }: { es: EntityScore }) {
   if (!evidence) {
     if (es.type === 'node' && es.matched_route) evidence = es.matched_route
     else if (es.type === 'element' && es.matched_element_label) evidence = es.matched_element_label + (es.matched_selector ? ` · ${es.matched_selector}` : '')
-    else if (es.type === 'edge' && es.edge_kind === 'data' && es.matched_endpoint) evidence = es.matched_endpoint
-    else if (es.type === 'edge' && es.edge_kind === 'navigation' && es.matched_nav_target) evidence = `→ ${es.matched_nav_target}`
-    else if (es.type === 'edge' && (es.edge_kind === 'structural') && es.trigger_element_label) evidence = es.trigger_element_label
+    else if (es.type === 'data_edge' && es.matched_endpoint) evidence = es.matched_endpoint
+    else if (es.type === 'navigation_edge' && es.matched_nav_target) evidence = `→ ${es.matched_nav_target}`
   }
 
   return (
@@ -50,11 +43,6 @@ function EntityRow({ es }: { es: EntityScore }) {
       <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${typeStyle}`}>
         {es.type}
       </span>
-      {es.edge_kind && (
-        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${ekStyle}`}>
-          {es.edge_kind}
-        </span>
-      )}
       {!es.primary && (
         <span className="inline-block px-1.5 py-0.5 rounded text-[10px] bg-gray-100 text-gray-500">sec</span>
       )}

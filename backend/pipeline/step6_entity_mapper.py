@@ -4,7 +4,6 @@ import re
 
 import anthropic
 
-from pipeline.utils import _classify_edge_kind  # noqa: F401 — re-exported for callers
 
 MODEL = "claude-haiku-4-5-20251001"
 
@@ -22,24 +21,20 @@ node:
 element:
   {"entity_index": N, "type": "element", "matched_element_label": "label" | null, "match_source": "playwright" | "route_elements" | null}
 
-edge with edge_kind "data":
-  {"entity_index": N, "type": "edge", "edge_kind": "data", "matched_endpoint": "METHOD /path" | null, "trigger_element_label": "label" | null}
+data_edge:
+  {"entity_index": N, "type": "data_edge", "matched_endpoint": "METHOD /path" | null, "trigger_element_label": "label" | null}
 
-edge with edge_kind "navigation":
-  {"entity_index": N, "type": "edge", "edge_kind": "navigation", "matched_nav_target": "/path" | null, "match_source": "playwright_element" | "navigation_graph" | null}
-
-edge with edge_kind "structural":
-  {"entity_index": N, "type": "edge", "edge_kind": "structural", "trigger_element_label": "label" | null, "match_source": "playwright" | "route_elements" | null}
+navigation_edge:
+  {"entity_index": N, "type": "navigation_edge", "matched_nav_target": "/path" | null, "match_source": "playwright_element" | "navigation_graph" | null}
 
 Matching rules:
 1. Default to null. Match only when you are confident the inventory item represents the same UI element as the path entity. A single shared generic noun (product, user, item, task, order, name) is NOT sufficient — require meaningful semantic equivalence: same type of UI control AND same purpose.
 2. node: Match the label to a route path using BOTH the route path AND its element content listed under "Available routes". Route paths are technical names; requirement labels are human-facing names that often differ significantly. Use element content as the primary evidence when route names are ambiguous. Examples: "Employee List Page" → "/search" if that route has employee-filter inputs; "Product Detail" → "/products/:id" (dynamic); "Home" → "/"; "Login Page" → "/login". Prefer the route whose element content best matches the expected page over a literal name match.
 3. element: after resolving a nearby node entity, find that route's element in the inventory. Match only when the entity label and the inventory label describe the same UI control — same type (input, button, select) and same purpose. A search input is not a submit button. A navigation link is not a form field.
-4. edge/data: match to implementation_units using the edge label to infer HTTP verb (submit/add/create → POST, delete/remove → DELETE, update/edit/save → PATCH or PUT). Return "METHOD /path" format.
-5. edge/navigation: check if a rendered link or button in the element inventory navigates to a matching target route → "playwright_element"; otherwise check the static navigation_graph → "navigation_graph".
-6. edge/structural: find a triggering element (filter input, search box, sort button, etc.) in the element inventory. Copy the inventory source into match_source.
-7. Always output exactly N objects, one per entity, maintaining index order.
-8. Display-only entities — statistics panels, count badges, summary info, read-only text, charts, progress indicators, data tables showing fetched content — have no interactive counterpart in the element inventory. Return null for these. Never match a display entity to a navigation link, button, or form input just because they share a word."""
+4. data_edge: match to implementation_units using the edge label to infer HTTP verb (submit/add/create → POST, delete/remove → DELETE, update/edit/save → PATCH or PUT). Return "METHOD /path" format.
+5. navigation_edge: check if a rendered link or button in the element inventory navigates to a matching target route → "playwright_element"; otherwise check the static navigation_graph → "navigation_graph".
+6. Always output exactly N objects, one per entity, maintaining index order.
+7. Display-only entities — statistics panels, count badges, summary info, read-only text, charts, progress indicators, data tables showing fetched content — have no interactive counterpart in the element inventory. Return null for these. Never match a display entity to a navigation link, button, or form input just because they share a word."""
 
 
 
@@ -204,11 +199,7 @@ def _build_grounding_user_message(
         etype = entity.get("type", "")
         label = entity.get("label", "")
         primary = "primary" if entity.get("primary", True) else "secondary"
-        if etype == "edge":
-            ek = _classify_edge_kind(label)
-            lines.append(f'[{i}] type: edge, edge_kind: {ek}, label: "{label}", {primary}')
-        else:
-            lines.append(f'[{i}] type: {etype}, label: "{label}", {primary}')
+        lines.append(f'[{i}] type: {etype}, label: "{label}", {primary}')
 
     route_paths = [r.get("path", "") if isinstance(r, dict) else str(r) for r in frontend_routes]
     dynamic_routes = {
@@ -253,10 +244,7 @@ def _build_grounding_user_message(
     if not shown_any:
         lines.append("  (no elements in inventory for candidate routes)")
 
-    has_data = any(
-        e.get("type") == "edge" and _classify_edge_kind(e.get("label", "")) == "data"
-        for e in path
-    )
+    has_data = any(e.get("type") == "data_edge" for e in path)
     if has_data or not path:
         lines.append("")
         lines.append("Implementation units (backend endpoints):")
@@ -270,10 +258,7 @@ def _build_grounding_user_message(
         else:
             lines.append("  (none detected)")
 
-    has_nav = any(
-        e.get("type") == "edge" and _classify_edge_kind(e.get("label", "")) == "navigation"
-        for e in path
-    )
+    has_nav = any(e.get("type") == "navigation_edge" for e in path)
     if has_nav or not path:
         lines.append("")
         lines.append("Navigation targets (from candidate routes):")
@@ -478,47 +463,31 @@ def _score_entity(entity: dict, grounding: dict, page_inventory: dict) -> tuple[
         else:
             e = 0.0
 
-    elif etype == "edge":
-        edge_kind = _classify_edge_kind(entity.get("label", ""))
-        extra["edge_kind"] = edge_kind
+    elif etype == "data_edge":
+        matched_ep = grounding.get("matched_endpoint")
+        trigger = grounding.get("trigger_element_label")
+        extra["matched_endpoint"] = matched_ep
+        extra["trigger_element_label"] = trigger
+        if matched_ep and trigger:
+            e = 1.0
+        elif matched_ep:
+            e = 0.75  # endpoint confirmed in source; trigger not live-confirmed (backend-data gap)
+        elif trigger:
+            e = 0.4
+        else:
+            e = 0.0
 
-        if edge_kind == "data":
-            matched_ep = grounding.get("matched_endpoint")
-            trigger = grounding.get("trigger_element_label")
-            extra["matched_endpoint"] = matched_ep
-            extra["trigger_element_label"] = trigger
-            if matched_ep and trigger:
-                e = 1.0
-            elif matched_ep:
-                e = 0.75  # endpoint confirmed in source; trigger not live-confirmed (backend-data gap)
-            elif trigger:
-                e = 0.4
-            else:
-                e = 0.0
-
-        elif edge_kind == "navigation":
-            nav_target = grounding.get("matched_nav_target")
-            match_source = grounding.get("match_source")
-            extra["matched_nav_target"] = nav_target
-            extra["match_source"] = match_source
-            if match_source == "playwright_element":
-                e = 1.0
-            elif match_source == "navigation_graph":
-                e = 0.75  # L3 nav link confirmed in source; not live-confirmed (backend-data gap)
-            else:
-                e = 0.0
-
-        else:  # structural
-            trigger = grounding.get("trigger_element_label")
-            match_source = grounding.get("match_source")
-            extra["trigger_element_label"] = trigger
-            extra["match_source"] = match_source
-            if match_source == "playwright":
-                e = 1.0
-            elif match_source == "route_elements":
-                e = 0.75  # L3 confirmed in source; L2 gap often caused by backend-data rendering
-            else:
-                e = 0.0
+    elif etype == "navigation_edge":
+        nav_target = grounding.get("matched_nav_target")
+        match_source = grounding.get("match_source")
+        extra["matched_nav_target"] = nav_target
+        extra["match_source"] = match_source
+        if match_source == "playwright_element":
+            e = 1.0
+        elif match_source == "navigation_graph":
+            e = 0.75  # L3 nav link confirmed in source; not live-confirmed (backend-data gap)
+        else:
+            e = 0.0
 
     else:
         e = 0.0
@@ -570,7 +539,7 @@ def _compute_unlinked(
     for m in mapped:
         if m["req_id"] in l1a_ids:
             for es in m.get("entity_scores", []):
-                if es.get("type") == "edge" and es.get("edge_kind") == "data":
+                if es.get("type") == "data_edge":
                     ep = es.get("matched_endpoint")
                     if ep:
                         matched_endpoints.add(ep)

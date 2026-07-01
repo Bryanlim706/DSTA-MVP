@@ -64,19 +64,20 @@ PATH CONSTRUCTION
 Each function includes a path: an ordered list of UI entities the user traverses to complete the goal.
 
 Entity types:
-  node    — a page or screen ("Login Page", "Dashboard", "Task Detail")
-  element — a UI control, form, button, or input within a specific page
-  edge    — a navigation action between two pages
+  node            — a page or screen ("Login Page", "Dashboard", "Task Detail")
+  element         — a UI control within a page: button, input, form, table, filter input, search bar, sort control. Structural interactions (filter, search, sort, drag) that change page content without navigating away are always element — never navigation_edge.
+  navigation_edge — a user-initiated page transition ("go to cart", "open details", "navigate to profile")
+  data_edge       — a user-initiated mutation sent to the backend ("submit credentials", "save changes", "delete task", "create account")
 
 Fields per entity:
-  type     — "node" | "element" | "edge"
+  type     — "node" | "element" | "navigation_edge" | "data_edge"
   label    — short human-readable name
   primary  — true if this entity is what the function is fundamentally asserting; false if it is context
-  ui_node  — (elements only) the containing page name
-  from/to  — (edges only) source and destination page names
+  ui_node  — (element only) the containing page name
+  from/to  — (navigation_edge, data_edge) source and destination page names
 
 PRIMARY ENTITY RULES:
-- element, edge → always primary: true. These are what the function asserts.
+- element, navigation_edge, data_edge → always primary: true. These are what the function asserts.
 - node → always primary: false. Pages are traversal context, not assertions.
 - Exception: if the function has no element or edge (sole purpose is asserting a page exists), the node is primary: true.
 - State-variant nodes ("Task List Page (filtered)", "Task List Page (updated)"): OMIT entirely — they are not scored. End the path at the last interaction element or edge.
@@ -88,26 +89,26 @@ A markdown section heading (`###`) immediately followed by a screenshot image (`
 
 PATH EXAMPLES
 
-"Users should be able to log in" — elements and edge are primary; pages are context:
+"Users should be able to log in" — elements and edges are primary; pages are context:
 path: [
-  {"type": "node",    "label": "Login Page",         "primary": false},
-  {"type": "element", "label": "login form",         "primary": true, "ui_node": "Login Page"},
-  {"type": "edge",    "label": "submit credentials", "primary": true, "from": "Login Page", "to": "Dashboard"},
-  {"type": "node",    "label": "Dashboard",          "primary": false}
+  {"type": "node",      "label": "Login Page",         "primary": false},
+  {"type": "element",   "label": "login form",         "primary": true, "ui_node": "Login Page"},
+  {"type": "data_edge", "label": "submit credentials", "primary": true, "from": "Login Page", "to": "Dashboard"},
+  {"type": "node",      "label": "Dashboard",          "primary": false}
 ]
 
 "The add-task button opens a form to create a new task" — same rule:
 path: [
-  {"type": "node",    "label": "Task List Page", "primary": false},
-  {"type": "element", "label": "add task form",  "primary": true, "ui_node": "Task List Page"},
-  {"type": "edge",    "label": "submit new task", "primary": true, "from": "Task List Page", "to": "Task List Page"}
+  {"type": "node",      "label": "Task List Page", "primary": false},
+  {"type": "element",   "label": "add task form",  "primary": true, "ui_node": "Task List Page"},
+  {"type": "data_edge", "label": "submit new task", "primary": true, "from": "Task List Page", "to": "Task List Page"}
 ]
 
 "Users can manage their tasks" — decompose first, one function per sub-action (all share the same source_quote):
   "User can view tasks"   → path: [node: Task List Page (false), element: task list (true)]
-  "User can add a task"   → path: [node: Task List Page (false), element: add task form (true), edge: submit new task (true)]
-  "User can edit a task"  → path: [node: Task List Page (false), element: edit task form (true), edge: save changes (true)]
-  "User can delete a task"→ path: [node: Task List Page (false), element: delete button (true), edge: confirm delete (true)]
+  "User can add a task"   → path: [node: Task List Page (false), element: add task form (true), data_edge: submit new task (true)]
+  "User can edit a task"  → path: [node: Task List Page (false), element: edit task form (true), data_edge: save changes (true)]
+  "User can delete a task"→ path: [node: Task List Page (false), element: delete button (true), data_edge: confirm delete (true)]
 
 ---
 
@@ -131,10 +132,10 @@ Return ONLY a valid JSON object (no markdown fences, no explanation):
     "req_id": "REQ-001",
     "description": "User can log in",
     "path": [
-      {"type": "node",    "label": "Login Page",         "primary": true},
-      {"type": "element", "label": "login form",         "primary": true, "ui_node": "Login Page"},
-      {"type": "edge",    "label": "submit credentials", "primary": true, "from": "Login Page", "to": "Dashboard"},
-      {"type": "node",    "label": "Dashboard",          "primary": true}
+      {"type": "node",      "label": "Login Page",         "primary": false},
+      {"type": "element",   "label": "login form",         "primary": true, "ui_node": "Login Page"},
+      {"type": "data_edge", "label": "submit credentials", "primary": true, "from": "Login Page", "to": "Dashboard"},
+      {"type": "node",      "label": "Dashboard",          "primary": false}
     ],
     "source": "README.md",
     "source_quote": "users should be able to log in",

@@ -19,7 +19,7 @@ def test_depends_on_filters_invalid_ids():
             "depends_on": ["REQ-002", "REQ-999"],
             "priority": "high",
             "functional_area": "navigation",
-            "path": [{"type": "edge", "label": "navigate to task list", "from": "home", "to": "Task List", "primary": True}],
+            "path": [{"type": "navigation_edge", "label": "navigate to task list", "from": "home", "to": "Task List", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1)
@@ -35,7 +35,7 @@ def test_depends_on_empty_list_when_none_provided():
             "reasoning": "CHECK 3 -- login has no exit path",
             "priority": "medium",
             "functional_area": "navigation",
-            "path": [{"type": "edge", "label": "exit login", "from": "Login", "to": "home", "primary": True}],
+            "path": [{"type": "navigation_edge", "label": "exit login", "from": "Login", "to": "home", "primary": True}],
         }
     ]
     valid, dropped = _validate_and_normalise(items, STEP1)
@@ -122,14 +122,14 @@ def test_check2_and_check3_kept():
             "reasoning": "CHECK 2 — Settings page has no stated inbound navigation element.",
             "depends_on": ["REQ-001"],
             "priority": "critical",
-            "path": [{"type": "edge", "label": "nav to settings", "from": "home", "to": "Settings", "primary": True}],
+            "path": [{"type": "navigation_edge", "label": "nav to settings", "from": "home", "to": "Settings", "primary": True}],
         },
         {
             "description": "System must provide a way to leave the Settings page.",
             "reasoning": "CHECK 3 — Settings page has no stated exit path.",
             "depends_on": [],
             "priority": "high",
-            "path": [{"type": "edge", "label": "exit settings", "from": "Settings", "to": "home", "primary": True}],
+            "path": [{"type": "navigation_edge", "label": "exit settings", "from": "Settings", "to": "home", "primary": True}],
         },
     ]
     valid, dropped = _validate_and_normalise(items, STEP1)
