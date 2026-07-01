@@ -1,3 +1,5 @@
+import asyncio
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -8,9 +10,67 @@ from pydantic import BaseModel
 import anthropic
 
 from pipeline import step4_repo_parser, step5_app_crawler, step6_entity_mapper, step7_scorer, step7_5_fa_advisor, task_registry
+from pipeline.utils import _validate_path
 from storage.job_store import add_step_result, get_job, is_terminated, update_job
 
 router = APIRouter()
+
+_CUSTOM_PATH_SYSTEM = """Generate a path — an ordered list of UI entities — for a single user function description ("User can [action]").
+
+Entity types:
+  node    — a page or screen ("Login Page", "Dashboard", "Products")
+  element — a UI control, form, button, or input within a page
+  edge    — a navigation or data action between states
+
+Fields:
+  type     — "node" | "element" | "edge"
+  label    — short human-readable name
+  primary  — true if this entity is what the function asserts; false if it is traversal context
+  ui_node  — (elements only) the page that contains this element
+  from     — (edges only) source page name
+  to       — (edges only) destination page name
+
+PRIMARY RULES:
+- element, edge → always primary: true (these are the scored assertions)
+- node → always primary: false (context only)
+- Exception: if the only purpose is asserting a page exists (view / access / browse with no action), set the node primary: true and include no element or edge
+
+Examples:
+"User can log in" →
+[{"type":"node","label":"Login Page","primary":false},{"type":"element","label":"login form","primary":true,"ui_node":"Login Page"},{"type":"edge","label":"submit credentials","primary":true,"from":"Login Page","to":"Dashboard"}]
+
+"User can delete a product" →
+[{"type":"node","label":"Products","primary":false},{"type":"element","label":"delete button","primary":true,"ui_node":"Products"},{"type":"edge","label":"delete","primary":true,"from":"Products","to":"Products"}]
+
+"User can filter tasks by status" →
+[{"type":"node","label":"Tasks","primary":false},{"type":"element","label":"status filter","primary":true,"ui_node":"Tasks"}]
+
+"User can view the dashboard" →
+[{"type":"node","label":"Dashboard","primary":true}]
+
+Return ONLY a valid JSON array. No markdown fences, no explanation."""
+
+
+async def _generate_custom_path(description: str, client: anthropic.AsyncAnthropic) -> list[dict]:
+    try:
+        response = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=512,
+            system=_CUSTOM_PATH_SYSTEM,
+            messages=[{"role": "user", "content": description}],
+        )
+        text = response.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```", 1)[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.split("```")[0]
+        parsed = json.loads(text)
+        if not isinstance(parsed, list):
+            return []
+        return _validate_path(parsed) or []
+    except Exception:
+        return []
 
 STEP0_CONTEXT_FIELDS = (
     "project_type", "frontend_framework", "frontend_tooling", "backend_framework",
@@ -209,6 +269,23 @@ async def confirm_requirements(
         if d.get("source_quote") is None:
             d["source_quote"] = original.get("source_quote")
         req_dicts.append(d)
+
+    # Generate real path entities for custom requirements (replace the TBD placeholder)
+    custom_indices = [
+        i for i, d in enumerate(req_dicts)
+        if d["req_id"].startswith("CUSTOM-")
+        and len(d.get("path", [])) == 1
+        and d["path"][0].get("label") == "TBD"
+    ]
+    if custom_indices:
+        llm_client = anthropic.AsyncAnthropic()
+        generated_paths = await asyncio.gather(
+            *[_generate_custom_path(req_dicts[i]["description"], llm_client) for i in custom_indices],
+            return_exceptions=True,
+        )
+        for i, result in zip(custom_indices, generated_paths):
+            if isinstance(result, list) and result:
+                req_dicts[i]["path"] = result
 
     step1_ids = {r["req_id"] for r in step1.get("requirements", [])}
     step2_ids = {r["req_id"] for r in step2.get("requirements", [])}

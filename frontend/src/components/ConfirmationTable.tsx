@@ -8,18 +8,6 @@ const WEIGHT_MAP: Record<string, number> = {
 
 const PRIORITY_OPTS = ['critical', 'high', 'medium', 'low'] as const
 
-const TAG_STYLES: Record<string, string> = {
-  stated:    'bg-green-100 text-green-700',
-  obvious:   'bg-blue-100 text-blue-700',
-  generated: 'bg-purple-100 text-purple-700',
-  custom:    'bg-orange-100 text-orange-700',
-}
-
-const STRENGTH_STYLES: Record<string, string> = {
-  strongly_implied: 'bg-yellow-100 text-yellow-700',
-  medium:           'bg-gray-100 text-gray-600',
-  weak:             'bg-gray-100 text-gray-400',
-}
 
 interface Props {
   job: Job
@@ -102,7 +90,7 @@ function IncludedRow({
           </select>
         </td>
         <td className="px-4 py-2 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-          {isL1aGen && onDemote && (
+          {(isL1aGen || req.tag === 'custom') && onDemote && (
             <button
               onClick={() => onDemote(req.req_id)}
               title="demote to advisory only"
@@ -147,11 +135,12 @@ function AdvisoryRow({
   req,
   onPromote,
 }: {
-  req: Step3Requirement
+  req: Step3Requirement | ConfirmedRequirement
   onPromote: (id: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const confPct = Math.round(req.confidence_score * 100)
+  const isCustom = req.tag === 'custom'
+  const s3 = isCustom ? null : (req as Step3Requirement)
 
   return (
     <>
@@ -159,11 +148,17 @@ function AdvisoryRow({
         <td className="px-4 py-2 text-xs font-mono text-gray-400 whitespace-nowrap">{req.req_id}</td>
         <td className="px-4 py-2 text-sm text-gray-700 max-w-xs">{req.description}</td>
         <td className="px-4 py-2">
-          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${req.category === 'sop' ? 'bg-blue-50 text-blue-500' : 'bg-purple-50 text-purple-500'}`}>
-            {req.category.toUpperCase()}
-          </span>
+          {isCustom ? (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-50 text-orange-500">CUSTOM</span>
+          ) : (
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${s3!.category === 'sop' ? 'bg-blue-50 text-blue-500' : 'bg-purple-50 text-purple-500'}`}>
+              {s3!.category.toUpperCase()}
+            </span>
+          )}
         </td>
-        <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{confPct}%</td>
+        <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">
+          {isCustom ? '—' : `${Math.round(s3!.confidence_score * 100)}%`}
+        </td>
         <td className="px-4 py-2 text-right" onClick={e => e.stopPropagation()}>
           <button onClick={() => onPromote(req.req_id)} className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap">
             + Promote
@@ -176,9 +171,13 @@ function AdvisoryRow({
           <td colSpan={5} className="px-4 pb-3 pt-1 space-y-1.5">
             <p className="text-xs text-gray-500 font-medium mb-1">Traversal path</p>
             <PathDisplay path={req.path} />
-            <p className="text-xs text-gray-500 font-medium mt-1.5">Reasoning</p>
-            <p className="text-xs text-gray-700 italic">{req.reasoning}</p>
-            <p className="text-xs text-gray-400">{req.confidence_reason}</p>
+            {s3 && (
+              <>
+                <p className="text-xs text-gray-500 font-medium mt-1.5">Reasoning</p>
+                <p className="text-xs text-gray-700 italic">{s3.reasoning}</p>
+                <p className="text-xs text-gray-400">{s3.confidence_reason}</p>
+              </>
+            )}
           </td>
         </tr>
       )}
@@ -202,8 +201,8 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
     return m
   })
 
-  const [advisory, setAdvisory] = useState<Map<string, Step3Requirement>>(() => {
-    const m = new Map<string, Step3Requirement>()
+  const [advisory, setAdvisory] = useState<Map<string, Step3Requirement | ConfirmedRequirement>>(() => {
+    const m = new Map<string, Step3Requirement | ConfirmedRequirement>()
     step3L1b.forEach(r => m.set(r.req_id, r))
     return m
   })
@@ -229,9 +228,14 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
   }
 
   function demoteToAdvisory(reqId: string) {
+    const custom = included.get(reqId)
+    setIncluded(prev => { const next = new Map(prev); next.delete(reqId); return next })
+    if (custom?.tag === 'custom') {
+      setAdvisory(prev => new Map(prev).set(reqId, custom))
+      return
+    }
     const req = step3Reqs.find(r => r.req_id === reqId)
     if (!req) return
-    setIncluded(prev => { const next = new Map(prev); next.delete(reqId); return next })
     setAdvisory(prev => new Map(prev).set(reqId, req))
   }
 
@@ -239,7 +243,11 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
     const req = advisory.get(reqId)
     if (!req) return
     setAdvisory(prev => { const next = new Map(prev); next.delete(reqId); return next })
-    setIncluded(prev => new Map(prev).set(reqId, toConfirmed(req, true)))
+    if (req.tag === 'custom') {
+      setIncluded(prev => new Map(prev).set(reqId, req as ConfirmedRequirement))
+    } else {
+      setIncluded(prev => new Map(prev).set(reqId, toConfirmed(req as Step3Requirement, true)))
+    }
   }
 
   function addCustom() {
@@ -349,7 +357,7 @@ export default function ConfirmationTable({ job, onConfirm }: Props) {
                       isL1aGen={isL1aGen}
                       category={step3Source?.category}
                       onPriority={updatePriority}
-                      onDemote={isL1aGen ? demoteToAdvisory : undefined}
+                      onDemote={(isL1aGen || req.tag === 'custom') ? demoteToAdvisory : undefined}
                       onDelete={deleteFromL1a}
                     />
                   )
