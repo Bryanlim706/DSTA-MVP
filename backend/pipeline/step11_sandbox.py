@@ -675,6 +675,15 @@ export default mergeConfig(base, {{
       '/': {{
         target: '{target}',
         changeOrigin: true,
+        configure: function(proxy, _options) {{
+          proxy.on('proxyReq', function(proxyReq) {{
+            // Strip browser origin/referer so Spring Boot's DefaultCorsProcessor
+            // never sees a cross-origin request — the proxy is the requester here,
+            // not the browser, so CORS enforcement is irrelevant on the server side.
+            proxyReq.removeHeader('origin');
+            proxyReq.removeHeader('referer');
+          }});
+        }},
         bypass: function(req) {{
           var url = req.url.split('?')[0];
           // Let Vite serve its own assets and source files directly.
