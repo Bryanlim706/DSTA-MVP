@@ -33,6 +33,7 @@ def prune_old_jobs() -> None:
 
 def create_job(job_id: str, initial_data: dict) -> dict:
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    prune_old_jobs()
     job = {
         "job_id": job_id,
         "status": "created",
