@@ -7,7 +7,7 @@ import aiofiles
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from pipeline import step0_classifier, step1_req_extractor, step2_obvious_generator, step3_implied_generator, task_registry
-from storage.job_store import add_step_result, create_job, get_job, is_terminated, update_job
+from storage.job_store import add_step_result, create_job, get_job, is_terminated, prune_old_jobs, update_job
 
 router = APIRouter()
 
@@ -55,6 +55,7 @@ async def upload_project(
 
 async def _run_pipeline(job_id: str, zip_path: Path, extract_to: Path, client):
     try:
+        await asyncio.to_thread(prune_old_jobs)
         update_job(job_id, {"status": "running", "current_step": 0})
 
         try:

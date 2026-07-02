@@ -17,7 +17,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _cleanup_old_jobs() -> None:
+def prune_old_jobs() -> None:
     """Delete oldest jobs beyond MAX_JOBS, removing both job JSON and uploads directory."""
     if not JOBS_DIR.exists():
         return
@@ -33,7 +33,6 @@ def _cleanup_old_jobs() -> None:
 
 def create_job(job_id: str, initial_data: dict) -> dict:
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    _cleanup_old_jobs()
     job = {
         "job_id": job_id,
         "status": "created",
