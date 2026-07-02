@@ -50,6 +50,9 @@ backend/gen_playwright_selectors.py
 backend/test_fallback*.py
 backend/test_sandbox*.py
 
+# Pytest cache
+.pytest_cache/
+
 # Step output dumps and ad-hoc test results
 backend/step*.json
 backend/req_test_*.json
