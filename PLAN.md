@@ -1,4 +1,4 @@
-# Functional Suitability Evaluator (ISO 25010) — Implementation Plan
+﻿# Functional Suitability Evaluator (ISO 25010) — Implementation Plan
 
 ## Overview
 
@@ -39,7 +39,7 @@ Per-entity E() values:
 | E(entity) | Condition |
 |---|---|
 | 1.0 | entity ∈ L2 AND entity ∈ L3 — accessible and implemented |
-| 0.75 | entity ∈ L3 only (element / nav edge / data edge / structural edge) — confirmed in source; not live-confirmed (typically: backend not running during crawl, data-driven pages render empty) |
+| 0.75 | entity ∈ L3 only (element / nav edge / data edge ) — confirmed in source; not live-confirmed (typically: backend not running during crawl, data-driven pages render empty) |
 | 0.5 | entity ∈ L3 only (node) — route defined in router but Playwright could not confirm accessibility |
 | 0.4 | Data edge only — trigger element found in Playwright DOM but no matching backend handler in `implementation_units` |
 | 0.0 | Not found in L2 or L3 |
@@ -772,7 +772,6 @@ Step 4 is the static code analysis pass. It reads the codebase without executing
 | `element` | Element in `route_elements` (parsed from source) | Element rendered in DOM |
 | `navigation edge` | Nav trigger in `navigation_graph` (Link/anchor in source) | Nav trigger rendered in DOM |
 | `data edge` | Backend handler in `implementation_units` | Trigger element rendered in DOM |
-| `structural edge` | Trigger element in `route_elements` (same L3 source as `element` entities) | Trigger element rendered in DOM |
 
 Linkage (is the trigger element wired to that endpoint?) → FCor (Step 11), not FCom.
 
@@ -871,7 +870,7 @@ Step 5 is the runtime observation pass. It boots the actual app and records what
 | Domain | Layer | Purpose in scoring |
 |---|---|---|
 | `pages[].route` + `accessible` | L2 (node signal) | **Node entity L2 check.** `accessible: true` → node E()=1.0 (L2 ∧ L3). Route in `unvisitable_routes` → Step 6 falls back to Step 4 `route_elements` → node E()=0.5. |
-| `pages[].elements` | L2 (element + nav signal) | **Element and navigation edge L2 check.** Interactive widgets (inputs, buttons, selects, links, ARIA role-based components) found on each page at runtime. `discovered_by: "playwright"` → E()=1.0. For unvisitable routes, Step 6 uses Step 4 `route_elements` → E()=0.75 (element/nav/structural/data edges). |
+| `pages[].elements` | L2 (element + nav signal) | **Element and navigation edge L2 check.** Interactive widgets (inputs, buttons, selects, links, ARIA role-based components) found on each page at runtime. `discovered_by: "playwright"` → E()=1.0. For unvisitable routes, Step 6 uses Step 4 `route_elements` → E()=0.75 (element/nav/data edges). |
 | `pages[].outbound_links` | Context | Supplementary; not used in E() scoring. Step 15 reporting only. |
 | `pages[].api_calls_observed` | Context | Passive page-load GETs only — POST/PUT/DELETE never observed. Cross-check against Step 4 endpoints in Step 15 evidence pack. Not used for E() scoring. |
 | `unvisitable_routes` | Scoring signal | Tells Step 6 which routes Playwright couldn't reach. Step 6 treats those routes as L3-only (E()=0.5) using Step 4 `route_elements`. |
@@ -992,23 +991,20 @@ Each entity resolves to a concrete inventory pointer:
 - Element → `matched_selector` + `match_source: "playwright"|"route_elements"` (e.g. `"email input"` → `"input[type=email]"`)
 - Navigation edge → `matched_nav_target` + `match_source: "playwright_element"|"navigation_graph"` (e.g. `"go to dashboard"` → `"/dashboard"`)
 - Data edge → `matched_endpoint` + `trigger_selector` (e.g. `"add to cart"` → `"POST /api/cart"`)
-- Structural edge → `triggering_element_found: true|false` + `match_source`
 
 Output stored in job JSON as `step_6_grounding` — inspectable and correctable before scoring runs.
 
 **Step 6b — Scoring:** Reads pre-resolved pointers from 6a and applies the piecewise E() tables deterministically. No fuzzy matching in the scoring pass.
 
-**Edge classification — keyword table:**
+**Edge entity type keyword reference:**
 
-Classify each `edge` entity by scanning `entity.label` (case-insensitive, word-boundary match):
+Path-generating LLMs (Steps 1–3) use these keyword signals to type edge entities as `data_edge` or `navigation_edge`:
 
-| Category | Keywords | Scoring mechanism |
+| Type | Keywords | Scoring mechanism |
 |---|---|---|
-| **data** (HTTP mutation) | submit, add, create, delete, remove, update, save, mark, complete, pause, resume, sync, upload, download, move, configure, change, reset, toggle | `implementation_units` lookup + triggering element check |
-| **navigation** (route transition) | navigate, go to, return, open, redirect, link to, show, display, access | Playwright element presence + `navigation_graph` fallback |
-| **structural** (client-side UI interaction) | filter, search, sort, drag, drop, reorder | Triggering element presence only — no HTTP mutation expected |
-
-Unknown edge labels → default `navigation` (conservative).
+| `data_edge` (HTTP mutation) | submit, add, create, delete, remove, update, save, mark, complete, pause, resume, sync, upload, download, move, configure, change, reset, toggle | `implementation_units` lookup + triggering element check |
+| `navigation_edge` (route transition) | navigate, go to, return, open, redirect, link to, show, display, access | Playwright element presence + `navigation_graph` fallback |
+Structural interactions (filter, search, sort, drag, reorder) → `element` entity, not `navigation_edge`. Unknown/ambiguous edge labels default to `navigation_edge` (conservative).
 
 ---
 
@@ -1058,18 +1054,6 @@ HTTP verb heuristic on edge label: submit/add/create → POST; remove/delete →
 | ✗ | ✗ | 0.0 |
 
 Navigation triggers are scored via the same Playwright element presence mechanism as `element` entities — links and navigation-triggering buttons appear in `pages[].elements`. Step 4 `navigation_graph` captures static `<Link to>`, `<a href>`, `navigate()`, `router.push()` targets per route and serves as the L3 fallback signal. `outbound_links` is NOT used for E() scoring (unreliable for programmatic navigation — use `pages[].elements` which includes rendered link elements).
-
-**`structural` edge entity** (edge label implies client-side UI interaction — filter/search/sort/drag/reorder — no HTTP mutation expected):
-
-No `implementation_units` lookup. Check only for a triggering element on the page anchor — same evidence sources as `element` entities.
-
-| Triggering element in Step 5 Playwright DOM | Triggering element in Step 4 `route_elements` (L3) | E(structural_edge) |
-|---|---|---|
-| ✓ | — | 1.0 |
-| ✗ | ✓ | 0.75 |
-| ✗ | ✗ | 0.0 |
-
-The triggering element match result is reused from the element-matching pass for the same page anchor — no additional LLM call needed. This category exists because filter/search/sort edges in GEN/OBV requirements would be misclassified as `navigation` (scored too strictly) or `data` (incorrectly requiring a backend handler) without it.
 
 **Aggregation:**
 ```

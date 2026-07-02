@@ -161,11 +161,9 @@ Element schema: `{type, subtype, label, selector, visible}` — `elements: []` f
 | node | 1.0 (accessible) | 0.5 (static_fallback) | 0.0 |
 | element | 1.0 | 0.75 (route_elements) | 0.0 |
 | navigation_edge | 1.0 | 0.75 (nav_graph) | 0.0 |
-| structural_edge | 1.0 | 0.75 (route_elements) | 0.0 |
 | data_edge | 1.0 (endpoint+trigger) | 0.75 (endpoint only) | 0.4 (trigger only) / 0.0 |
 
 - **Aggregation:** `E(req) = 0.7×[primary_avg] + 0.3×[secondary_avg]` (α=1.0 if no secondary)
-- **Edge classification** (`_classify_edge_kind` in `utils.py`): data keywords (submit/add/create/delete/update/save/…) → `data_edge`; structural (filter/search/sort/drag/reorder) → `structural_edge`; else → `navigation_edge`
 - **`_match_node_to_route()` deterministic fallback:** word-overlap scoring; runs OUTSIDE the try/retry loop (fires regardless of LLM success/failure); only fires when LLM returned null. PascalCase split via `_SPLIT_CAMEL_RE`; state-variant parentheticals stripped. Bonuses: list/search labels → `_ROUTE_LIST_PATHS` +4; detail/edit + dynamic route +4; home + "/" +3; `_ROUTE_AUTH_PATHS` suppresses list/detail bonuses. Threshold 3 rejects false positives
 - **`page_inventory`:** Playwright-accessible pages use live DOM (source=`playwright`, E=1.0); static_fallback/auth-gated fall back to `route_elements` (source=`route_elements`, E=0.75)
 - **Conditionally-rendered elements** (e.g. Delete/Edit buttons that only appear when backend data loads): `_build_page_inventory` merges `route_elements` entries not found by Playwright, tagged `_fallback_source: "route_elements"`. `_resolve_element_source()` checks `_playwright_labels` set → E=1.0 or 0.75
@@ -235,7 +233,7 @@ llm_model, error
 ### Step 8.5 — AC Generator (COMPLETE)
 - Hybrid deterministic + concurrent LLM. `POST /api/jobs/{job_id}/acs` `{selected_ids: [...]}`. Per-req caching — re-POST merges new IDs. Status `step_8_5_running` → `step_8_5_complete`
 - **FCor orthogonality:** reads only `step_3_5` + `step_8` — never reads Step 6 `e_score`
-- **Goal kind** (`_classify_goal_kind`): scans path edges by keyword precedence data > structural > navigation > presence (no edges). `BEH-xxx` prefix → `behavioral`
+- **Goal kind** (`_classify_goal_kind`): checks entity types — `data_edge` → data; `element` with structural-keyword label (filter/search/sort/drag/reorder) → structural; `navigation_edge` → navigation; no edges → presence. `BEH-xxx` prefix → `behavioral`
 - **Data verb sub-classification:** delete > create > update precedence on edge labels
 - **AC slot sets:**
   - `data` → [happy_path 0.5, persistence 0.3, edge_case 0.2]
@@ -245,7 +243,6 @@ llm_model, error
 - **`_compute_acws`:** `acw_i = round(frac_i × W, 2)`; last AC absorbs rounding remainder so `Σacw == W` exactly
 - **AC ID format:** REQ-001 → AC-001-1; OBV-001 → AC-OBV-001-1; GEN-005 → AC-GEN-005-3; BEH-001 → AC-BEH-001-1; CUSTOM-001 → AC-CUSTOM-001-1
 - **`_test_type`:** behavioral → `"behavioral"`; data + API-only test strategy (no "e2e") → `"api"`; else → `"e2e"`
-- `_classify_edge_kind` shared in `pipeline/utils.py`; Step 6 imports from there
 - Placeholder GWT: missing LLM slots filled with `"[LLM did not generate this AC]"` so output length always matches slot count
 - Tests: `backend/tests/test_step8_5_ac_generator.py` — 46 tests, all passing
 
@@ -299,9 +296,9 @@ status, db_type, frontend_type, spring_port, api_style, sandbox_warnings[], erro
 - **Step 3.5 as consolidation gate** — Steps 4+ read only from `step_3_5`; Steps 0–3 outputs fully subsumed
 - **Test strategy rule** — for `backend_api_only`, primary is always the HTTP-level test tool (Pytest API / Supertest / JUnit MockMvc / PHPUnit / RSpec), never a unit test runner. Secondary is `null` for API-only; backend tool for full-stack (Playwright primary + backend secondary)
 - **Function+path model** — requirements are "User can [action]" functions with `path: PathEntity[]`. `primary: true` = scored if absent. `E(req) = 0.7×primary_avg + 0.3×secondary_avg`
-- **FCom / FA / FCor orthogonal** — Steps 4–7 = presence (no test execution). Steps 8–11 = correctness. FCom locked after Step 7; FCor never updates E() scores. `_classify_edge_kind` shared via `utils.py`
+- **FCom / FA / FCor orthogonal** — Steps 4–7 = presence (no test execution). Steps 8–11 = correctness. FCom locked after Step 7; FCor never updates E() scores
 - **task_registry.launch()** — all step chains registered; `cancel()` raises `CancelledError` (BaseException, not swallowed by `except Exception`); force-aborts in-flight LLM calls
-- **5 entity types** — node, element, navigation_edge, data_edge, structural_edge. L3 (Step 4 static) = 0.75, L2 (Step 5 Playwright) = 1.0. Structural edges never check `implementation_units`
+- **4 entity types** — node, element, navigation_edge, data_edge. Structural interactions (filter/search/sort/drag) are `element` entities. L3 (Step 4 static) = 0.75, L2 (Step 5 Playwright) = 1.0
 - **Step 5 is passive crawl only** — Playwright visits routes on page load; does NOT fill forms or click buttons. `api_calls_observed` is supplementary only, not an E() source. **Step 9 does NOT use Step 5 selectors** — Step 9 generates `getByRole`/`getByText`/`getByPlaceholder` locators from path entity labels via LLM (CSS selectors from Playwright DOM are unreliable due to CSS-in-JS/component libraries)
 - **playwright install chromium** — must be installed in DSTA backend venv: `NODE_TLS_REJECT_UNAUTHORIZED=0 python -m playwright install chromium`. Stored in `C:\Users\Owner\AppData\Local\ms-playwright\`
 
@@ -335,7 +332,7 @@ c:\Users\Owner\OneDrive\Documents\GitHub\DSTA\
       step8_behavioral_gen.py
       step8_5_ac_generator.py
       step11_sandbox.py
-      utils.py                       # _classify_edge_kind, _validate_path, shared helpers
+      utils.py                       # _validate_path, shared helpers
     storage/
       job_store.py
     tests/
