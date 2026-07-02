@@ -1,9 +1,12 @@
 import json
 import os
+import shutil
 from pathlib import Path
 from datetime import datetime, timezone
 
 JOBS_DIR = Path(os.getenv("JOBS_DIR", "./jobs"))
+UPLOADS_DIR = Path(os.getenv("UPLOAD_DIR", "./uploads"))
+MAX_JOBS = 50
 
 
 def _path(job_id: str) -> Path:
@@ -14,8 +17,23 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _cleanup_old_jobs() -> None:
+    """Delete oldest jobs beyond MAX_JOBS, removing both job JSON and uploads directory."""
+    if not JOBS_DIR.exists():
+        return
+    job_files = sorted(JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime)
+    excess = job_files[: max(0, len(job_files) - MAX_JOBS)]
+    for p in excess:
+        job_id = p.stem
+        p.unlink(missing_ok=True)
+        upload_dir = UPLOADS_DIR / job_id
+        if upload_dir.exists():
+            shutil.rmtree(upload_dir, ignore_errors=True)
+
+
 def create_job(job_id: str, initial_data: dict) -> dict:
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_jobs()
     job = {
         "job_id": job_id,
         "status": "created",
